@@ -2,3 +2,106 @@ quey gemini advanced to make vmf from photo object
 query ai by text to make blender object pass to mdlstudio.exe
 execute vmf importer by text insert replace
 compile with vvis vbsp
+
+
+map editor in game
+
+display a rotating cube in source sdk multiplayer main menu c++
+Displaying a rotating cube in the Source SDK Multiplayer main menu using C++ involves several steps, combining Source Engine's rendering capabilities with your menu code.  Here's a breakdown of the process and key considerations:
+
+1. Model Creation (or Use Existing):
+
+Create a Cube Model: You'll need a .mdl model of a cube. You can create this in a modeling program like Blender and compile it using the Source Engine's model compiler, mdl. Keep it simple for performance. A basic, low-poly cube is ideal.
+Use an Existing Model: If you're comfortable with it, you could potentially adapt an existing, simple model from the game's assets. However, creating your own often gives you the most control.
+2. Material Setup:
+
+Create a Material: You'll need a .vmt material file for your cube. This defines how the cube looks. A simple, unlit material is often sufficient for a menu element. For example:
+"UnlitGeneric"
+{
+        "$basetexture" "path/to/your/cube_texture" // Path to your texture
+        "$nocull" 1 // Important for proper rendering
+}
+Cube Texture: Create a texture (.tga or .vtf) for your cube. This could be a solid color, a pattern, or anything you want.
+3. Code Integration (C++):
+
+This is the most complex part. You'll need to work within the Source Engine's menu framework.  Here's a general outline:
+
+Menu Panel Class:  You'll likely be working within your custom menu panel class (derived from CCustomMenuPanel or similar).
+
+OnPaint() Override:  The OnPaint() function is where you'll draw the cube.
+
+StudioRender: Use the StudioRender interface to draw your model.  This is the core function for rendering models in Source.
+
+C++
+#include "cbase.h" // ... other includes ...
+#include "engine/ivmodelrender.h" // For StudioRender
+#include "studio.h" // For model loading
+
+// ... Inside your menu panel class ...
+
+void CYourMenuPanel::OnPaint()
+{
+    BaseClass::OnPaint(); // Call the base class's OnPaint first
+
+    // 1. Load the model (do this only once, preferably in the constructor)
+    if (!m_hCubeModel) 
+    {
+        m_hCubeModel = modelinfo->GetModelIndex("models/your_cube.mdl"); // Path to your .mdl
+        if (m_hCubeModel == MODEL_INVALID)
+        {
+            Msg("Error: Could not load cube model!\n");
+            return;
+        }
+    }
+
+    // 2. Set up the rendering state
+    render->SetMaterial(m_pCubeMaterial); // Your cube's material (loaded earlier)
+    render->PushRenderGroup(RENDER_GROUP_MENU); // Important for menu rendering
+
+    // 3. Calculate the transformation matrix (for rotation)
+    matrix3x4 worldToModel;
+    MatrixSetIdentity(worldToModel);
+
+    // Rotation (example: rotate around the Y axis)
+    static float flRotation = 0.0f;
+    flRotation += gpGlobals->frametime * 20.0f; // Adjust rotation speed
+    MatrixRotateY(worldToModel, flRotation);
+
+    // Position the cube (adjust as needed)
+    Vector cubePosition(100, 100, 0); // Example position
+    MatrixSetColumn(cubePosition, 3, worldToModel);
+
+    // 4. Render the model
+    modelrender->DrawModel(STUDIO_D_FLAG_DONT_DRAW | STUDIO_D_FLAG_STATIC_LIGHTING, worldToModel, m_hCubeModel, NULL);
+
+    render->PopRenderGroup(); // Restore render group
+}
+
+// ... In your constructor ...
+
+CYourMenuPanel::CYourMenuPanel()
+{
+    // ... other initialization ...
+
+    m_hCubeModel = MODEL_INVALID;
+    m_pCubeMaterial = materials->FindMaterial("materials/your_cube.vmt", TEXTURE_GROUP_OTHER); // Load your material
+    if (m_pCubeMaterial == NULL)
+    {
+        Msg("Error: Could not load cube material!\n");
+    }
+}
+
+// ... Member variables ...
+model_t* m_hCubeModel;
+IMaterial* m_pCubeMaterial;
+4. Key Considerations:
+
+Performance: Keep the cube model simple (low poly). Avoid complex materials or textures. Menu rendering can be sensitive to performance.
+Rotation: The code provides a basic rotation example. You can modify the rotation axis and speed as needed.
+Positioning: Adjust the cubePosition vector to place the cube where you want it in the menu.
+Material Loading: Make sure you load the material only once (e.g., in the constructor) to avoid performance issues.
+Model Loading: Similarly, load the model index only once.
+Error Handling: Include error checks (like checking if the model and material loaded successfully) to prevent crashes.
+Menu Structure: The exact implementation will depend on how your menu is structured. You might need to adapt the code to fit your specific menu class.
+gpGlobals->frametime: Use gpGlobals->frametime for smooth, frame-rate-independent rotation.
+This detailed breakdown should give you a solid starting point for implementing a rotating cube in your Source SDK multiplayer menu. Remember to compile your code and place the model, material, and texture files in the correct directories for your mod.  Debugging will be crucial, so use Msg() or the debugger to track down any issues.
