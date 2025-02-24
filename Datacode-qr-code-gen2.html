@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QR Code Generator</title>
+    <style>
+        .qr-container {
+            display: inline-block;
+            margin: 20px 0;
+            line-height: 0;
+        }
+        .qr-pixel {
+            width: 10px;
+            height: 10px;
+            display: inline-block;
+        }
+        .black {
+            background-color: black;
+        }
+        .white {
+            background-color: white;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <input type="text" id="textInput" placeholder="Enter text for QR code">
+        <button onclick="generateQR()">Generate QR Code</button>
+    </div>
+    <div id="qrContainer"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.4.4/build/qrcode.min.js"></script>
+    <script>
+        function generateQR() {
+            const text = document.getElementById('textInput').value;
+            if (!text) {
+                alert('Please enter some text');
+                return;
+            }
+
+            const container = document.getElementById('qrContainer');
+            container.innerHTML = '';
+
+            QRCode.toDataURL(text, { 
+                width: 200,
+                margin: 1,
+                errorCorrectionLevel: 'H'
+            }, function (err, url) {
+                if (err) {
+                    console.error(err);
+                    return;
+                }
+
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    const imageData = ctx.getImageData(0, 0, img.width, img.height);
+                    const data = imageData.data;
+
+                    const qrDiv = document.createElement('div');
+                    qrDiv.className = 'qr-container';
+                    const size = img.width;
+
+                    for (let y = 0; y < size; y++) {
+                        for (let x = 0; x < size; x++) {
+                            const pixel = document.createElement('div');
+                            pixel.className = 'qr-pixel';
+                            const index = (y * size + x) * 4;
+                            const isBlack = data[index] < 128;
+                            pixel.className += isBlack ? ' black' : ' white';
+                            qrDiv.appendChild(pixel);
+                        }
+                        qrDiv.appendChild(document.createElement('br'));
+                    }
+                    
+                    container.appendChild(qrDiv);
+                };
+                img.src = url;
+            });
+        }
+    </script>
+</body>
+</html>
