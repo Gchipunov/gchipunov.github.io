@@ -1,0 +1,80 @@
+// prompt AI bard, meta. copilot, grok
+// code a datacode generator in raw web clientjavascript using black squares as divs or tr td tables to make image of a datacode qr code of a string from a text box onto the screen
+
+
+<!DOCTYPE html>
+<html>
+<head>
+<title>Data Matrix Generator</title>
+<style>
+  #datamatrix-container {
+    display: inline-block;
+    border: 1px solid black;
+  }
+  .module {
+    width: 5px;
+    height: 5px;
+    display: inline-block;
+  }
+  .black {
+    background-color: black;
+  }
+  table {
+    border-collapse: collapse;
+  }
+  td {
+    width: 5px;
+    height: 5px;
+    padding: 0;
+  }
+</style>
+</head>
+<body>
+  <textarea id="dataInput" placeholder="Enter data to encode"></textarea>
+  <button onclick="generateDataMatrix()">Generate Data Matrix</button>
+  <div id="datamatrix-container"></div>
+  <div id="datamatrix-container-table"></div>
+
+  <script src="https://unpkg.com/jsdatamatrix"></script>
+
+  <script>
+    function generateDataMatrix() {
+      const data = document.getElementById("dataInput").value;
+      const dm = new DataMatrix();
+      dm.encode(data);
+
+      const container = document.getElementById("datamatrix-container");
+      container.innerHTML = ""; // Clear previous content
+
+      const containerTable = document.getElementById("datamatrix-container-table");
+      containerTable.innerHTML = "";
+
+      const symbolSize = dm.symbolSize;
+
+      // Div based rendering
+      for (let y = 0; y < symbolSize; y++) {
+        for (let x = 0; x < symbolSize; x++) {
+          const module = document.createElement("div");
+          module.className = "module " + (dm.getModule(x, y) ? "black" : "");
+          container.appendChild(module);
+        }
+        container.appendChild(document.createElement("br")); // New row
+      }
+
+      //Table based rendering
+      const table = document.createElement("table");
+
+      for (let y = 0; y < symbolSize; y++) {
+        const row = table.insertRow();
+        for (let x = 0; x < symbolSize; x++){
+          const cell = row.insertCell();
+          if (dm.getModule(x, y)){
+            cell.className = "black";
+          }
+        }
+      }
+      containerTable.appendChild(table);
+    }
+  </script>
+</body>
+</html>
