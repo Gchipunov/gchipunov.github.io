@@ -3,6 +3,18 @@
 window.addEventListener("load", setupWebGL, false);
 var gl,
   program;
+// Assuming you have a WebGL context (gl) and shaders set up
+let timeUniformLocation = gl.getUniformLocation(program, 'time');
+let startTime = performance.now();
+
+function render() {
+  let currentTime = (performance.now() - startTime) / 1000; // Convert to seconds
+  gl.uniform1f(timeUniformLocation, currentTime);
+  gl.drawArrays(gl.POINTS, 0, 1);
+  // Rest of your rendering code...
+  requestAnimationFrame(render);
+}
+  
 function setupWebGL (evt) {
   window.removeEventListener(evt.type, setupWebGL, false);
   if (!(gl = getRenderingContext()))
@@ -35,8 +47,10 @@ function setupWebGL (evt) {
   initializeAttributes();
   gl.useProgram(program);
   gl.drawArrays(gl.POINTS, 0, 1);
+  render();
   cleanup();
 }
+
 
 var buffer;
 function initializeAttributes() {
