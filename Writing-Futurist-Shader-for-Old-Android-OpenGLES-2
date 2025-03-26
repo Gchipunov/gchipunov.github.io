@@ -1,0 +1,21 @@
+<html><head><title> Writing Futurist Shader for Old Android OpenGLES 2.0</title>
+
+
+
+
+</head>
+<body>
+
+The Android robot mascot has a distinctive glass-like appearance with a glossy shader. The specific shader used is often referred to as a "glass" or "plastic" shader, with the following characteristics:
+Specular: High glossiness with a sharp specular highlight
+Reflectivity: Moderate to high reflectivity, with a slight fade-off towards the edges
+Transparency: Partial transparency, with a subtle gradient effect
+Color: A bright, electric green color (#A4C639)
+This shader gives the Android robot its iconic, futuristic look.
+<p><img src="android_phone_mascot_robot (1).jpeg"> </p>
+<p><img src="android_phone_mascot_robot (2).jpeg"> </p>
+<p><img src="android_phone_mascot_robot (3).jpeg"> </p>
+<p><img src="android_phone_mascot_robot (4).jpeg"> </p>
+
+</body>
+</html>
