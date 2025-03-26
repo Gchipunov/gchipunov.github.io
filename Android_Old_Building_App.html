@@ -1,0 +1,1147 @@
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN"
+                      "http://www.w3.org/TR/1998/REC-html40-19980424/loose.dtd">
+<html>
+
+<!--
+*******************************************************************************
+  Google Analytics
+*******************************************************************************
+-->
+<script type="text/javascript">
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-23819188-1']);
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+</script>
+
+<head>
+   <title>Building Android programs on the command line</title>
+   <meta name="Author" content="Geotechnical Software Services">
+   <meta name="Keywords" content="android, apps, app, java, programming, software, development, code, howto, command line, geosoft, stavanger, norway">
+   <meta name="Description"
+         content="Building Android programs on the command line">
+   <meta http-equiv="Content-Type"
+         content="text/html; charset=iso-8859-1">
+   <link rel="stylesheet" href="../style.css" type="text/css">
+</head>
+
+<body bgcolor="white"
+      link="7a88a1"
+      vlink="7a88a1"
+      marginwidth=20 marginheight=20>
+
+<!--
+*******************************************************************************
+   Heading
+*******************************************************************************
+-->
+
+<center>
+  <h1 class="title">Building Android programs on the command line</h1>
+
+  <img src="../images/android.png" align="right" alt="android">
+
+  <em>Version 1.0, June 2011</em><br>
+  <em>Geotechnical Software Services</em><br>
+  <em>Copyright &copy; 2011</em><br>
+
+  <br><br>
+<!--
+  <p>
+  This document is available at
+  <a href="http://geosoft.no/development/android.html">http://geosoft.no/development/android.html</a>
+  </p>
+-->
+</center>
+
+<table>
+<tr>
+
+<td valign="bottom" width="65">
+  <script type="text/javascript" src="http://platform.linkedin.com/in.js"></script>
+  <script type="in/share" data-counter="right"></script>
+</td>
+
+<td valign="bottom" width="100">
+  <a href="http://twitter.com/share"
+     class="twitter-share-button"
+     data-count="horizontal">Tweet</a>
+  <script type="text/javascript" src="http://platform.twitter.com/widgets.js"></script>
+</td>
+
+<td valign="bottom">
+  <div id="fb-root"></div>
+  <script src="http://connect.facebook.net/en_US/all.js#xfbml=1"></script>
+  <fb:like href="http://geosoft.no/development/android.html"
+           layout="button_count"
+           send="true"
+           width="450"
+           show_faces="false"
+           action="recommend"
+           font="">
+  </fb:like>
+</td>
+
+</tr>
+</table>
+
+<hr class="android-hr">
+
+<p>
+This guideline shows how to build Android programs (<em>apps</em>) using a
+command line environment only.
+</p>
+
+<p>
+Even though the
+<a href="http://en.wikipedia.org/wiki/Eclipse_%28software%29">Eclipse IDE</a>
+(among others) can be a powerful development
+environment for Android programmers, there are several reasons why you
+could benefit from utilizing simple command line utilities and build
+scripts instead.
+Actually <em>understanding</em> what's going on is one of them.
+</p>
+
+<script type="text/javascript"><!--
+  google_ad_client = "ca-pub-1737499834905788";
+  /* UnitTesting */
+  google_ad_slot = "0364656851";
+  google_ad_width = 728;
+  google_ad_height = 90;
+  //-->
+</script>
+<script type="text/javascript"
+  src="http://pagead2.googlesyndication.com/pagead/show_ads.js">
+</script>
+
+<p>
+Using the stepwise approach outlined below might seem overwhelming, but
+there is a great educational value in performing these steps, and
+the information present is essential if you are setting up a build system
+based on
+<a href="http://en.wikipedia.org/wiki/Make_%28software%29">make</a>,
+<a href="http://en.wikipedia.org/wiki/SCons">SCons</a>,
+<a href="http://en.wikipedia.org/wiki/Apache_Ant">Ant</a>,
+or similar tools.
+</p>
+
+<p>
+The setup below depends on a few
+<em><a href="http://en.wikipedia.org/wiki/Environment_variables">environment variables</a></em>
+identifying directory paths on the local system.
+The exact procedure for setting and accessing environment variables
+differs between operating systems and command shells.
+In the present guideline the simplest possible notation is being used.
+In practice these variables needs to be accessed
+using special notation like
+<tt>%JAVA_HOME%</tt>,
+<tt>${JAVA_HOME}</tt>
+or even
+<tt>"${JAVA_HOME}"</tt> if the path contains spaces.
+In addition, commands are listed over multiple lines to improve
+readability. In practice commands must be written on a single
+line or separated by proper line delimiters.
+Note also that the forward slash character ("/")
+is consistently used as directory delimiter even though
+the backslash ("\") is still used on some systems.
+</p>
+
+<p>
+Color coding is used in the commands in order to easily
+indicate where local replacements needs to take place.
+</p>
+
+<p>
+All commands are self-contained meaning that they can be executed from
+any directory.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>1. Download Java</h1>
+
+<p>
+The <em>Java Standard Edition</em> (Java SE)
+is available from Oracle at
+<a href="http://www.oracle.com/technetwork/java/javase/downloads">
+  http://www.oracle.com/technetwork/java/javase/downloads</a>.
+</p>
+
+<p>
+Default installation location will vary between Java versions and OS platforms,
+so create a pointer to its location:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+JAVA_HOME = <span class="color1">C:/Program Files/Java/jdk1.6.0_26</span>
+</td>
+</tr>
+</table>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>2. Download Android</h1>
+
+<p>
+The <em>Android Software Development Kit</em> (Android SDK)
+is available from Google at
+<a href="http://developer.android.com/sdk">
+  http://developer.android.com/sdk</a>.
+</p>
+
+<p>
+Default installation location will vary between Android versions and
+OS platforms, so create a pointer to its location:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+ANDROID_HOME = <span class="color1">C:/Program Files/Android/android-sdk</span>
+</td>
+</tr>
+</table>
+
+<p>
+The download includes the core parts of Android. In addition you need SDK(s)
+for the specific Android platforms you will develop for and test on.
+Launch the SDK manager GUI, select <em>Available packages</em> and open the
+<em>Android Repository</em>:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+ANDROID_HOME/tools/android
+</td>
+</tr>
+</table>
+
+<p>
+Select the required platform/tool packages (all is fine) and hit the
+<em>Install Selected</em> button.
+After installation, the <tt>platform/</tt> and <tt>platform-tools/</tt>
+directories of <tt>ANDROID_HOME</tt> should have been populated.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>3. Choose project name</h1>
+
+<p>
+At some disk location create a project directory that will hold the
+code, libraries and other files that constitutes the Android project.
+Create a pointer to this location:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+DEV_HOME = <span class="color1">C:/Users/johnd/dev/</span><span class="color2">AndroidTest</span>
+</td>
+</tr>
+</table>
+
+<p>
+The <em>project name</em> in this context is simply a convenience in
+order to consistently name directories and files related to the
+application being created.
+</p>
+
+<p>
+In the example <tt class="color2">AndroidTest</tt> is used as the project name.
+The term has been emphasized below so that it can be easily replaced.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>4. Create development area</h1>
+
+<p>
+Beneath the project directory create sub directories as follows:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+DEV_HOME/src/<span class="color1">com/mycompany/package1/...</span>
+         res/drawable/
+             layout/
+             values/
+         obj/
+         lib/
+         bin/
+         docs/
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The <tt>src/</tt> directory will hold java code and other source files in
+a package structure common for java projects.
+Using the
+<em><a href="http://en.wikipedia.org/wiki/Reverse-DNS">reverse domain name system</a></em>
+(Reverse DNS) for package names is optional but recommended.
+<br>
+The <tt>res/</tt> directory will hold user provided resources like
+<em>text strings</em>,
+<em>images</em>,
+<em>menues</em>,
+<em>layouts</em>
+etc.
+The <tt>res/</tt> sub directories have predefined names
+according to the
+<a href="http://android.docs.uu3g.com/guide/topics/resources/providing-resources.html">Android resource documentation</a>.
+<br>
+The <tt>obj/</tt> directory will contain <tt>.class</tt> files and
+other secondary files produced by the Java tools as explained below.
+<br>
+The <tt>lib/</tt> directory should hold 3rd-party
+<tt>.jar</tt> files the project depends on.
+<br>
+The <tt>bin/</tt> directory will hold intermediate and final
+executables produced by the Android tools.
+<br>
+The <tt>docs/</tt> directory will hold javadoc HTML documents
+for the project. If generated, the <tt>docs/index.html</tt> file
+will be the entry point.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>5. Create manifest</h1>
+
+<p>
+The
+<a href="http://developer.android.com/guide/topics/manifest/manifest-intro.html">Android manifest file</a>
+is used to specify application settings like name and version, as well as what
+permissions the application requires to run and what components it is
+comprised of. The file contains a single <tt>application</tt> tag inside
+the root <tt>manifest</tt> tag.
+</p>
+
+<p>
+Put the manifest file in the project root directory: <tt>DEV_HOME/AndroidManifest.xml</tt>. Note that
+the file <em>must</em> be called <tt>AndroidManifest.xml</tt> and nothing else.
+</p>
+
+<p>
+A typical manifest file is shown below:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+&lt;?xml version="1.0" encoding="utf-8"?>
+&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"
+      package="<span class="color1">com.mycompany.package1</span>"
+      android:versionCode="<span class="color1">1</span>"
+      android:versionName="<span class="color1">1.0</span>">
+
+    &lt;uses-permission android:name="android.permission.INTERNET"/>
+    &lt;uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    &lt;uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+
+    &lt;uses-sdk android:minSdkVersion="2"/>
+
+    &lt;application android:icon="<span class="color1">@drawable/mylogo</span>"
+                 android:label="<span class="color1">@string/myApplicationName</span>">
+        &lt;activity android:name="<span class="color1">com.mycompany.package1.HelloAndroid</span>"
+                  android:label="<span class="color1">@string/myApplicationName</span>">
+            &lt;intent-filter>
+                &lt;action android:name="android.intent.action.MAIN" />
+                &lt;category android:name="android.intent.category.LAUNCHER" />
+            &lt;/intent-filter>
+        &lt;/activity>
+    &lt;/application>
+
+&lt;/manifest></pre>
+</td>
+</tr>
+</table>
+
+<p>
+The <tt>package</tt> attribute identifies the application and is also the destination
+location of the generated <tt>R.java</tt> file (see below).
+<tt>versionCode</tt> is a numeric version value for managing application updates.
+<tt>versionName</tt> is the application version in a human readable form.
+</p>
+
+<p>
+The <tt>application</tt> tag contains the activities of the program, one
+of which should contain the main launcher activity as shown.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>6. Select target platform</h1>
+
+<p>
+The different Android OS versions are known through target names
+like <tt>android-3</tt>, <tt>android-4</tt>, <tt>android-5</tt> etc.
+All available platforms can be listed by the following command:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+ANDROID_HOME/tools/android list target
+</td>
+</tr>
+</table>
+
+<p>
+For the examples below we use <tt class="color3">android-7</tt>
+(Android OS 2.1) consistently.
+Replace this with a different target as required.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>7. Define virtual device</h1>
+
+<p>
+An <a href="http://developer.android.com/guide/developing/devices/index.html">
+<em>Android Virtual Device</em></a> (AVD) defines the main
+characteristics of the target Android device.
+AVDs are used only when testing an Android program in the
+<a href="http://developer.android.com/guide/developing/devices/emulator.html">Android emulator</a>.
+The typical approach is to define several AVDs in order to verify that
+a program behave correct across hardware platforms and OS versions.
+</p>
+
+<p>
+Use the
+<a href="http://developer.android.com/guide/developing/tools/android.html">android</a>
+tool to create AVDs:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/tools/android
+                     --verbose
+                     create avd
+                     --name <span class="color1">MySonyEricsson</span>
+                     --target <span class="color3">android-7</span>
+                     --sdcard 1024M
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+This will create an AVD with the specified name and with a
+1 GB memory card <a href="http://en.wikipedia.org/wiki/Disk_image">disk image</a>.
+When the command is executed you are asked
+if you want to specify a custom hardware profile. By this the AVD
+can be tailored to a specific hardware device by identifying properties
+for features like
+<em>screen</em>,
+<em>camera</em>,
+<em>memory</em>,
+<em>battery</em>,
+<em>audio</em>,
+<em>accelerometer</em>,
+<em>wi-fi</em>,
+<em>bluetooth</em>,
+<em>GPS,</em>
+<em>keyboard</em> and so on.
+</p>
+
+<p>
+If no longer needed, an AVD can be deleted as follows:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/tools/android
+                     --verbose
+                     delete avd
+                     --name <span class="color1">MySonyEricsson</span>
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The actual AVD profiles are stored within the <tt>HOME/.android/avd/</tt>
+directory.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>8. Create keystore</h1>
+
+<p>
+A keystore is a database of private keys and their associated
+<a href="http://en.wikipedia.org/wiki/X.509">X.509</a>
+certificate chains authenticating the corresponding public keys.
+An Android  program must be <em>signed</em> in order to execute on a device,
+and the program is signed by using a key from a keystore.
+</p>
+
+<p>
+Use the
+<a href="http://download.oracle.com/javase/1,5.0/docs/tooldocs/windows/keytool.html">keytool</a>
+program to create a keystore:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+JAVA_HOME/bin/keytool
+                -genkeypair
+                -validity 10000
+                -dname "CN=<span class="color1">company name</span>,
+                        OU=<span class="color1">organisational unit</span>,
+                        O=<span class="color1">organisation</span>,
+                        L=<span class="color1">location</span>,
+                        S=<span class="color1">state</span>,
+                        C=<span class="color1">country code</span>"
+                -keystore DEV_HOME/<span class="color2">AndroidTest</span>.keystore
+                -storepass <span class="color1">password</span>
+                -keypass <span class="color1">password</span>
+                -alias <span class="color1">AndroidTestKey</span>
+                -keyalg RSA
+                -v</pre>
+</td>
+</tr>
+</table>
+
+<p>
+Replace the
+<em><a href="http://msdn.microsoft.com/en-us/library/aa366101%28v=vs.85%29.aspx">distinguished name</a></em> (dname)
+information with your own.
+Make sure to specify passwords as indicated.
+The key is accessed through the specified <em>alias</em>
+which can be any string.
+</p>
+
+<p>
+The output of the command will be the
+<tt>DEV_HOME/<span class="color2">AndroidTest</span>.keystore</tt>
+file which contains one key identified by the supplied alias.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>9. Write code</h1>
+
+<p>
+Define a suitable package structure and put the Java code
+within the <tt>src/</tt> tree of the project area.
+</p>
+
+<p>
+The following minimal class can serve as an example.
+It should be located in <tt>DEV_HOME/src/<span class="color1">com/mycompany/package1/HelloAndroid</span>.java</tt>:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+package <span class="color1">com.mycompany.package1</span>;
+
+import android.app.Activity;
+import android.content.res.Resources;
+import android.os.Bundle;
+import android.widget.TextView;
+
+public class <span class="color1">HelloAndroid</span> extends Activity {
+
+  @Override
+  public void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+
+    TextView textView = new TextView(this);
+
+    String text = getResources().getString(R.string.<span class="color1">helloText</span>);
+    textView.setText(text);
+
+    setContentView(textView);
+  }
+}
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The
+<a href="http://developer.android.com/reference/packages.html">Android API</a>
+documentation contains a complete reference to the Android packages and classes,
+including the ones provided by the Java SE.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>10. Provide resources</h1>
+
+<p>
+Android programmers are advised to keep all non-logic data (<em>text strings</em>,
+<em>images</em>,
+<em>animations</em>,
+<em>colors</em>,
+<em>layouts</em> etc.) within the designated <tt>res/</tt>
+directory of the project area. The <tt>res/</tt> directory consists of a
+predefined set of sub directories with a
+<a href="http://developer.android.com/guide/topics/resources/providing-resources.html">naming structure</a>
+that will
+simplify application localization and adoption to different hardware types.
+</p>
+
+<p>
+The following minimal text resource can serve as an example.
+It should be located in <tt>DEV_HOME/res/values/strings.xml</tt>:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+&lt;?xml version="1.0" encoding="utf-8"?>
+&lt;resources>
+    &lt;string name="<span class="color1">myApplicationName</span>"><span class="color1">Android Test Program</span>&lt;/string>
+    &lt;string name="<span class="color1">helloText</span>"><span class="color1">Hello, world!</span>&lt;/string>
+&lt;/resources>
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The manifest file refers to the <tt class="color1">myApplicationName</tt> entry,
+while the java class above refers to the <tt class="color1">helloText</tt> entry.
+The example manifest file above also refers to the drawable resource
+<tt class="color1">mylogo</tt> which is the icon image for the program.
+Put an image file in the <tt>res/</tt> directory to serve this purpose:
+<tt>DEV_HOME/res/drawable/<span class="color1">mylogo</span>.png</tt>.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>11. Create R.java</h1>
+
+<p>
+In order for the application source code to be able to access the
+resources within the <tt>res/</tt> directory, a class called <tt>R.java</tt>
+(for <em>Resources</em>) is created.
+
+<p>
+Use the
+<em><a href="http://elinux.org/Android_aapt">Android Asset Packaging Tool</a></em>
+(<tt>aapt</tt>) to create the <tt>R.java</tt> file:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/platform-tools/aapt
+                        package
+                        -v
+                        -f
+                        -m
+                        -S DEV_HOME/res
+                        -J DEV_HOME/src
+                        -M DEV_HOME/AndroidManifest.xml
+                        -I ANDROID_HOME/platforms/<span class="color3">android-7</span>/android.jar
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The destination location of <tt>R.java</tt> within the <tt>src/</tt> tree is
+determined by the <em>package</em> attribute of the manifest file.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>12. Compile code</h1>
+
+<p>
+Use the
+<a href="http://download.oracle.com/javase/6/docs/technotes/tools/windows/javac.html">javac</a>
+tool to compile java source code in a package:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+JAVA_HOME/bin/javac
+                -verbose
+                -d DEV_HOME/obj
+                -classpath ANDROID_HOME/platforms/<span class="color3">android-7</span>/android.jar;DEV_HOME/obj
+                -sourcepath DEV_HOME/src
+                DEV_HOME/src/<span class="color1">com/mycompany/package1</span>/*.java</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The command must be applied for each existing package.
+3rd-party <tt>.jar</tt> files from the <tt>lib/</tt> directory
+must be listed in the <tt>-classpath</tt> entry.
+Note that on UNIX-like operating systems
+the classpath entry delimiter should be a colon (":").
+</p>
+
+<p>
+The output of the command is <tt>.class</tt> files in the
+<tt>obj/</tt> tree.
+</p>
+
+<p>
+Non-java files within the <tt>src/</tt> tree must be copied to the
+associated location in the <tt>obj/</tt> tree.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>13. Create DEX file</h1>
+
+<p>
+DEX ("Dalvik Executable") is the specific bytecode format understood by the
+<a href="http://en.wikipedia.org/wiki/Dalvik_%28software%29">Dalvik virtual machine</a>
+(VM) present in all Android devices.
+</p>
+
+<p>
+Use the <tt>dx</tt> tool to bundle the content of the <tt>obj/</tt> directory
+as well as 3rd-party <tt>.jar</tt> files from the <tt>lib/</tt> directory
+into a single <tt>.dex</tt> file:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/platform-tools/dx
+                --dex
+                --verbose
+                --output=DEV_HOME/bin/classes.dex
+                DEV_HOME/obj
+                DEV_HOME/lib
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+This will create the <tt>classes.dex</tt>
+file in the <tt>bin/</tt>
+directory. The content of a <tt>.dex</tt> file can be inspected
+using the <tt>ANDROID_HOME/platform-tools/dexdump</tt> tool.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>14. Create APK file</h1>
+
+<p>
+The
+<a href="http://en.wikipedia.org/wiki/APK_%28file_format%29">Android package format</a> (APK)
+is the <tt>.jar</tt> equivalent for Android.
+The package contains the manifest file, the resources and the <tt>classes.dex</tt> file.
+</p>
+
+<p>
+Use the
+<tt>aapt</tt>
+tool to create the
+<tt>.apk</tt> file:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/platform-tools/aapt
+                         package
+                         -v
+                         -f
+                         -M DEV_HOME/AndroidManifest.xml
+                         -S DEV_HOME/res
+                         -I ANDROID_HOME/platforms/<span class="color3">android-7</span>/android.jar
+                         -F DEV_HOME/bin/<span class="color2">AndroidTest</span>.unsigned.apk
+                         DEV_HOME/bin
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+This will create the <tt><span class="color2">AndroidTest</span>.unsigned.apk</tt> file
+in the <tt>bin/</tt> directory. Note that APK is an ordinary archive format that can be
+inspected by tools like <a href="http://en.wikipedia.org/wiki/Winzip">WinZip</a> or
+<tt>unzip -l</tt>.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>15. Sign APK file</h1>
+
+<p>
+In order to execute on an Android device, the Android package
+needs to be <em>signed</em>.
+<p>
+
+</p>
+Use the
+<a href="http://download.oracle.com/javase/6/docs/technotes/tools/windows/jarsigner.html">jarsigner</a>
+tool and the key from the keystore created above to create
+a signed version of the package:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+JAVA_HOME/bin/jarsigner
+                -verbose
+                -keystore DEV_HOME/<span class="color2">AndroidTest</span>.keystore
+                -storepass <span class="color1">password</span>
+ 	        -keypass <span class="color1">password</span>
+	        -signedjar DEV_HOME/bin/<span class="color2">AndroidTest</span>.signed.apk
+                DEV_HOME/bin/<span class="color2">AndroidTest</span>.unsigned.apk
+	        <span class="color1">AndroidTestKey</span>
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The signing process adds the <tt>META-INF/</tt> directory to the APK archive
+including the signature (<tt>.SF</tt>) file and the
+associated <a href="http://en.wikipedia.org/wiki/PKCS">PKSC</a> file (<tt>.RSA</tt>).
+</p>
+
+<p>
+The signed APK is stored as <tt><span class="color2">AndroidTest</span>.signed.apk</tt>
+file in the <tt>bin/</tt> directory.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>16. Zip-align APK file</h1>
+
+<p>
+<a href="http://developer.android.com/guide/developing/tools/zipalign.html">zipalign</a>
+is an archive alignment tool that provides
+<a href="http://developer.android.com/resources/articles/zipalign.html">important optimization</a>
+to Android packages.
+This step is optional, but recommended:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/tools/zipalign
+                -v
+                -f
+                4
+                DEV_HOME/bin/<span class="color2">AndroidTest</span>.signed.apk
+                DEV_HOME/bin/<span class="color2">AndroidTest</span>.apk
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+This will create the <tt><span class="color2">AndroidTest</span>.apk</tt>
+which is the final product delivered in one self-contained unit.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>17. Start emulator</h1>
+
+<p>
+In order to test the application, start the Android emulator
+and specify the virtual device (AVD) to use:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/tools/emulator
+                -wipe-data
+                -avd <span class="color1">MySonyEricsson</span>
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+This will launch the emulator GUI. The <tt>wipe-data</tt> option ensures
+the emulator starts up clean. The initialization process may take
+some time, so don't proceed until the emulator is ready.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>18. Install in emulator</h1>
+
+<p>
+When the emulator is ready, use the
+<em><a href="http://developer.android.com/guide/developing/tools/adb.html">Android Debug Bridge</a></em> (adb)
+tool to install the Android package in the running emulator:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/platform-tools/adb
+                -e
+                install DEV_HOME/bin/<span class="color2">AndroidTest</span>.apk
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The program should eventually show up in the emulator and can
+be executed by selecting it.
+</p>
+
+<p>
+The application can be uninstalled as follows:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/platform-tools/adb
+                shell
+                rm /data/app/<span class="color1">com.mycompany.package1</span>.apk
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+Note that inside the emulator or device the APK is stored using its
+main package name (from the <em>package</em> attribute of the manifest file)
+with an <tt>.apk</tt> extension.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>19. Install on device</h1>
+
+<p>
+Attach the Android device to the computer and
+install the program using the <tt>adb</tt> command:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+ANDROID_HOME/platform-tools/adb
+                -d
+                install DEV_HOME/bin/<span class="color2">AndroidTest</span>.apk
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+The program should be ready for execution on the target device.
+</p>
+
+
+
+<!--
+****************************************************************************
+   Step
+****************************************************************************
+-->
+
+<h1>20. Create documentation</h1>
+
+<p>
+7Every well managed project should have up-to-date documentation available
+at any time. This step is of course optional, but strongly recommended.
+</p>
+
+<p>
+Use the
+<a href="http://www.oracle.com/technetwork/java/javase/documentation/index-jsp-135444.html">javadoc</a>
+tool to create HTML documentation as follows:
+</p>
+
+<table class="android-table" width="100%">
+<tr>
+<td class="android-command">
+<pre>
+JAVA_HOME/bin/javadoc
+                -verbose
+                -d DEV_HOME/docs
+                -sourcepath DEV_HOME/src
+                -classpath ANDROID_HOME/platforms/<span class="color3">android-7</span>/android.jar;DEV_HOME/obj
+                -author
+                -package
+                -use
+                -splitIndex
+                -version
+                -windowtitle '<span class="color2">AndroidTest</span>'
+                -doctitle '<span class="color2">AndroidTest</span>'
+                DEV_HOME/src/<span class="color1">com/mycompany/package1/</span>*.java
+</pre>
+</td>
+</tr>
+</table>
+
+<p>
+Source from additional packages should be added to the last argument
+using ":" or ";" as delimiter (depending on platform).
+</p>
+
+<p>
+The documentation entry point will be <tt>DEV_HOME/docs/index.html</tt>.
+</p>
+
+
+
+
+
+</body>
+</html>
