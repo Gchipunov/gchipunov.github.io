@@ -40,7 +40,7 @@
   precision highp float;
 
   attribute vec2 position;
-
+ uniform float time; // Add a uniform for time
   void main() {
     gl_Position = vec4(position, 0.0, 1.0);
     gl_PointSize = 128.0;
@@ -58,6 +58,7 @@
 <script type="x-shader/x-fragment" id="fragment-shader">
   #version 100
   precision mediump float;
+   uniform float time; // Add a uniform for time
   void main() {
     vec2 fragmentPosition = 2.0*gl_PointCoord - 1.0;
     float distance = length(fragmentPosition);
