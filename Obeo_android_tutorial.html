@@ -1,0 +1,31 @@
+About this codelab
+subjectLast updated Dec 11, 2024
+account_circleWritten by a Googler
+1. Before you begin
+
+This codelab is deprecated and will be removed soon.
+
+In this codelab, you build a simple musical game using the Oboe library, a C++ library that uses the high-performance audio APIs in the Android NDK. The objective of the game is to copy the clapping pattern you hear by tapping the screen.
+
+Prerequisites
+Basic knowledge of C++, including how to use header and implementation files.
+What you'll do
+Play sounds using the Oboe library.
+Create low-latency audio streams.
+Mix sounds together.
+Trigger sounds precisely on a timeline.
+Synchronize audio with the on-screen UI.
+What you'll need
+Android Studio 4.1 or higher
+Android NDK and build tools installed
+An Android device running Android Lollipop (API level 21) or higher for testing (Pixel devices are best for low-latency audio)
+
+2. How do you play the game?
+
+The game plays a funky four-beat backing track that continually loops. When the game starts, it also plays a clapping sound on the first three beats of the bar.
+
+The user must try to repeat the three claps with the same timing by tapping the screen when the second bar begins.
+
+Each time the user taps, the game plays a clap sound. If the tap happens at the right time, the screen flashes green. If the tap is too early or too late, the screen flashes orange or purple, respectively.
+
+
