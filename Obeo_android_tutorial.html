@@ -28,4 +28,72 @@ The user must try to repeat the three claps with the same timing by tapping the 
 
 Each time the user taps, the game plays a clap sound. If the tap happens at the right time, the screen flashes green. If the tap is too early or too late, the screen flashes orange or purple, respectively.
 
+3. Get started
+
+Clone project
+Clone the Oboe repository on GitHub and switch to the game-codelab branch.
+
+
+git clone https://github.com/google/oboe 
+cd oboe
+git checkout game-codelab
+Open the project in Android Studio
+Load Android Studio and open the codelab project:
+
+File > Open...
+Select the oboe/samples folder
+Note: This project contains all the code samples for the Oboe library. For this codelab, you are only working with the RhythmGame sample.
+
+Run the project
+Choose the RhythmGame run configuration.
+7b4f35798850bf56.png
+
+Press Control+R to build and run the template app. It should compile and run, but it doesn't do anything except turn the screen yellow. You add functionality to the game during this codelab.
+b765df05ad65059a.png
+
+Open the RhythmGame module
+The files you work on for this codelab are stored in the RhythmGame module. Expand this module in the Project window, making sure that the Android view is selected.
+
+Now expand the cpp/native-lib folder. During this codelab, you edit Game.h and Game.cpp.
+
+3852ca925b510220.png
+
+Compare with the final version
+During the codelab, it can be useful to refer to the final version of the code, which is stored in the master branch. Android Studio makes it easy to compare changes in files across branches.
+
+Right click on a file in the Project view.
+Go to git > Compare with Branch... > master
+564bed20e0c63be.png
+
+This opens a new window with the differences highlighted.
+
+ Architecture overview
+
+Here's the game architecture:
+
+fb908048f894be35.png
+
+UI
+The left side of the diagram shows objects associated with the UI.
+
+The OpenGL Surface calls tick each time the screen needs to be updated, typically 60 times per second. Game then instructs any UI-rendering objects to render pixels to the OpenGL surface and the screen is updated.
+
+The UI for the game is very simple: the single method SetGLScreenColor updates the color of the screen. The following colours are used to show what's happening in the game:
+
+Yellow—game is loading.
+Red—game failed to load.
+Grey—game is running.
+Orange—user tapped too early.
+Green—user tapped on time.
+Purple—user tapped too late.
+Tap events
+Each time the user taps the screen, the tap method is called, passing the time the event occurred.
+
+Audio
+The right side of the diagram shows objects associated with audio. Oboe provides the AudioStream class and associated objects to allow Game to send audio data to the audio output (a speaker or headphones).
+
+Each time the AudioStream needs more data it calls AudioStreamDataCallback::onAudioReady. This passes an array named audioData to Game, which must then fill the array with numFrames of audio frames.
+
+
+
 
