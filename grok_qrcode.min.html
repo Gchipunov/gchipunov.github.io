@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Generator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 50px;
+        }
+        #qrInput {
+            width: 300px;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        #generateBtn {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+        #qrCode {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>QR Code Generator</h1>
+    <input type="text" id="qrInput" placeholder="Enter text or URL">
+    <button id="generateBtn">Generate QR Code</button>
+    <div id="qrCode"></div>
+
+    <!-- Include qrcode.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script>
+        // Get DOM elements
+        const qrInput = document.getElementById('qrInput');
+        const generateBtn = document.getElementById('generateBtn');
+        const qrCodeDiv = document.getElementById('qrCode');
+
+        // Event listener for the generate button
+        generateBtn.addEventListener('click', () => {
+            // Clear previous QR code
+            qrCodeDiv.innerHTML = '';
+
+            // Get input value
+            const inputText = qrInput.value.trim();
+
+            // Check if input is empty
+            if (!inputText) {
+                alert('Please enter some text or a URL.');
+                return;
+            }
+
+            // Generate QR code
+            QRCode.toCanvas(inputText, { width: 200 }, (error, canvas) => {
+                if (error) {
+                    console.error(error);
+                    alert('Error generating QR code.');
+                    return;
+                }
+                qrCodeDiv.appendChild(canvas);
+            });
+        });
+
+        // Optional: Generate QR code when pressing Enter
+        qrInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                generateBtn.click();
+            }
+        });
+    </script>
+</body>
+</html>
