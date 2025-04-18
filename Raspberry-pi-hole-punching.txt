@@ -1,0 +1,84 @@
+For raspberry pi Show hole punching server c++ example
+
+
+
+Here is a basic example of a hole punching server in C++ for Raspberry Pi:
+HolePunchingServer.cpp
+C++
+#include <iostream>
+#include <string>
+#include <vector>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#define PORT 8080
+
+struct Client {
+    std::string ip;
+    int port;
+};
+
+std::vector<Client> clients;
+
+void handleClient(int clientSocket) {
+    Client client;
+    socklen_t len = sizeof(client);
+    getpeername(clientSocket, (struct sockaddr*)&client, &len);
+    client.ip = inet_ntoa(((struct sockaddr_in*)&client)->sin_addr);
+    client.port = ntohs(((struct sockaddr_in*)&client)->sin_port);
+    clients.push_back(client);
+    std::cout << "Client connected: " << client.ip << ":" << client.port << std::endl;
+}
+
+void punchHole(int clientSocket1, int clientSocket2) {
+    Client client1 = clients[0];
+    Client client2 = clients[1];
+    std::cout << "Punching hole between " << client1.ip << ":" << client1.port << " and " << client2.ip << ":" << client2.port << std::endl;
+    // Send client1's IP and port to client2
+    send(clientSocket2, (char*)&client1, sizeof(client1), 0);
+    // Send client2's IP and port to client1
+    send(clientSocket1, (char*)&client2, sizeof(client2), 0);
+}
+
+int main() {
+    int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (serverSocket < 0) {
+        std::cerr << "Error creating socket" << std::endl;
+        return 1;
+    }
+
+    struct sockaddr_in serverAddr;
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(PORT);
+    inet_pton(AF_INET, "192.168.1.100", &serverAddr.sin_addr); // Replace with Raspberry Pi's IP address
+
+    if (bind(serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        std::cerr << "Error binding socket" << std::endl;
+        return 1;
+    }
+
+    listen(serverSocket, 3);
+
+    int clientSocket1 = accept(serverSocket, NULL, NULL);
+    handleClient(clientSocket1);
+
+    int clientSocket2 = accept(serverSocket, NULL, NULL);
+    handleClient(clientSocket2);
+
+    punchHole(clientSocket1, clientSocket2);
+
+    close(clientSocket1);
+    close(clientSocket2);
+    close(serverSocket);
+
+    return 0;
+}
+Compile and Run:
+1. Install the necessary libraries: sudo apt-get install libssl-dev
+2. Compile the code: g++ HolePunchingServer.cpp -o HolePunchingServer
+3. Run the server: ./HolePunchingServer
+Note:
+* Replace 192.168.1.100 with the Raspberry Pi's IP address.
+* This example assumes that the Raspberry Pi is connected to the same network as the clients.
+* This is a basic example and doesn't handle errors, disconnections, or multiple clients. In a real-world scenario, you would need to add additional logic and error handling.
