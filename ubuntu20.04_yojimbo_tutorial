@@ -1,0 +1,17 @@
+sudo apt update
+
+
+sudo apt install wget unzip
+
+
+wget https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+
+tar -xvzf premake-5.0.0-beta2-linux.tar.gz
+
+
+sudo mv premake5 /usr/local/bin/
+
+
+premake5 --version
+
+
