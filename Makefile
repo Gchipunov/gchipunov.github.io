@@ -40,16 +40,16 @@ SOAK_SRC = soak.cpp
 TEST_SRC = test.cpp
 
 # Object files
-SODIUM_OBJ = $(SODIUM_SRC:.c=.o) $(SODIUM_ASM:.S=.o)
-NETCODE_OBJ = $(NETCODE_SRC:.c=.o)
-RELIABLE_OBJ = $(RELIABLE_SRC:.c=.o)
-TLSF_OBJ = $(TLSF_SRC:.c=.o)
-YOJIMBO_OBJ = $(YOJIMBO_SRC:.cpp=.o)
-CLIENT_OBJ = $(CLIENT_SRC:.cpp=.o)
-SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
-LOOPBACK_OBJ = $(LOOPBACK_SRC:.cpp=.o)
-SOAK_OBJ = $(SOAK_SRC:.cpp=.o)
-TEST_OBJ = $(TEST_SRC:.cpp=.o)
+SODIUM_OBJ = $(patsubst sodium/%.c,$(OBJDIR)/sodium/%.o,$(SODIUM_SRC)) $(patsubst sodium/%.S,$(OBJDIR)/sodium/%.o,$(SODIUM_ASM))
+NETCODE_OBJ = $(patsubst netcode/%.c,$(OBJDIR)/netcode/%.o,$(NETCODE_SRC))
+RELIABLE_OBJ = $(patsubst reliable/%.c,$(OBJDIR)/reliable/%.o,$(RELIABLE_SRC))
+TLSF_OBJ = $(patsubst tlsf/%.c,$(OBJDIR)/tlsf/%.o,$(TLSF_SRC))
+YOJIMBO_OBJ = $(patsubst source/%.cpp,$(OBJDIR)/source/%.o,$(YOJIMBO_SRC))
+CLIENT_OBJ = $(patsubst %.cpp,$(OBJDIR)/%.o,$(CLIENT_SRC))
+SERVER_OBJ = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SERVER_SRC))
+LOOPBACK_OBJ = $(patsubst %.cpp,$(OBJDIR)/%.o,$(LOOPBACK_SRC))
+SOAK_OBJ = $(patsubst %.cpp,$(OBJDIR)/%.o,$(SOAK_SRC))
+TEST_OBJ = $(patsubst %.cpp,$(OBJDIR)/%.o,$(TEST_SRC))
 
 # Targets
 .PHONY: all clean debug release
@@ -87,26 +87,31 @@ $(OBJDIR)/source/%.o: source/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# Rules for executable source files
+$(OBJDIR)/%.o: %.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 # Executable rules
-$(BINDIR)/client: $(OBJDIR)/$(CLIENT_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
+$(BINDIR)/client: $(CLIENT_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -Lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
+	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -L$(OBJDIR) -lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
 
-$(BINDIR)/server: $(OBJDIR)/$(SERVER_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
+$(BINDIR)/server: $(SERVER_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -Lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
+	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -L$(OBJDIR) -lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
 
-$(BINDIR)/loopback: $(OBJDIR)/$(LOOPBACK_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
+$(BINDIR)/loopback: $(LOOPBACK_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -Lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
+	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -L$(OBJDIR) -lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
 
-$(BINDIR)/soak: $(OBJDIR)/$(SOAK_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
+$(BINDIR)/soak: $(SOAK_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -Lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
+	$(CXX) $(CXXFLAGS) $< -o $@ $(LIBDIRS) -L$(OBJDIR) -lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
 
-$(BINDIR)/test: $(OBJDIR)/$(TEST_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
+$(BINDIR)/test: $(TEST_OBJ) $(OBJDIR)/yojimbo.a $(OBJDIR)/sodium.a $(OBJDIR)/tlsf.a $(OBJDIR)/netcode.a $(OBJDIR)/reliable.a
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -DSERIALIZE_ENABLE_TESTS=1 $< -o $@ $(LIBDIRS) -Lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
+	$(CXX) $(CXXFLAGS) -DSERIALIZE_ENABLE_TESTS=1 $< -o $@ $(LIBDIRS) -L$(OBJDIR) -lyojimbo -lsodium -ltlsf -lnetcode -lreliable $(LIBS)
 
 # Archive rules
 $(OBJDIR)/sodium.a: $(SODIUM_OBJ)
@@ -128,9 +133,3 @@ $(OBJDIR)/tlsf.a: $(TLSF_OBJ)
 $(OBJDIR)/yojimbo.a: $(YOJIMBO_OBJ)
 	@mkdir -p $(@D)
 	ar rcs $@ $^
-
-# Clean
-clean:
-	rm -rf $(OBJDIR) $(BINDIR) *.make *.txt *.zip *.tar.gz *.db *.opendb *.vcproj *.vcxproj *.vcxproj.user *.vcxproj.filters *.sln *.xcodeproj *.xcworkspace
-	rm -rf ipch .vs Debug Release release cov-int docker/yojimbo valgrind/yojimbo docs xml
-	find . -name .DS_Store -delete
