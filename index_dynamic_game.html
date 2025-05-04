@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dynamic Game Script Compiler</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+  <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-2xl">
+    <h1 class="text-2xl font-bold mb-4 text-center">Dynamic Game Script Compiler</h1>
+    <canvas id="gameCanvas" width="400" height="400" class="border-2 border-gray-300 mx-auto block"></canvas>
+    <div class="mt-4">
+      <label for="scriptInput" class="block text-sm font-medium text-gray-700">Enter Script (Define updatePosition(x, y, t)):</label>
+      <textarea id="scriptInput" rows="4" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="return { x: x + Math.sin(t) * 2, y: y + Math.cos(t) * 2 };">
+return { x: x + Math.sin(t) * 2, y: y + Math.cos(t) * 2 };
+      </textarea>
+      <button id="compileButton" class="mt-2 w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700">Compile & Run</button>
+    </div>
+    <p id="errorMessage" class="mt-2 text-red-600 hidden"></p>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scriptInput = document.getElementById('scriptInput');
+    const compileButton = document.getElementById('compileButton');
+    const errorMessage = document.getElementById('errorMessage');
+
+    // Game state
+    let player = { x: 200, y: 200 };
+    let time = 0;
+    let updateFunction = null;
+
+    // Default update function (no movement)
+    function defaultUpdate(x, y, t) {
+      return { x, y };
+    }
+
+    // Game loop
+    function gameLoop() {
+      // Update time
+      time += 0.05;
+
+      // Update player position using the compiled function
+      const newPos = updateFunction ? updateFunction(player.x, player.y, time) : defaultUpdate(player.x, player.y, time);
+      player.x = Math.max(0, Math.min(canvas.width - 20, newPos.x));
+      player.y = Math.max(0, Math.min(canvas.height - 20, newPos.y));
+
+      // Clear canvas
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw player (a simple square)
+      ctx.fillStyle = 'blue';
+      ctx.fillRect(player.x, player.y, 20, 20);
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Compiler: Generate executable function from script
+    function compileScript(script) {
+      try {
+        // Create a function that takes x, y, t and returns { x, y }
+        const sanitizedScript = script.trim();
+        if (!sanitizedScript) {
+          throw new Error('Script cannot be empty.');
+        }
+
+        // Create function with Math object available
+        const func = new Function('x', 'y', 't', 'Math', `
+          with (Math) {
+            ${sanitizedScript}
+          }
+        `);
+
+        // Test the function
+        const testResult = func(0, 0, 0, Math);
+        if (!testResult || typeof testResult.x !== 'number' || typeof testResult.y !== 'number') {
+          throw new Error('Script must return an object with numeric x and y properties.');
+        }
+
+        errorMessage.classList.add('hidden');
+        return func;
+      } catch (err) {
+        errorMessage.textContent = `Error: ${err.message}`;
+        errorMessage.classList.remove('hidden');
+        return null;
+      }
+    }
+
+    // Event listener for compile button
+    compileButton.addEventListener('click', () => {
+      const script = scriptInput.value;
+      const compiledFunc = compileScript(script);
+      if (compiledFunc) {
+        updateFunction = compiledFunc;
+      }
+    });
+
+    // Start game loop
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
