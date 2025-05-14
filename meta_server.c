@@ -27,7 +27,7 @@ int main() {
 
 	while(1) {
 	// Receive message from client
-	int bytes_received = recvfrom(sockfd, buffer, BUFFER_SIZE, 0 ,(struct sockaddr * )&client_Addr, &client_len)
+	int bytes_received = recvfrom(sockfd, buffer, BUFFER_SIZE, 0 ,(struct sockaddr * )&client_Addr, &client_len);
 	if(bytes_received < 0)
 	{
 	perror("recvfrom failed");
