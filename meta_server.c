@@ -35,7 +35,7 @@ int main() {
 	}
 
 	buffer[bytes_received] = '\0';
-	printf("Receieved message from client: %s\n" buffer);
+	printf("Receieved message from client: %s\n" ,buffer);
 
 	//Send response back to client
 	int bytes_sent = sendto(sockfd, buffer, bytes_received, 0, (struct sockaddr * ) &client_addr , &client_len);
