@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Logistics Hub - RTS Unit</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            font-family: Arial, sans-serif;
+        }
+        button { margin: 5px; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button onclick="toggleDeployment()">Toggle Deploy</button>
+        <button onclick="moveUnit('forward')">Move Forward</button>
+        <button onclick="moveUnit('backward')">Move Backward</button>
+      <button onclick="moveUnit('right')">Move right</button>
+        <button onclick="moveUnit('left')">Move left</button>
+      
+      
+        <button onclick="toggleScavenge()">Toggle Scavenge</button>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        camera.position.set(0, 10, 20);
+        camera.lookAt(0, 0, 0);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(5, 10, 7.5);
+        scene.add(directionalLight);
+
+        // Terrain
+        const terrainGeometry = new THREE.PlaneGeometry(50, 50);
+        const terrainMaterial = new THREE.MeshStandardMaterial({ color: 0x4a7043, side: THREE.DoubleSide });
+        const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+        terrain.rotation.x = Math.PI / 2;
+        scene.add(terrain);
+
+        // Mobile Logistics Hub
+        const hubGroup = new THREE.Group();
+        scene.add(hubGroup);
+
+        // Chassis
+        const chassisGeometry = new THREE.BoxGeometry(2, 1, 4);
+        const chassisMaterial = new THREE.MeshStandardMaterial({ color: 0x4682b4 }); // Faction color: blue
+        const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
+        chassis.position.y = 0.5;
+        hubGroup.add(chassis);
+
+        // Deployable Legs (4 legs)
+        const legGeometry = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
+        const legMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        const legs = [];
+        const legPositions = [
+            [0.8, -0.5, 1.5], [-0.8, -0.5, 1.5],
+            [0.8, -0.5, -1.5], [-0.8, -0.5, -1.5]
+        ];
+        for (let pos of legPositions) {
+            const leg = new THREE.Mesh(legGeometry, legMaterial);
+            leg.position.set(pos[0], pos[1], pos[2]);
+            hubGroup.add(leg);
+            legs.push(leg);
+        }
+
+        // Collection Arms
+        const armGeometry = new THREE.BoxGeometry(0.2, 0.2, 1);
+        const armMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 });
+        const arms = [];
+        const armPositions = [[1.1, 0.5, 0], [-1.1, 0.5, 0]];
+        for (let pos of armPositions) {
+            const arm = new THREE.Mesh(armGeometry, armMaterial);
+            arm.position.set(pos[0], pos[1], pos[2]);
+            hubGroup.add(arm);
+            arms.push(arm);
+        }
+
+        // Antenna
+        const antennaGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1.5, 8);
+        const antenna = new THREE.Mesh(antennaGeometry, legMaterial);
+        antenna.position.set(0, 1.5, 0);
+        hubGroup.add(antenna);
+
+        // Utility Light (for deployed mode)
+        const lightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+        const lightMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+        const utilityLight = new THREE.Mesh(lightGeometry, lightMaterial);
+        utilityLight.position.set(0, 1.2, 1.8);
+        hubGroup.add(utilityLight);
+        utilityLight.visible = false;
+
+        // Resources (visualized as glowing cubes)
+        const resourceGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+        const resourceMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const resources = [];
+        for (let i = 0; i < 5; i++) {
+            const resource = new THREE.Mesh(resourceGeometry, resourceMaterial);
+            resource.position.set(
+                Math.random() * 10 - 5,
+                0.15,
+                Math.random() * 10 - 5
+            );
+            scene.add(resource);
+            resources.push(resource);
+        }
+
+        // State
+        let isDeployed = false;
+        let isScavenging = false;
+        let legAnimationProgress = 0;
+        let armAnimationProgress = 0;
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Animate legs when deploying/undeploying
+            if (isDeployed && legAnimationProgress < 1) {
+                legAnimationProgress += 0.05;
+                legs.forEach(leg => {
+                    leg.position.y = -0.5 - legAnimationProgress * 0.5;
+                });
+                utilityLight.visible = true;
+            } else if (!isDeployed && legAnimationProgress > 0) {
+                legAnimationProgress -= 0.05;
+                legs.forEach(leg => {
+                    leg.position.y = -0.5 - legAnimationProgress * 0.5;
+                });
+                utilityLight.visible = false;
+            }
+
+            // Animate collection arms when scavenging
+            if (isScavenging && isDeployed && armAnimationProgress < 1) {
+                armAnimationProgress += 0.05;
+                arms.forEach(arm => {
+                    arm.position.z = Math.sin(armAnimationProgress * Math.PI) * 0.5;
+                });
+            } else if (!isScavenging && armAnimationProgress > 0) {
+                armAnimationProgress -= 0.05;
+                arms.forEach(arm => {
+                    arm.position.z = Math.sin(armAnimationProgress * Math.PI) * 0.5;
+                });
+            }
+
+            // Simulate resource collection (move resources toward hub)
+            if (isScavenging && isDeployed) {
+                resources.forEach(resource => {
+                    const distance = resource.position.distanceTo(hubGroup.position);
+                    if (distance < 5 && distance > 0.5) {
+                        const direction = hubGroup.position.clone().sub(resource.position).normalize();
+                        resource.position.add(direction.multiplyScalar(0.05));
+                    }
+                });
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Controls
+        function toggleDeployment() {
+            isDeployed = !isDeployed;
+        }
+
+        function moveUnit(direction) {
+            if (!isDeployed) {
+                hubGroup.position.z += direction === 'forward' ? -0.5 : 0.5;
+            }
+        }
+
+        function toggleScavenge() {
+            if (isDeployed) {
+                isScavenging = !isScavenging;
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
