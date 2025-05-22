@@ -17,11 +17,12 @@
 
     // Vertex shader: Simple pass-through with time-based animation
     var vertexShaderSource = `
-      attribute vec2 a_position;
+      attribute vec4 a_position;
+      attribute float a_type;
       uniform float time;
       void main() {
         // Example animation: slightly offset positions based on time
-        vec2 animatedPos = a_position + vec2(sin(time) * 0.1, cos(time) * 0.1);
+        vec2 animatedPos = a_position.xy + vec2(sin(time) * 0.1, cos(time) * 0.1);
         gl_Position = vec4(animatedPos, 0.0, 1.0);
       }
     `;
@@ -71,6 +72,13 @@
 
     // Define vertices for 4 quads (each quad is 2 triangles, 6 vertices)
     // Quad positions in clip space (-1 to 1)
+   var quadtypes = { 0.0,0.0,0.0,0.0,0.0,0.0
+     ,
+                    1.0,1.0,1.0,1.0,1.0,1.0,
+                    2.0,2.0,2.0,2.0,2.0,2.0,
+                    3.0,3.0,3.0,3.0,3.0,3.0 };
+    
+                      
     const quadVertices = new Float32Array([
       // Quad 1 (top-left)
       -0.8,  0.8,  // top-left
