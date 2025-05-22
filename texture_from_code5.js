@@ -81,40 +81,43 @@
                       
     const quadVertices = new Float32Array([
       // Quad 1 (top-left)
-      -0.8,  0.8,  // top-left
-      -0.8,  0.4,  // bottom-left
-      -0.4,  0.8,  // top-right
-      -0.8,  0.4,  // bottom-left
-      -0.4,  0.4,  // bottom-right
-      -0.4,  0.8,  // top-right
+      -0.8,  0.8, 0.0,0.0,  // top-left
+      -0.8,  0.4, 0.0,0.0 ,// bottom-left
+      -0.4,  0.8,  0.0,0.0, //top-right
+      -0.8,  0.4, 0.0,0.0 ,// bottom-left
+      -0.4,  0.4, 0.0,0.0 ,// bottom-right
+      -0.4,  0.8,  0.0,0.0,// top-right
 
       // Quad 2 (top-right)
-       0.4,  0.8,  // top-left
-       0.4,  0.4,  // bottom-left
-       0.8,  0.8,  // top-right
-       0.4,  0.4,  // bottom-left
-       0.8,  0.4,  // bottom-right
-       0.8,  0.8,  // top-right
+       0.4,  0.8, 0.0,1.0, // top-left
+       0.4,  0.4, 0.0,1.0, // bottom-left
+       0.8,  0.8,  0.0,1.0,// top-right
+       0.4,  0.4,  0.0,1.0,// bottom-left
+       0.8,  0.4,  0.0,1.0,// bottom-right
+       0.8,  0.8,  0.0,1.0,// top-right
 
       // Quad 3 (bottom-left)
-      -0.8, -0.4,  // top-left
-      -0.8, -0.8,  // bottom-left
-      -0.4, -0.4,  // top-right
-      -0.8, -0.8,  // bottom-left
-      -0.4, -0.8,  // bottom-right
-      -0.4, -0.4,  // top-right
+      -0.8, -0.4, 0.0,2.0, // top-left
+      -0.8, -0.8, 0.0,2.0, // bottom-left
+      -0.4, -0.4,  0.0,2.0,// top-right
+      -0.8, -0.8, 0.0,2.0, // bottom-left
+      -0.4, -0.8,  0.0,2.0,// bottom-right
+      -0.4, -0.4, 0.0,2.0, // top-right
 
       // Quad 4 (bottom-right)
-       0.4, -0.4,  // top-left
-       0.4, -0.8,  // bottom-left
-       0.8, -0.4,  // top-right
-       0.4, -0.8,  // bottom-left
-       0.8, -0.8,  // bottom-right
-       0.8, -0.4   // top-right
+       0.4, -0.4, 0.0,3.0, // top-left
+       0.4, -0.8, 0.0,3.0, // bottom-left
+       0.8, -0.4, 0.0,3.0, // top-right
+       0.4, -0.8,  0.0,3.0,// bottom-left
+       0.8, -0.8,  0.0,3.0,// bottom-right
+       0.8, -0.4   ,0.0,3.0,// top-right
     ]);
 
     gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+
+     gl.bufferData(gl.ARRAY_BUFFER, quadtypes, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(1,1,gl.FLOAT, false, 0, 0);
   }
 
   function cleanup(gl, program, buffer) {
