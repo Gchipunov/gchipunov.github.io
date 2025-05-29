@@ -30,7 +30,20 @@
 </head>
 <body>
     <canvas id="webglCanvas"></canvas>
+    <div class="image-container">
+        <img src="https://gchipunov.github.io/Concrete_Factory.png" alt="Concrete Factory">
+        <img src="https://gchipunov.github.io/Garage_House.png" alt="Garage House">
+        <img src="https://gchipunov.github.io/HeadQuatars.png" alt="HeadQuarters">
+        <img src="https://gchipunov.github.io/Lumberyard_Refindary.png" alt="Lumberyard Refinery">
+    </div>
 
+    <div id="info" style="position: absolute; top: 10px; left: 10px; color: white; background-color: rgba(0,0,0,0.5); padding: 5px;">
+        Wood: <span id="wood">100</span> |
+        Stone: <span id="stone">0</span> |
+        Planks: <span id="planks">0</span><br>
+        Project: <span id="project">None</span> |
+        Progress: <span id="progress">0.0%</span>
+    </div>
    <div id="ui">
         <p>Resources: <span id="wood">0</span> Wood | <span id="stone">0</span> Stone | <span id="planks">0</span> Planks</p>
         <p>Projects: <span id="project">None</span> (<span id="progress">0%</span>)</p>
