@@ -1102,4 +1102,12 @@ function draggable(ele, toggleEle) {
 
 		ele.style.left = x + 'px';
 		ele.style.top = y + 'px';
+
+		}
+	
+	toggleEle.addEventListener('mousedown', onMouseDown, true);
+	window.addEventListener('mouseup', onMouseUp, true);
+	
+}
+
     
