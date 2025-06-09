@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Scene with Images</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        .image-container {
+            text-align: center; /* Optional: centers the images */
+            margin-bottom: 10px; /* Optional: adds some space below the images */
+        }
+        .image-container img {
+            max-width: 200px; /* Optional: sets a max width for the images */
+            height: auto;     /* Optional: maintains aspect ratio */
+            margin: 5px;      /* Optional: adds some space around each image */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="image-container">
+        <img src="https://gchipunov.github.io/assets/images/Concrete_Factory.png" alt="Concrete Factory">
+        <img src="https://gchipunov.github.io/assets/images/Garage_House.png" alt="Garage House">
+        <img src="https://gchipunov.github.io/assets/images/HeadQuatars.png" alt="HeadQuarters">
+        <img src="https://gchipunov.github.io/assets/images/Lumberyard_Refindary.png" alt="Lumberyard Refinery">
+    </div>
+
+    <div id="info" style="position: absolute; top: 10px; left: 10px; color: white; background-color: rgba(0,0,0,0.5); padding: 5px;">
+        Wood: <span id="wood">100</span> |
+        Stone: <span id="stone">0</span> |
+        Planks: <span id="planks">0</span><br>
+        Project: <span id="project">None</span> |
+        Progress: <span id="progress">0.0%</span>
+    </div>
+Quaternions are a mathematical concept used in game development to represent rotations. They offer several advantages over other methods, such as Euler angles, including avoiding gimbal lock and providing smooth interpolation between rotations.
+
+This tutorial provides an overview of quaternions and their application in game development. It covers the basics of quaternion math and demonstrates how to use them for common game development tasks such as rotating objects, orienting cameras, and blending animations. The tutorial also includes practical examples and code snippets to help you get started.
+
+What is a Quaternion?
+A quaternion is a four-dimensional complex number that can represent a 3D rotation. It consists of a scalar component (w) and a 3D vector component (x, y, z), often written as q=w+xi+yj+zk.
+
+The unit quaternion, which is a quaternion with a magnitude of 1, is particularly useful for representing rotations.
+
+Why Use Quaternions in Game Development?
+Avoids Gimbal Lock: Gimbal lock is a problem that occurs with Euler angles when two of the rotation axes align, resulting in a loss of a degree of freedom. Quaternions do not suffer from gimbal lock.
+Smooth Interpolation: Quaternions allow for smooth and consistent interpolation between two rotations, which is essential for realistic animations and camera movements.
+Concise Representation: A single quaternion can represent any 3D rotation, making them a compact and efficient way to store rotation data.
+Basic Quaternion Operations
+Here are some fundamental operations you'll encounter when working with quaternions:
+
+Identity Quaternion: Represents no rotation. q=(1,0,0,0)
+Conjugate: q 
+∗
+ =(w,−x,−y,−z). Useful for inverse rotations.
+Magnitude (Norm): ∣q∣= 
+w 
+2
+ +x 
+2
+ +y 
+2
+ +z 
+2
+ 
+
+​	
+ . For unit quaternions, this is 1.
+Normalization: Scaling a quaternion so its magnitude is 1. This is crucial for maintaining valid rotations.
+Multiplication: Quaternion multiplication is not commutative (q 
+1
+​	
+ q 
+2
+​	
+ 
+
+=q 
+2
+​	
+ q 
+1
+​	
+ ). It's used to combine rotations. If q 
+1
+​	
+  rotates A to B, and q 
+2
+​	
+  rotates B to C, then q 
+2
+​	
+ q 
+1
+​	
+  rotates A to C.
+Inverse: For a unit quaternion, the inverse is its conjugate. q 
+−1
+ =q 
+∗
+ .
+Representing Rotations with Quaternions
+A rotation around an axis (x, y, z) by an angle θ can be represented as a quaternion:
+
+q=(cos(θ/2),xsin(θ/2),ysin(θ/2),zsin(θ/2))
+
+Where (x, y, z) is a unit vector representing the axis of rotation.
+
+Practical Applications in Game Development
+Most game engines provide built-in quaternion classes and functions, so you won't typically need to implement the low-level math yourself. Instead, you'll focus on using the provided API.
+
+Let's look at some common use cases:
+
+1. Rotating Objects
+
+Most game engines allow you to directly set an object's rotation using a quaternion.
+
+Example (Unity C#):
+
+C#
+
+    <div style="position: absolute; top: 70px; left: 10px;">
+        <button onclick="selectBuilding('lumberMill')">Build Lumber Mill (10 Wood)</button>
+        <button onclick="selectBuilding('stoneQuarry')">Build Stone Quarry (10 Wood)</button>
+        <button onclick="startProject('house')">Start House Project (20 Planks, 10 Stone)</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Camera position
+        camera.position.set(0, 10, 20);
+        camera.lookAt(0, 0, 0);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(10, 20, 10);
+        scene.add(directionalLight);
+
+        // Ground plane
+        const groundGeometry = new THREE.PlaneGeometry(50, 50);
+        const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x228B22 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Construction Hub
+        const hubGeometry = new THREE.BoxGeometry(3, 3, 3);
+        const hubMaterial = new THREE.MeshBasicMaterial({ color: 0x808080 });
+        const hub = new THREE.Mesh(hubGeometry, hubMaterial);
+        hub.position.set(0, 1.5, 0);
+        scene.add(hub);
+
+        // Resource and building management
+        let resources = { wood: 100, stone: 0, planks: 0 };
+        let buildings = [];
+        let selectedBuilding = null;
+        let currentProject = null;
+        let projectProgress = 0;
+
+        // Building definitions
+        const buildingTypes = {
+            lumberMill: {
+                cost: { wood: 10 },
+                produce: { resource: 'wood', amount: 1, interval: 2000 },
+                geometry: new THREE.BoxGeometry(2, 2, 2),
+                material: new THREE.MeshBasicMaterial({ color: 0x8B4513 })
+            },
+            stoneQuarry: {
+                cost: { wood: 10 },
+                produce: { resource: 'stone', amount: 1, interval: 3000 },
+                geometry: new THREE.BoxGeometry(2, 2, 2),
+                material: new THREE.MeshBasicMaterial({ color: 0x696969 })
+            }
+        };
+
+        // Project definitions
+        const projects = {
+            house: {
+                cost: { planks: 20, stone: 10 },
+                duration: 10000 // 10 seconds
+            }
+        };
+
+        // Raycaster for mouse interaction
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let intersectedPoint = null;
+
+        // Event listeners
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(ground);
+            if (intersects.length > 0) {
+                intersectedPoint = intersects[0].point;
+            }
+        });
+
+        window.addEventListener('click', () => {
+            if (selectedBuilding && intersectedPoint) {
+                placeBuilding(selectedBuilding, intersectedPoint);
+                selectedBuilding = null;
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Building placement
+        function placeBuilding(type, position) {
+            const building = buildingTypes[type];
+            let canAfford = true;
+            for (let resource in building.cost) {
+                if (resources[resource] < building.cost[resource]) {
+                    canAfford = false;
+                    break;
+                }
+            }
+            if (canAfford) {
+                for (let resource in building.cost) {
+                    resources[resource] -= building.cost[resource];
+                }
+                const mesh = new THREE.Mesh(building.geometry, building.material);
+                mesh.position.set(position.x, 1, position.z); // Assuming y=1 is appropriate for building height
+                scene.add(mesh);
+                buildings.push({ type, mesh, produce: building.produce });
+                updateUI();
+            } else {
+                alert("Not enough resources!");
+            }
+        }
+
+        // Select building to place
+        function selectBuilding(type) {
+            selectedBuilding = type;
+        }
+
+        // Start a project
+        function startProject(type) {
+            if (!currentProject) {
+                const project = projects[type];
+                let canAfford = true;
+                for (let resource in project.cost) {
+                    if (resources[resource] < project.cost[resource]) {
+                        canAfford = false;
+                        break;
+                    }
+                }
+                if (canAfford) {
+                    for (let resource in project.cost) {
+                        resources[resource] -= project.cost[resource];
+                    }
+                    currentProject = { type, duration: project.duration, startTime: Date.now() };
+                    updateUI();
+                } else {
+                    alert("Not enough resources for the project!");
+                }
+            } else {
+                alert("A project is already in progress!");
+            }
+        }
+
+        // Resource production
+        setInterval(() => {
+            buildings.forEach(building => {
+                if (building.produce && Math.random() < 0.5) { // Simplified production trigger for testing
+                    resources[building.produce.resource] += building.produce.amount;
+                    // Special handling for wood to planks conversion (example)
+                    if (building.produce.resource === 'wood' && building.type === 'lumberMill') {
+                         // Assuming 1 wood can be converted to 0.5 planks, or similar logic
+                        // This part might need adjustment based on your game logic for plank production
+                        // For now, let's assume lumber mill directly produces planks if that's the intent
+                        // Or, if planks are a separate conversion, that logic would go here.
+                        // resources.planks += building.produce.amount * 0.5; // Example: 1 wood -> 0.5 planks
+                    }
+                    updateUI();
+                }
+            });
+
+            // Example: Convert wood to planks if a lumber mill exists and there's wood
+            // This is a simplified global conversion logic. You might want something more sophisticated.
+            if (resources.wood >= 2 && buildings.some(b => b.type === 'lumberMill')) {
+                 resources.planks += 1; // Convert 2 wood to 1 plank
+                 resources.wood -=2;
+                 updateUI();
+            }
+
+
+        }, 1000); // Check every second
+
+
+        // Project progress
+        setInterval(() => {
+            if (currentProject) {
+                const elapsed = Date.now() - currentProject.startTime;
+                projectProgress = Math.min((elapsed / currentProject.duration) * 100, 100);
+                updateUI();
+                if (projectProgress >= 100) {
+                    alert(currentProject.type + " project completed!"); // Notify user
+                    // Add rewards based on the project type
+                    if (currentProject.type === 'house') {
+                         // For example, a completed house might increase population capacity or unlock new things
+                        console.log("House completed! Implement rewards here.");
+                    }
+                    currentProject = null;
+                    projectProgress = 0;
+                    updateUI();
+                }
+            }
+        }, 100);
+
+        // Update UI
+        function updateUI() {
+            document.getElementById('wood').textContent = resources.wood;
+            document.getElementById('stone').textContent = resources.stone;
+            document.getElementById('planks').textContent = resources.planks;
+            document.getElementById('project').textContent = currentProject ? currentProject.type : 'None';
+            document.getElementById('progress').textContent = projectProgress.toFixed(1) + '%';
+        }
+
+        // Game loop
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        // Initial UI update
+        updateUI();
+        animate();
+    </script>
+</body>
+</html>
