@@ -118,7 +118,293 @@ Most game engines allow you to directly set an object's rotation using a quatern
 
 Example (Unity C#):
 
+C#:
+    Example (Unity C#):
+
 C#
+using UnityEngine;
+
+public class RotateObject : MonoBehaviour
+{
+    public float rotationSpeed = 50.0f;
+
+    void Update()
+    {
+        // Rotate around the Y-axis
+        transform.rotation *= Quaternion.AngleAxis(rotationSpeed * Time.deltaTime, Vector3.up);
+
+        // Alternatively, set a specific rotation
+        // transform.rotation = Quaternion.Euler(0, 90, 0); // Directly set to 90 degrees around Y
+
+        // Or combine rotations
+        // Quaternion additionalRotation = Quaternion.AngleAxis(30, Vector3.right);
+        // transform.rotation *= additionalRotation;
+    }
+}
+Example (Unreal Engine C++):
+
+C++
+#include "GameFramework/Actor.h"
+#include "RotateActor.generated.h"
+
+UCLASS()
+class MYPROJECT_API ARotateActor : public AActor
+{
+	GENERATED_BODY()
+
+public:	
+	ARotateActor();
+
+protected:
+	virtual void BeginPlay() override;
+
+public:	
+	virtual void Tick(float DeltaTime) override;
+
+	UPROPERTY(EditAnywhere, Category = "Rotation")
+	float RotationSpeed = 50.0f;
+};
+
+// .cpp file
+#include "RotateActor.h"
+
+ARotateActor::ARotateActor()
+{
+	PrimaryActorTick.bCanEverTick = true;
+}
+
+void ARotateActor::BeginPlay()
+{
+	Super::BeginPlay();
+}
+
+void ARotateActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Rotate around the Y-axis
+	FQuat RotationDelta = FQuat(FVector::UpVector, FMath::DegreesToRadians(RotationSpeed * DeltaTime));
+	SetActorRotation(GetActorRotation() * RotationDelta);
+
+	// Alternatively, set a specific rotation
+	// SetActorRotation(FRotator(0, 90, 0).Quaternion());
+
+	// Or combine rotations
+	// FQuat AdditionalRotation = FQuat(FVector::RightVector, FMath::DegreesToRadians(30));
+	// SetActorRotation(GetActorRotation() * AdditionalRotation);
+}
+2. Orienting Cameras
+
+Quaternions are crucial for smoothly rotating cameras, especially in first-person or third-person controllers.
+
+Example (Unity C# - LookAt function):
+
+C#
+using UnityEngine;
+
+public class LookAtTarget : MonoBehaviour
+{
+    public Transform target;
+    public float rotationSpeed = 5.0f;
+
+    void Update()
+    {
+        if (target != null)
+        {
+            // Calculate the rotation needed to look at the target
+            Quaternion targetRotation = Quaternion.LookRotation(target.position - transform.position);
+
+            // Smoothly interpolate towards that rotation
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
+        }
+    }
+}
+Example (Unreal Engine C++ - LookAt equivalent):
+
+C++
+#include "GameFramework/Actor.h"
+#include "CameraLookAt.generated.h"
+
+UCLASS()
+class MYPROJECT_API ACameraLookAt : public AActor
+{
+	GENERATED_BODY()
+
+public:	
+	ACameraLookAt();
+
+protected:
+	virtual void BeginPlay() override;
+
+public:	
+	virtual void Tick(float DeltaTime) override;
+
+	UPROPERTY(EditAnywhere, Category = "Target")
+	AActor* TargetActor;
+
+	UPROPERTY(EditAnywhere, Category = "Rotation")
+	float RotationSpeed = 5.0f;
+};
+
+// .cpp file
+#include "CameraLookAt.h"
+
+ACameraLookAt::ACameraLookAt()
+{
+	PrimaryActorTick.bCanEverTick = true;
+}
+
+void ACameraLookAt::BeginPlay()
+{
+	Super::BeginPlay();
+}
+
+void ACameraLookAt::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (TargetActor)
+	{
+		// Calculate the direction to the target
+		FVector DirectionToTarget = TargetActor->GetActorLocation() - GetActorLocation();
+		
+		// Get the target rotation using FQuat::FindBetween function (similar to LookRotation)
+		// This finds the rotation needed to rotate the current forward vector to the target direction
+		FQuat TargetRotation = FQuat::FindBetween(GetActorForwardVector(), DirectionToTarget.GetSafeNormal());
+
+		// Smoothly interpolate towards the target rotation
+		SetActorRotation(FQuat::Slerp(GetActorQuat(), TargetRotation, RotationSpeed * DeltaTime));
+	}
+}
+3. Blending Animations (Slerp)
+
+Spherical Linear Interpolation (Slerp) is a powerful operation for smoothly interpolating between two quaternions. This is invaluable for blending animations, transitioning between camera states, or smoothing character rotations.
+
+Example (Unity C# - Blending two rotations):
+
+C#
+using UnityEngine;
+
+public class BlendRotations : MonoBehaviour
+{
+    public Quaternion startRotation;
+    public Quaternion endRotation;
+    public float blendTime = 2.0f;
+
+    private float timer = 0.0f;
+
+    void Start()
+    {
+        // Example: Define two distinct rotations
+        startRotation = transform.rotation;
+        endRotation = Quaternion.Euler(0, 180, 0); // Rotate 180 degrees around Y
+    }
+
+    void Update()
+    {
+        timer += Time.deltaTime;
+        float t = Mathf.Clamp01(timer / blendTime); // Normalized blend factor (0 to 1)
+
+        // Slerp between start and end rotations
+        transform.rotation = Quaternion.Slerp(startRotation, endRotation, t);
+
+        if (t >= 1.0f)
+        {
+            // Swap rotations to loop the blending
+            Quaternion temp = startRotation;
+            startRotation = endRotation;
+            endRotation = temp;
+            timer = 0.0f;
+        }
+    }
+}
+Example (Unreal Engine C++ - Blending two rotations):
+
+C++
+#include "GameFramework/Actor.h"
+#include "BlendRotationsActor.generated.h"
+
+UCLASS()
+class MYPROJECT_API ABlendRotationsActor : public AActor
+{
+	GENERATED_BODY()
+
+public:	
+	ABlendRotationsActor();
+
+protected:
+	virtual void BeginPlay() override;
+
+public:	
+	virtual void Tick(float DeltaTime) override;
+
+	UPROPERTY(EditAnywhere, Category = "Rotation")
+	float BlendTime = 2.0f;
+
+private:
+	FQuat StartRotation;
+	FQuat EndRotation;
+	float Timer = 0.0f;
+};
+
+// .cpp file
+#include "BlendRotationsActor.h"
+
+ABlendRotationsActor::ABlendRotationsActor()
+{
+	PrimaryActorTick.bCanEverTick = true;
+}
+
+void ABlendRotationsActor::BeginPlay()
+{
+	Super::BeginPlay();
+	
+	// Example: Define two distinct rotations
+	StartRotation = GetActorQuat();
+	EndRotation = FRotator(0, 180, 0).Quaternion(); // Rotate 180 degrees around Y
+}
+
+void ABlendRotationsActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	Timer += DeltaTime;
+	float T = FMath::Clamp(Timer / BlendTime, 0.0f, 1.0f); // Normalized blend factor (0 to 1)
+
+	// Slerp between start and end rotations
+	SetActorRotation(FQuat::Slerp(StartRotation, EndRotation, T));
+
+	if (T >= 1.0f)
+	{
+		// Swap rotations to loop the blending
+		FQuat Temp = StartRotation;
+		StartRotation = EndRotation;
+		EndRotation = Temp;
+		Timer = 0.0f;
+	}
+}
+Tips for Working with Quaternions
+Don't directly modify quaternion components: Unless you explicitly know what you're doing, avoid directly setting the x, y, z, and w components. Use the provided functions by your game engine (e.g., Quaternion.AngleAxis, Quaternion.Euler, Quaternion.LookRotation, Quaternion.Slerp).
+Understand the order of multiplication: When multiplying quaternions to combine rotations, the order matters. q 
+new
+​	
+ =q 
+current
+​	
+ ×q 
+additional
+​	
+ means applying q 
+additional
+​	
+  after q 
+current
+​	
+ .
+Visualize rotations: If you're struggling to understand a rotation, try visualizing it in your game engine's editor. Many engines provide gizmos for visualizing object rotations.
+Convert to/from Euler angles carefully: While quaternions are superior for calculations, Euler angles are often more intuitive for designers. Be mindful of potential issues when converting between them, especially for large rotations or when dealing with gimbal lock scenarios. Most engines provide methods for conversion (e.g., Quaternion.Euler to create a quaternion from Euler angles, or transform.rotation.eulerAngles to get Euler angles from a quaternion).
+Conclusion
+Quaternions are an essential tool in modern game development for handling rotations. While their underlying mathematics can seem complex, game engines abstract away most of the complexity, allowing developers to leverage their benefits through intuitive APIs. By understanding the core concepts and common operations, you can effectively use quaternions to create smooth, stable, and visually appealing rotations in your games.
 
     <div style="position: absolute; top: 70px; left: 10px;">
         <button onclick="selectBuilding('lumberMill')">Build Lumber Mill (10 Wood)</button>
