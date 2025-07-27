@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrimeWars: Prisoner Escape</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            color: #e2e8f0; /* Light text color */
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            background-color: #2d3748; /* Slightly lighter dark background for container */
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.3);
+            max-width: 90%;
+            width: 800px; /* Max width for desktop */
+        }
+        canvas {
+            background-color: #000; /* Prison walls background */
+            border: 2px solid #4a5568;
+            border-radius: 8px;
+            display: block;
+            width: 100%; /* Make canvas responsive */
+            height: auto; /* Maintain aspect ratio */
+        }
+        .controls, .status, .message-box {
+            background-color: #4a5568;
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .game-button {
+            background-color: #4299e1; /* Blue */
+            color: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            border: none;
+            box-shadow: 0 4px #2b6cb0; /* Darker blue for shadow */
+        }
+        .game-button:hover {
+            background-color: #3182ce; /* Darker blue on hover */
+            transform: translateY(1px);
+            box-shadow: 0 3px #2b6cb0;
+        }
+        .game-button:active {
+            background-color: #2c5282; /* Even darker on active */
+            transform: translateY(2px);
+            box-shadow: 0 2px #2b6cb0;
+        }
+        .game-button:disabled {
+            background-color: #a0aec0; /* Grey for disabled */
+            cursor: not-allowed;
+            box-shadow: 0 4px #718096;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        .status-item span:first-child {
+            font-weight: bold;
+            color: #cbd5e0;
+        }
+        .status-item span:last-child {
+            color: #a0aec0;
+        }
+        .message-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d3748;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 15px 25px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            text-align: center;
+            border: 2px solid #4299e1;
+            display: none; /* Hidden by default */
+        }
+        .message-box h2 {
+            margin-top: 0;
+            color: #4299e1;
+            font-size: 1.8em;
+            margin-bottom: 15px;
+        }
+        .message-box p {
+            margin-bottom: 20px;
+            font-size: 1.1em;
+            color: #e2e8f0;
+        }
+        .message-box .game-button {
+            padding: 12px 25px;
+            font-size: 1.1em;
+        }
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 999;
+            display: none; /* Hidden by default */
+        }
+        .trade-menu {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d3748;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 15px 25px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            text-align: center;
+            border: 2px solid #4299e1;
+            display: none; /* Hidden by default */
+            max-width: 400px;
+            width: 90%;
+        }
+        .trade-menu h2 {
+            margin-top: 0;
+            color: #4299e1;
+            font-size: 1.8em;
+            margin-bottom: 15px;
+        }
+        .trade-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #4a5568;
+            border-radius: 8px;
+        }
+        .trade-item span {
+            font-size: 1.1em;
+            color: #cbd5e0;
+        }
+        .trade-item .cost {
+            color: #a0aec0;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1 class="text-3xl font-bold text-center text-blue-400 mb-4">CrimeWars: Prisoner Escape</h1>
+
+        <canvas id="gameCanvas"></canvas>
+
+        <div class="status grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="status-item"><span>Contraband:</span> <span id="contrabandStatus">0</span></div>
+            <div class="status-item"><span>Shovels:</span> <span id="shovelsStatus">0</span></div>
+            <div class="status-item"><span>Digging Progress:</span> <span id="diggingStatus">0%</span></div>
+            <div class="status-item"><span>Time Elapsed:</span> <span id="timeStatus">0s</span></div>
+        </div>
+
+        <div class="controls">
+            <h2 class="text-xl font-bold text-center text-blue-300 mb-4">Actions</h2>
+            <div class="button-group">
+                <button id="moveUpBtn" class="game-button">Move Up</button>
+                <button id="moveLeftBtn" class="game-button">Move Left</button>
+                <button id="moveRightBtn" class="game-button">Move Right</button>
+                <button id="moveDownBtn" class="game-button">Move Down</button>
+                <button id="tradeBtn" class="game-button">Trade (Canteen)</button>
+                <button id="digBtn" class="game-button">Dig</button>
+                <button id="resetBtn" class="game-button bg-red-500 shadow-red-700 hover:bg-red-600 active:bg-red-700">Reset Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Box for game over/win -->
+    <div id="messageBox" class="message-box">
+        <h2 id="messageTitle"></h2>
+        <p id="messageText"></p>
+        <button id="messageBoxOkBtn" class="game-button">OK</button>
+    </div>
+    <div id="overlay" class="overlay"></div>
+
+    <!-- Trade Menu -->
+    <div id="tradeMenu" class="trade-menu">
+        <h2 class="mb-6">Canteen Trade</h2>
+        <div class="trade-item">
+            <span>Shovel</span>
+            <span class="cost">Cost: 5 Contraband</span>
+            <button class="game-button buy-item-btn" data-item="shovel">Buy</button>
+        </div>
+        <button id="closeTradeBtn" class="game-button bg-gray-500 shadow-gray-700 hover:bg-gray-600 active:bg-gray-700 mt-4">Close</button>
+    </div>
+
+    <script>
+        // --- Game Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game constants
+        const GRID_SIZE = 20; // Number of cells wide/high
+        const CELL_SIZE = 30; // Size of each cell in pixels
+        let MAP_WIDTH = GRID_SIZE * CELL_SIZE;
+        let MAP_HEIGHT = GRID_SIZE * CELL_SIZE;
+
+        // Adjust canvas size based on constants
+        canvas.width = MAP_WIDTH;
+        canvas.height = MAP_HEIGHT;
+
+        // Cell types
+        const CELL_TYPE = {
+            FLOOR: 0,
+            WALL: 1,
+            DIGGABLE_WALL: 2,
+            CANTEEN: 3,
+            EXIT: 4,
+            PLAYER: 5 // Not a map cell type, but for drawing
+        };
+
+        // Colors for drawing
+        const COLORS = {
+            FLOOR: '#36454F', // Dark Slate Gray
+            WALL: '#607d8b', // Blue Gray
+            DIGGABLE_WALL: '#8d6e63', // Brown (dirt-like)
+            CANTEEN: '#fbc02d', // Amber
+            EXIT: '#4caf50', // Green
+            PLAYER: '#ffeb3b', // Yellow
+            DIGGING_OVERLAY: 'rgba(255, 255, 255, 0.3)', // White semi-transparent
+            TEXT: '#e2e8f0'
+        };
+
+        // Game state variables
+        let playerX, playerY;
+        let contraband, shovels;
+        let diggingProgress; // 0-100%
+        let isDigging;
+        let gameTime; // in seconds
+        let gameInterval; // for game time
+        let gameActive = false;
+        let currentMap;
+
+        // UI Elements
+        const contrabandStatus = document.getElementById('contrabandStatus');
+        const shovelsStatus = document.getElementById('shovelsStatus');
+        const diggingStatus = document.getElementById('diggingStatus');
+        const timeStatus = document.getElementById('timeStatus');
+
+        const moveUpBtn = document.getElementById('moveUpBtn');
+        const moveLeftBtn = document.getElementById('moveLeftBtn');
+        const moveRightBtn = document.getElementById('moveRightBtn');
+        const moveDownBtn = document.getElementById('moveDownBtn');
+        const tradeBtn = document.getElementById('tradeBtn');
+        const digBtn = document.getElementById('digBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        const messageBox = document.getElementById('messageBox');
+        const messageTitle = document.getElementById('messageTitle');
+        const messageText = document.getElementById('messageText');
+        const messageBoxOkBtn = document.getElementById('messageBoxOkBtn');
+        const overlay = document.getElementById('overlay');
+
+        const tradeMenu = document.getElementById('tradeMenu');
+        const closeTradeBtn = document.getElementById('closeTradeBtn');
+        const buyItemBtns = document.querySelectorAll('.buy-item-btn');
+
+        // --- Game Map Definition ---
+        // A simple prison layout (20x20 grid)
+        // 0: Floor, 1: Wall, 2: Diggable Wall, 3: Canteen, 4: Exit
+        const prisonMap = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1],
+            [1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1],
+            [1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,1],
+            [1,0,1,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1,0,1],
+            [1,0,1,0,1,0,1,1,1,1,1,1,1,0,1,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,0,0,0,0,1,0,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,1,1,1,0,1,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,1,0,1,0,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,1,0,1,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,1,0,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,1,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,0,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,1,1,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,0,0,1,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,1,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,0,0,0,0,1,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,1,1,1,1,1,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,1,1,1,1,1,1,1,0,1,0,1,0,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,0,1,0,1],
+            [1,0,1,1,1,1,1,1,1,1,1,1,0,1,0,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1,0,1],
+            [1,0,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1],
+            [1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
+            [1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        // Place canteen and exit on the map
+        prisonMap[1][1] = CELL_TYPE.PLAYER; // Starting position
+        prisonMap[3][18] = CELL_TYPE.CANTEEN; // Canteen location
+        prisonMap[29][1] = CELL_TYPE.DIGGABLE_WALL; // Diggable wall near exit
+        prisonMap[29][0] = CELL_TYPE.EXIT; // Exit location (outside the wall)
+
+        // --- Game Functions ---
+
+        /**
+         * Initializes the game state.
+         */
+        function initGame() {
+            playerX = 1;
+            playerY = 1;
+            contraband = 10; // Starting contraband
+            shovels = 0;
+            diggingProgress = 0;
+            isDigging = false;
+            gameTime = 0;
+            gameActive = true;
+
+            // Create a deep copy of the map to allow modifications
+            currentMap = prisonMap.map(row => [...row]);
+
+            updateStatus();
+            drawGame();
+            if (gameInterval) clearInterval(gameInterval);
+            gameInterval = setInterval(updateGameTime, 1000); // Update game time every second
+            showMessage("Welcome to CrimeWars!", "Escape the prison by trading for shovels and digging your way out!", () => {
+                // No action needed after welcome message
+            });
+        }
+
+        /**
+         * Displays a message box to the user.
+         * @param {string} title - The title of the message.
+         * @param {string} text - The main message content.
+         * @param {function} onOk - Callback function when OK is clicked.
+         */
+        function showMessage(title, text, onOk) {
+            messageTitle.textContent = title;
+            messageText.textContent = text;
+            messageBox.style.display = 'block';
+            overlay.style.display = 'block';
+            gameActive = false; // Pause game while message is open
+
+            // Ensure previous event listeners are removed to prevent multiple calls
+            const oldOkBtn = messageBoxOkBtn.cloneNode(true);
+            messageBoxOkBtn.parentNode.replaceChild(oldOkBtn, messageBoxOkBtn);
+            const newOkBtn = document.getElementById('messageBoxOkBtn');
+
+            newOkBtn.onclick = () => {
+                messageBox.style.display = 'none';
+                overlay.style.display = 'none';
+                gameActive = true; // Resume game
+                if (onOk) onOk();
+            };
+        }
+
+        /**
+         * Updates the status display on the UI.
+         */
+        function updateStatus() {
+            contrabandStatus.textContent = contraband;
+            shovelsStatus.textContent = shovels;
+            diggingStatus.textContent = `${diggingProgress}%`;
+            timeStatus.textContent = `${gameTime}s`;
+
+            // Disable/enable buttons based on game state
+            digBtn.disabled = !canDig();
+            tradeBtn.disabled = !canTrade();
+            moveUpBtn.disabled = !gameActive;
+            moveLeftBtn.disabled = !gameActive;
+            moveRightBtn.disabled = !gameActive;
+            moveDownBtn.disabled = !gameActive;
+        }
+
+        /**
+         * Updates the game time.
+         */
+        function updateGameTime() {
+            if (gameActive) {
+                gameTime++;
+                updateStatus();
+            }
+        }
+
+        /**
+         * Draws the entire game state on the canvas.
+         */
+        function drawGame() {
+            ctx.clearRect(0, 0, MAP_WIDTH, MAP_HEIGHT); // Clear canvas
+
+            // Draw map cells
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const cellType = currentMap[y][x];
+                    let color = COLORS.FLOOR; // Default to floor
+
+                    switch (cellType) {
+                        case CELL_TYPE.WALL:
+                            color = COLORS.WALL;
+                            break;
+                        case CELL_TYPE.DIGGABLE_WALL:
+                            color = COLORS.DIGGABLE_WALL;
+                            break;
+                        case CELL_TYPE.CANTEEN:
+                            color = COLORS.CANTEEN;
+                            break;
+                        case CELL_TYPE.EXIT:
+                            color = COLORS.EXIT;
+                            break;
+                    }
+                    ctx.fillStyle = color;
+                    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+                    // Draw special icons/text for canteen and exit
+                    if (cellType === CELL_TYPE.CANTEEN) {
+                        ctx.fillStyle = COLORS.TEXT;
+                        ctx.font = 'bold 12px Inter';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('Canteen', x * CELL_SIZE + CELL_SIZE / 2, y * CELL_SIZE + CELL_SIZE / 2 + 5);
+                    } else if (cellType === CELL_TYPE.EXIT) {
+                        ctx.fillStyle = COLORS.TEXT;
+                        ctx.font = 'bold 12px Inter';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('Exit', x * CELL_SIZE + CELL_SIZE / 2, y * CELL_SIZE + CELL_SIZE / 2 + 5);
+                    }
+                }
+            }
+
+            // Draw player
+            ctx.fillStyle = COLORS.PLAYER;
+            ctx.beginPath();
+            ctx.arc(playerX * CELL_SIZE + CELL_SIZE / 2, playerY * CELL_SIZE + CELL_SIZE / 2, CELL_SIZE / 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw digging progress overlay if digging
+            if (isDigging && diggingProgress > 0) {
+                const targetX = playerX + (currentMap[playerY][playerX + 1] === CELL_TYPE.DIGGABLE_WALL ? 1 : (currentMap[playerY][playerX - 1] === CELL_TYPE.DIGGABLE_WALL ? -1 : 0));
+                const targetY = playerY + (currentMap[playerY + 1] && currentMap[playerY + 1][playerX] === CELL_TYPE.DIGGABLE_WALL ? 1 : (currentMap[playerY - 1] && currentMap[playerY - 1][playerX] === CELL_TYPE.DIGGABLE_WALL ? -1 : 0));
+
+                if (currentMap[targetY] && currentMap[targetY][targetX] === CELL_TYPE.DIGGABLE_WALL) {
+                    ctx.fillStyle = COLORS.DIGGING_OVERLAY;
+                    const progressHeight = CELL_SIZE * (diggingProgress / 100);
+                    ctx.fillRect(targetX * CELL_SIZE, targetY * CELL_SIZE + (CELL_SIZE - progressHeight), CELL_SIZE, progressHeight);
+                }
+            }
+        }
+
+        /**
+         * Checks if a move is valid.
+         * @param {number} newX - The target X coordinate.
+         * @param {number} newY - The target Y coordinate.
+         * @returns {boolean} True if the move is valid, false otherwise.
+         */
+        function isValidMove(newX, newY) {
+            // Check boundaries
+            if (newX < 0 || newX >= GRID_SIZE || newY < 0 || newY >= GRID_SIZE) {
+                return false;
+            }
+            // Check for walls (non-diggable)
+            const targetCell = currentMap[newY][newX];
+            return targetCell !== CELL_TYPE.WALL && targetCell !== CELL_TYPE.DIGGABLE_WALL;
+        }
+
+        /**
+         * Moves the player character.
+         * @param {number} dx - Change in X.
+         * @param {number} dy - Change in Y.
+         */
+        function movePlayer(dx, dy) {
+            if (!gameActive || isDigging) return; // Cannot move while digging
+
+            const newX = playerX + dx;
+            const newY = playerY + dy;
+
+            if (isValidMove(newX, newY)) {
+                playerX = newX;
+                playerY = newY;
+                drawGame();
+                checkGameEnd();
+            } else {
+                // If trying to move into a diggable wall, allow digging action
+                const targetCell = currentMap[newY] && currentMap[newY][newX];
+                if (targetCell === CELL_TYPE.DIGGABLE_WALL) {
+                    // Optionally, show a message that they need to dig
+                    // showMessage("Blocked!", "You need to dig through this wall.", null);
+                }
+            }
+            updateStatus();
+        }
+
+        /**
+         * Checks if the player is next to the canteen.
+         * @returns {boolean} True if next to canteen, false otherwise.
+         */
+        function canTrade() {
+            const neighbors = [
+                [playerX, playerY - 1], // Up
+                [playerX, playerY + 1], // Down
+                [playerX - 1, playerY], // Left
+                [playerX + 1, playerY]  // Right
+            ];
+            for (const [nx, ny] of neighbors) {
+                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && currentMap[ny][nx] === CELL_TYPE.CANTEEN) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Opens the trade menu.
+         */
+        function openTradeMenu() {
+            if (!gameActive || isDigging) return;
+            if (canTrade()) {
+                tradeMenu.style.display = 'block';
+                overlay.style.display = 'block';
+                gameActive = false; // Pause game
+            } else {
+                showMessage("No Canteen Nearby", "You need to be next to the canteen to trade.", null);
+            }
+        }
+
+        /**
+         * Buys an item from the trade menu.
+         * @param {string} item - The item to buy (e.g., 'shovel').
+         */
+        function buyItem(item) {
+            if (item === 'shovel') {
+                const cost = 5;
+                if (contraband >= cost) {
+                    contraband -= cost;
+                    shovels += 1;
+                    showMessage("Purchase Successful!", "You bought a shovel for 5 contraband.", null);
+                } else {
+                    showMessage("Not Enough Contraband", "You need 5 contraband to buy a shovel.", null);
+                }
+            }
+            updateStatus();
+            closeTradeMenu();
+        }
+
+        /**
+         * Closes the trade menu.
+         */
+        function closeTradeMenu() {
+            tradeMenu.style.display = 'none';
+            overlay.style.display = 'none';
+            gameActive = true; // Resume game
+        }
+
+        /**
+         * Checks if the player is next to a diggable wall.
+         * @returns {object|null} An object with {x, y} of the diggable wall, or null if none.
+         */
+        function getDiggableWallNeighbor() {
+            const neighbors = [
+                [playerX, playerY - 1], // Up
+                [playerX, playerY + 1], // Down
+                [playerX - 1, playerY], // Left
+                [playerX + 1, playerY]  // Right
+            ];
+            for (const [nx, ny] of neighbors) {
+                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && currentMap[ny][nx] === CELL_TYPE.DIGGABLE_WALL) {
+                    return { x: nx, y: ny };
+                }
+            }
+            return null;
+        }
+
+        /**
+         * Checks if the player can initiate digging.
+         * @returns {boolean} True if digging is possible, false otherwise.
+         */
+        function canDig() {
+            return shovels > 0 && getDiggableWallNeighbor() !== null;
+        }
+
+        /**
+         * Starts or continues the digging process.
+         */
+        function startDigging() {
+            if (!gameActive) return;
+
+            const diggableWall = getDiggableWallNeighbor();
+            if (!diggableWall) {
+                showMessage("No Diggable Wall", "You need to be next to a diggable wall to dig.", null);
+                return;
+            }
+
+            if (shovels <= 0) {
+                showMessage("No Shovels", "You need shovels to dig. Visit the canteen to trade for them!", null);
+                return;
+            }
+
+            if (!isDigging) {
+                isDigging = true;
+                diggingProgress = 0;
+                digBtn.textContent = 'Digging...';
+                digBtn.disabled = true; // Disable until digging is done or cancelled
+                moveUpBtn.disabled = true; // Disable movement during digging
+                moveLeftBtn.disabled = true;
+                moveRightBtn.disabled = true;
+                moveDownBtn.disabled = true;
+                tradeBtn.disabled = true;
+                updateDiggingProgress();
+            }
+        }
+
+        /**
+         * Updates the digging progress over time.
+         */
+        function updateDiggingProgress() {
+            if (!isDigging) return;
+
+            diggingProgress += 10; // Increase progress
+            updateStatus();
+            drawGame(); // Redraw to show progress overlay
+
+            if (diggingProgress >= 100) {
+                // Digging complete
+                isDigging = false;
+                shovels--; // Consume one shovel
+                diggingProgress = 0; // Reset progress
+
+                const diggableWall = getDiggableWallNeighbor();
+                if (diggableWall) {
+                    currentMap[diggableWall.y][diggableWall.x] = CELL_TYPE.FLOOR; // Turn wall into floor
+                }
+
+                showMessage("Wall Breached!", "You successfully dug through the wall!", null);
+
+                digBtn.textContent = 'Dig';
+                digBtn.disabled = false; // Re-enable
+                moveUpBtn.disabled = false; // Re-enable movement
+                moveLeftBtn.disabled = false;
+                moveRightBtn.disabled = false;
+                moveDownBtn.disabled = false;
+                tradeBtn.disabled = false;
+                updateStatus();
+                drawGame(); // Redraw map with new floor
+                checkGameEnd();
+            } else {
+                setTimeout(updateDiggingProgress, 500); // Continue digging after a delay
+            }
+        }
+
+        /**
+         * Checks for game win/loss conditions.
+         */
+        function checkGameEnd() {
+            // Check if player reached the exit
+            if (currentMap[playerY][playerX] === CELL_TYPE.EXIT) {
+                gameActive = false;
+                clearInterval(gameInterval);
+                showMessage("Escape Successful!", `You escaped the prison in ${gameTime} seconds!`, initGame);
+            }
+            // No explicit loss condition yet (e.g., guards catching you), but can be added.
+        }
+
+        /**
+         * Resets the game to its initial state.
+         */
+        function resetGame() {
+            if (confirm("Are you sure you want to reset the game?")) {
+                initGame();
+            }
+        }
+
+        // --- Event Listeners ---
+        moveUpBtn.addEventListener('click', () => movePlayer(0, -1));
+        moveDownBtn.addEventListener('click', () => movePlayer(0, 1));
+        moveLeftBtn.addEventListener('click', () => movePlayer(-1, 0));
+        moveRightBtn.addEventListener('click', () => movePlayer(1, 0));
+        tradeBtn.addEventListener('click', openTradeMenu);
+        digBtn.addEventListener('click', startDigging);
+        resetBtn.addEventListener('click', resetGame);
+
+        closeTradeBtn.addEventListener('click', closeTradeMenu);
+        buyItemBtns.forEach(button => {
+            button.addEventListener('click', (event) => {
+                const item = event.target.dataset.item;
+                buyItem(item);
+            });
+        });
+
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (!gameActive || isDigging) return; // Only allow input when game is active and not digging
+            switch (e.key) {
+                case 'ArrowUp':
+                case 'w':
+                    movePlayer(0, -1);
+                    break;
+                case 'ArrowDown':
+                case 's':
+                    movePlayer(0, 1);
+                    break;
+                case 'ArrowLeft':
+                case 'a':
+                    movePlayer(-1, 0);
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                    movePlayer(1, 0);
+                    break;
+                case 't': // 't' for trade
+                    openTradeMenu();
+                    break;
+                case 'g': // 'g' for dig (ground)
+                    startDigging();
+                    break;
+            }
+        });
+
+        // Initialize the game when the window loads
+        window.onload = function() {
+            initGame();
+        };
+    </script>
+</body>
+</html>
