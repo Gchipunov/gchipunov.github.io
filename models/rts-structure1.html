@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RTS Structure Viewer</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #info-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 10px;
+            font-family: sans-serif;
+            display: none; /* Initially hidden */
+        }
+    </style>
+</head>
+<body>
+    <div id="info-panel">
+        <h2>Structure Info</h2>
+        <p>Health: <span id="health-value">100</span></p>
+        <p>Armor: <span id="armor-value">50</span></p>
+        <button id="upgrade-button">Upgrade Armor</button>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
