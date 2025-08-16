@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Platformer with Ray-Melt</title>
+    <style>
+        body { margin: 0; background-color: #1a1a1a; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { background-color: #000; border: 2px solid #555; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game Settings
+        const gravity = 0.5;
+        const playerSpeed = 5;
+        const jumpPower = 12;
+
+        // --- Keyboard Input Handler ---
+        const keys = {};
+        window.addEventListener('keydown', (e) => { keys[e.code] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        // --- Game Objects ---
+        let player = {
+            x: 100, y: 500, width: 30, height: 50,
+            vx: 0, vy: 0,
+            color: '#00aaff',
+            onGround: false,
+            shootCooldown: 0
+        };
+
+        let enemy = {
+            x: 650, y: 500, width: 30, height: 50,
+            vx: 2, vy: 0,
+            color: '#ff4400',
+            onGround: false,
+            shootCooldown: 0,
+            direction: -1 // -1 for left, 1 for right
+        };
+
+        let platforms = [
+            // Ground
+            { x: 0, y: 550, width: 800, height: 50, health: Infinity, maxHealth: Infinity },
+            // Meltable boxes
+            { x: 250, y: 450, width: 100, height: 30, health: 100, maxHealth: 100 },
+            { x: 450, y: 400, width: 100, height: 30, health: 100, maxHealth: 100 },
+            { x: 350, y: 300, width: 80, height: 80, health: 200, maxHealth: 200 }
+        ];
+
+        let bullets = [];
+
+        // --- Ray-Casting Collision Logic ---
+        // Uses the Separating Axis Theorem (SAT) for line-segment vs. rectangle
+        function raycast(ray) {
+            let closestHit = null;
+            let minDistance = Infinity;
+
+            for (const box of platforms) {
+                // Simplified intersection check
+                const dx = ray.x2 - ray.x1;
+                const dy = ray.y2 - ray.y1;
+
+                for (let i = 0; i < 1; i += 0.01) { // Check points along the ray
+                    const pointX = ray.x1 + dx * i;
+                    const pointY = ray.y1 + dy * i;
+
+                    if (pointX > box.x && pointX < box.x + box.width &&
+                        pointY > box.y && pointY < box.y + box.height)
+                    {
+                        const distance = Math.sqrt((pointX - ray.x1) ** 2 + (pointY - ray.y1) ** 2);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestHit = box;
+                        }
+                        break; // Stop checking this box once a hit is found
+                    }
+                }
+            }
+            return closestHit;
+        }
+
+
+        // --- Update Functions ---
+        function updatePlayer() {
+            // Horizontal Movement
+            if (keys['KeyA'] || keys['ArrowLeft']) player.vx = -playerSpeed;
+            else if (keys['KeyD'] || keys['ArrowRight']) player.vx = playerSpeed;
+            else player.vx = 0;
+
+            // Jumping
+            if ((keys['KeyW'] || keys['ArrowUp']) && player.onGround) {
+                player.vy = -jumpPower;
+                player.onGround = false;
+            }
+
+            // Shooting
+            if (keys['Space'] && player.shootCooldown <= 0) {
+                bullets.push({
+                    x1: player.x + player.width / 2,
+                    y1: player.y + player.height / 2,
+                    x2: player.x + player.width / 2 + 1000, // Long ray to the right
+                    y2: player.y + player.height / 2,
+                    color: player.color,
+                    life: 0.1 // How long the laser appears on screen
+                });
+                player.shootCooldown = 20; // 20 frames cooldown
+            }
+            if (player.shootCooldown > 0) player.shootCooldown--;
+
+
+            // Apply physics
+            player.y += player.vy;
+            player.x += player.vx;
+            player.vy += gravity;
+            player.onGround = false;
+
+            // Collision with platforms
+            for (const p of platforms) {
+                if (player.x < p.x + p.width && player.x + player.width > p.x &&
+                    player.y < p.y + p.height && player.y + player.height > p.y)
+                {
+                    // Check vertical collision (landing on top)
+                    if (player.vy > 0 && player.y + player.height - player.vy <= p.y) {
+                        player.y = p.y - player.height;
+                        player.vy = 0;
+                        player.onGround = true;
+                    }
+                }
+            }
+        }
+
+        function updateEnemy() {
+            // Simple AI: patrol and shoot
+            enemy.x += enemy.vx * enemy.direction;
+            if (enemy.x < 550 || enemy.x > 700) {
+                enemy.direction *= -1; // Turn around
+            }
+
+            // Apply physics
+            enemy.y += enemy.vy;
+            enemy.vy += gravity;
+            enemy.onGround = false;
+
+             // Collision with platforms
+            for (const p of platforms) {
+                if (enemy.x < p.x + p.width && enemy.x + enemy.width > p.x &&
+                    enemy.y < p.y + p.height && enemy.y + enemy.height > p.y)
+                {
+                    if (enemy.vy > 0 && enemy.y + enemy.height - enemy.vy <= p.y) {
+                        enemy.y = p.y - enemy.height;
+                        enemy.vy = 0;
+                        enemy.onGround = true;
+                    }
+                }
+            }
+            
+            // AI shooting
+            if (enemy.shootCooldown <= 0) {
+                bullets.push({
+                    x1: enemy.x + enemy.width / 2,
+                    y1: enemy.y + enemy.height / 2,
+                    x2: enemy.x + enemy.width / 2 - 1000, // Shoot left
+                    y2: enemy.y + enemy.height / 2,
+                    color: enemy.color,
+                    life: 0.1
+                });
+                enemy.shootCooldown = 60; // Slower fire rate
+            }
+            if(enemy.shootCooldown > 0) enemy.shootCooldown--;
+        }
+
+        function updateBullets() {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.life -= 1/60; // Decrease life based on frame rate
+
+                if (b.life <= 0) {
+                    // Raycast on the frame the bullet is created
+                    const hitBox = raycast(b);
+                    if (hitBox && hitBox.health !== Infinity) {
+                        hitBox.health -= 10; // Damage the box
+                    }
+                    bullets.splice(i, 1); // Remove bullet
+                }
+            }
+        }
+
+        function updatePlatforms() {
+            for (let i = platforms.length - 1; i >= 0; i--) {
+                const p = platforms[i];
+                if (p.health <= 0) {
+                    platforms.splice(i, 1);
+                }
+            }
+        }
+
+
+        // --- Draw Functions ---
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw player
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+
+            // Draw enemy
+            ctx.fillStyle = enemy.color;
+            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+
+            // Draw platforms
+            for (const p of platforms) {
+                if (p.health === Infinity) {
+                     ctx.fillStyle = '#888';
+                } else {
+                    // "Melt" effect: change color and size
+                    const healthPercent = p.health / p.maxHealth;
+                    const red = 200 * (1 - healthPercent);
+                    const green = 200 * healthPercent;
+                    ctx.fillStyle = `rgb(${red}, ${green}, 50)`;
+
+                    // Shrink visual size slightly
+                    const shrink = (1 - healthPercent) * 5;
+                    ctx.fillRect(p.x + shrink, p.y + shrink, p.width - shrink * 2, p.height - shrink * 2);
+                }
+                ctx.fillRect(p.x, p.y, p.width, p.height);
+            }
+
+            // Draw bullets (lasers)
+            for (const b of bullets) {
+                ctx.strokeStyle = b.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(b.x1, b.y1);
+                ctx.lineTo(b.x2, b.y2);
+                ctx.stroke();
+            }
+        }
+
+
+        // --- Main Game Loop ---
+        function gameLoop() {
+            updatePlayer();
+            updateEnemy();
+            updateBullets();
+            updatePlatforms();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
