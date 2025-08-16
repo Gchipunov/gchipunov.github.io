@@ -1,0 +1,60 @@
+body {
+    background-color: #333;
+    color: #eee;
+    font-family: sans-serif;
+    text-align: center;
+}
+
+#container {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    margin: 20px auto;
+    border: 2px solid #555;
+}
+
+#gl-canvas {
+    display: block;
+}
+
+#menu-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Allows clicks to pass through overlay */
+}
+
+button {
+    position: absolute;
+    pointer-events: all; /* Makes buttons clickable */
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    background-color: #f0ad4e;
+    border: 2px solid #eea236;
+    border-radius: 5px;
+    color: #fff;
+    text-shadow: 1px 1px 2px #000;
+}
+
+button:hover {
+    background-color: #ec971f;
+}
+
+/* Position each button near its corresponding house */
+#house1-btn {
+    top: 450px;
+    left: 100px;
+}
+
+#house2-btn {
+    top: 450px;
+    left: 350px;
+}
+
+#house3-btn {
+    top: 450px;
+    left: 600px;
+}
