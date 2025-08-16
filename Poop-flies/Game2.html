@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Fly Catcher</title>
+    <style>
+        body { margin: 0; background-color: #111; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { background-color: #87CEEB; max-width: 100%; max-height: 100%; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script id="vertex-shader-2d" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    void main() {
+        vec2 position = a_position + u_translation;
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+</script>
+<script id="fragment-shader-2d" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+    'use strict';
+
+    function main() {
+        const canvas = document.getElementById("gameCanvas");
+        const gl = canvas.getContext("webgl");
+        if (!gl) {
+            alert("WebGL not supported!");
+            return;
+        }
+
+        // --- Shader and Program Setup (Unchanged) ---
+        const vertexShaderSource = document.getElementById("vertex-shader-2d").text;
+        const fragmentShaderSource = document.getElementById("fragment-shader-2d").text;
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+        const program = createProgram(gl, vertexShader, fragmentShader);
+
+        // --- Game State (Unchanged) ---
+        const gameState = {
+            player: {
+                x: 50, y: 450, width: 20, height: 30,
+                vx: 0, vy: 0, onGround: false
+            },
+            flies: [
+                { x: 200, y: 350, width: 10, height: 10, caught: false },
+                { x: 400, y: 250, width: 10, height: 10, caught: false },
+                { x: 600, y: 400, width: 10, height: 10, caught: false },
+                { x: 750, y: 150, width: 10, height: 10, caught: false },
+            ],
+            platforms: [
+                { x: 0, y: 580, width: 800, height: 20 }, // Floor
+                { x: 150, y: 500, width: 150, height: 20 },
+                { x: 350, y: 420, width: 150, height: 20 },
+                { x: 550, y: 340, width: 150, height: 20 },
+                { x: 700, y: 220, width: 100, height: 20 },
+            ],
+            keys: {},
+            gravity: 0.5,
+            friction: 0.8,
+            moveSpeed: 4,
+            jumpStrength: -12,
+            fliesCaught: 0
+        };
+
+        // --- Input Handling ---
+        // Keyboard controls
+        window.addEventListener('keydown', e => gameState.keys[e.code] = true);
+        window.addEventListener('keyup', e => gameState.keys[e.code] = false);
+
+        // ** NEW ** Mobile Touch Controls
+        const handleTouches = (e, state) => {
+            e.preventDefault(); // Prevent scrolling/zooming
+            
+            // Reset touch-based keys before processing current touches
+            state.keys['ArrowLeft'] = false;
+            state.keys['ArrowRight'] = false;
+            state.keys['ArrowUp'] = false;
+
+            const rect = canvas.getBoundingClientRect();
+
+            // Iterate through all current touches on the screen
+            for (let i = 0; i < e.touches.length; i++) {
+                const touch = e.touches[i];
+                const touchX = touch.clientX - rect.left;
+                const touchY = touch.clientY - rect.top;
+                
+                // Control Scheme:
+                // Top half of the screen is for jumping
+                // Bottom half is for left/right movement
+                if (touchY < canvas.height / 2) {
+                    state.keys['ArrowUp'] = true;
+                } else {
+                    if (touchX < canvas.width / 2) {
+                        state.keys['ArrowLeft'] = true;
+                    } else {
+                        state.keys['ArrowRight'] = true;
+                    }
+                }
+            }
+        };
+        
+        canvas.addEventListener('touchstart', e => handleTouches(e, gameState));
+        canvas.addEventListener('touchmove', e => handleTouches(e, gameState));
+        canvas.addEventListener('touchend', e => handleTouches(e, gameState));
+
+
+        // --- Game Loop ---
+        function gameLoop() {
+            update(gameState);
+            draw(gl, program, gameState);
+            if (gameState.fliesCaught === gameState.flies.length) {
+                // Use a timeout to prevent the alert from blocking the final render
+                setTimeout(() => alert("You caught all the flies! 🎉"), 10);
+            } else {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        requestAnimationFrame(gameLoop);
+    }
+
+    // --- Update Function: Handles physics and logic (Unchanged) ---
+    function update(state) {
+        const player = state.player;
+
+        // Horizontal movement (This logic now works for both keyboard and touch)
+        if (state.keys['ArrowLeft'] || state.keys['KeyA']) {
+            player.vx = -state.moveSpeed;
+        } else if (state.keys['ArrowRight'] || state.keys['KeyD']) {
+            player.vx = state.moveSpeed;
+        } else {
+            player.vx *= state.friction;
+        }
+
+        // Jumping (This logic now works for both keyboard and touch)
+        if ((state.keys['ArrowUp'] || state.keys['KeyW']) && player.onGround) {
+            player.vy = state.jumpStrength;
+            player.onGround = false;
+        }
+
+        player.vy += state.gravity;
+        player.onGround = false;
+        let nextX = player.x + player.vx;
+        let nextY = player.y + player.vy;
+
+        state.platforms.forEach(platform => {
+            if (
+                player.x < platform.x + platform.width &&
+                player.x + player.width > platform.x &&
+                player.y + player.height <= platform.y &&
+                nextY + player.height >= platform.y
+            ) {
+                player.onGround = true;
+                nextY = platform.y - player.height;
+                player.vy = 0;
+            }
+        });
+        
+        player.x = nextX;
+        player.y = nextY;
+
+        if (player.x < 0) player.x = 0;
+        if (player.x + player.width > 800) player.x = 800 - player.width;
+
+        state.flies.forEach(fly => {
+            if (!fly.caught && checkCollision(player, fly)) {
+                fly.caught = true;
+                state.fliesCaught++;
+            }
+        });
+    }
+
+    function checkCollision(rect1, rect2) {
+        return (
+            rect1.x < rect2.x + rect2.width &&
+            rect1.x + rect1.width > rect2.x &&
+            rect1.y < rect2.y + rect2.height &&
+            rect1.y + rect1.height > rect2.y
+        );
+    }
+
+    // --- Draw Functions and WebGL Utilities (Unchanged) ---
+    function draw(gl, program, state) {
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0.53, 0.81, 0.92, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.useProgram(program);
+        gl.enableVertexAttribArray(gl.getAttribLocation(program, "a_position"));
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+        gl.uniform2f(gl.getUniformLocation(program, "u_resolution"), gl.canvas.width, gl.canvas.height);
+        state.platforms.forEach(p => drawRect(gl, program, p.x, p.y, p.width, p.height, [0.3, 0.7, 0.3, 1]));
+        state.flies.forEach(f => {
+            if (!f.caught) {
+                drawRect(gl, program, f.x, f.y, f.width, f.height, [0.1, 0.1, 0.1, 1]);
+            }
+        });
+        drawRect(gl, program, state.player.x, state.player.y, state.player.width, state.player.height, [1, 0.2, 0.2, 1]);
+    }
+
+    function drawRect(gl, program, x, y, width, height, color) {
+        const positions = [x, y, x + width, y, x, y + height, x, y + height, x + width, y, x + width, y + height];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+        gl.vertexAttribPointer(gl.getAttribLocation(program, "a_position"), 2, gl.FLOAT, false, 0, 0);
+        gl.uniform4fv(gl.getUniformLocation(program, "u_color"), color);
+        gl.uniform2f(gl.getUniformLocation(program, "u_translation"), 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+    }
+
+    function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        if (gl.getProgramParameter(program, gl.LINK_STATUS)) return program;
+        console.error(gl.getProgramInfoLog(program));
+        gl.deleteProgram(program);
+    }
+
+    main();
+</script>
+
+</body>
+</html>
