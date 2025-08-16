@@ -472,11 +472,11 @@
         // --- GAME STATE & UI ---
         function checkGameOver() {
             if (playerHealth <= 0 && !gameOver) {
-                gameOver = true;
-                playerHealth = 0;
+               // gameOver = true;
+             //   playerHealth = 0;
                 updateUI();
-                document.getElementById('final-score').innerText = score;
-                document.getElementById('game-over-screen').classList.remove('hidden');
+               // document.getElementById('final-score').innerText = score;
+              //  document.getElementById('game-over-screen').classList.remove('hidden');
             }
         }
 
