@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Fly Catcher</title>
+    <style>
+        body { margin: 0; background-color: #333; }
+        canvas { display: block; margin: 50px auto; background-color: #87CEEB; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script id="vertex-shader-2d" type="x-shader/x-vertex">
+    // An attribute will receive data from a buffer
+    attribute vec2 a_position;
+
+    // Uniforms are global variables for the shader program
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+
+    // all shaders have a main function
+    void main() {
+        // Add the translation to the position
+        vec2 position = a_position + u_translation;
+
+        // convert the position from pixels to 0.0 to 1.0
+        vec2 zeroToOne = position / u_resolution;
+
+        // convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+
+        // convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+
+        // Flip the y-axis because WebGL's clip space has +Y as up
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+</script>
+
+<script id="fragment-shader-2d" type="x-shader/x-fragment">
+    // fragment shaders need to set a precision
+    precision mediump float;
+
+    // A uniform to pass the color
+    uniform vec4 u_color;
+
+    void main() {
+        // gl_FragColor is a special variable that holds the color
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+    'use strict';
+
+    function main() {
+        // Get A WebGL context
+        const canvas = document.getElementById("gameCanvas");
+        const gl = canvas.getContext("webgl");
+        if (!gl) {
+            alert("WebGL not supported!");
+            return;
+        }
+
+        // --- Shader Setup ---
+        // Get the strings for our GLSL shaders
+        const vertexShaderSource = document.getElementById("vertex-shader-2d").text;
+        const fragmentShaderSource = document.getElementById("fragment-shader-2d").text;
+
+        // create GLSL shaders, upload the GLSL source, compile the shaders
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+        // Link the two shaders into a program
+        const program = createProgram(gl, vertexShader, fragmentShader);
+
+        // Look up where the vertex data needs to go.
+        const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+
+        // Look up uniform locations
+        const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+        const colorUniformLocation = gl.getUniformLocation(program, "u_color");
+        const translationUniformLocation = gl.getUniformLocation(program, "u_translation");
+
+        // --- Buffer Setup ---
+        // Create a buffer to put positions in
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+        // We'll draw rectangles, so we define the vertices for a 1x1 unit rectangle
+        const positions = [
+            0, 0,
+            1, 0,
+            0, 1,
+            0, 1,
+            1, 0,
+            1, 1,
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        // --- Game State ---
+        const gameState = {
+            player: {
+                x: 50, y: 450, width: 20, height: 30,
+                vx: 0, vy: 0, onGround: false
+            },
+            flies: [
+                { x: 200, y: 350, width: 10, height: 10, caught: false },
+                { x: 400, y: 250, width: 10, height: 10, caught: false },
+                { x: 600, y: 400, width: 10, height: 10, caught: false },
+                { x: 750, y: 150, width: 10, height: 10, caught: false },
+            ],
+            platforms: [
+                { x: 0, y: 580, width: 800, height: 20 }, // Floor
+                { x: 150, y: 500, width: 150, height: 20 },
+                { x: 350, y: 420, width: 150, height: 20 },
+                { x: 550, y: 340, width: 150, height: 20 },
+                { x: 700, y: 220, width: 100, height: 20 },
+            ],
+            keys: {},
+            gravity: 0.5,
+            friction: 0.8,
+            moveSpeed: 4,
+            jumpStrength: -12,
+            fliesCaught: 0
+        };
+
+        // --- Input Handling ---
+        window.addEventListener('keydown', e => gameState.keys[e.code] = true);
+        window.addEventListener('keyup', e => gameState.keys[e.code] = false);
+
+        // --- Game Loop ---
+        function gameLoop() {
+            update(gameState);
+            draw(gl, program, gameState);
+            if (gameState.fliesCaught === gameState.flies.length) {
+                alert("You caught all the flies! 🎉");
+            } else {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        
+        // Start the game loop
+        requestAnimationFrame(gameLoop);
+    }
+
+    // --- Update Function: Handles physics and logic ---
+    function update(state) {
+        const player = state.player;
+
+        // Horizontal movement
+        if (state.keys['ArrowLeft'] || state.keys['KeyA']) {
+            player.vx = -state.moveSpeed;
+        } else if (state.keys['ArrowRight'] || state.keys['KeyD']) {
+            player.vx = state.moveSpeed;
+        } else {
+            player.vx *= state.friction; // Apply friction
+        }
+
+        // Jumping
+        if ((state.keys['ArrowUp'] || state.keys['KeyW']) && player.onGround) {
+            player.vy = state.jumpStrength;
+            player.onGround = false;
+        }
+
+        // Apply gravity
+        player.vy += state.gravity;
+
+        // Reset onGround flag before collision checks
+        player.onGround = false;
+
+        // --- Collision Detection and Resolution ---
+        // Store next position
+        let nextX = player.x + player.vx;
+        let nextY = player.y + player.vy;
+
+        // Check platform collisions
+        state.platforms.forEach(platform => {
+            // Check vertical collision (falling onto a platform)
+            if (
+                player.x < platform.x + platform.width &&
+                player.x + player.width > platform.x &&
+                player.y + player.height <= platform.y &&
+                nextY + player.height >= platform.y
+            ) {
+                player.onGround = true;
+                nextY = platform.y - player.height;
+                player.vy = 0;
+            }
+        });
+        
+        // Update positions
+        player.x = nextX;
+        player.y = nextY;
+
+        // World bounds
+        if (player.x < 0) player.x = 0;
+        if (player.x + player.width > 800) player.x = 800 - player.width;
+
+        // Check fly collisions
+        state.flies.forEach(fly => {
+            if (!fly.caught && checkCollision(player, fly)) {
+                fly.caught = true;
+                state.fliesCaught++;
+            }
+        });
+    }
+
+    function checkCollision(rect1, rect2) {
+        return (
+            rect1.x < rect2.x + rect2.width &&
+            rect1.x + rect1.width > rect2.x &&
+            rect1.y < rect2.y + rect2.height &&
+            rect1.y + rect1.height > rect2.y
+        );
+    }
+
+    // --- Draw Function: Renders everything to the canvas ---
+    function draw(gl, program, state) {
+        // --- WebGL Preparation ---
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0.53, 0.81, 0.92, 1); // Sky blue
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.useProgram(program);
+        gl.enableVertexAttribArray(gl.getAttribLocation(program, "a_position"));
+        gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+
+        // Set the resolution uniform
+        gl.uniform2f(gl.getUniformLocation(program, "u_resolution"), gl.canvas.width, gl.canvas.height);
+        
+        // --- Drawing Game Objects ---
+        // Draw platforms
+        state.platforms.forEach(p => drawRect(gl, program, p.x, p.y, p.width, p.height, [0.3, 0.7, 0.3, 1])); // Green
+
+        // Draw flies
+        state.flies.forEach(f => {
+            if (!f.caught) {
+                drawRect(gl, program, f.x, f.y, f.width, f.height, [0.1, 0.1, 0.1, 1]); // Black
+            }
+        });
+
+        // Draw player
+        drawRect(gl, program, state.player.x, state.player.y, state.player.width, state.player.height, [1, 0.2, 0.2, 1]); // Red
+    }
+
+    function drawRect(gl, program, x, y, width, height, color) {
+        // Set up the vertices for a rectangle of the given size
+        const positions = [
+            x, y,
+            x + width, y,
+            x, y + height,
+            x, y + height,
+            x + width, y,
+            x + width, y + height,
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
+        gl.vertexAttribPointer(
+            gl.getAttribLocation(program, "a_position"),
+            2,          // 2 components per iteration
+            gl.FLOAT,   // the data is 32bit floats
+            false,      // don't normalize the data
+            0,          // 0 = move forward size * sizeof(type) each iteration to get the next position
+            0           // start at the beginning of the buffer
+        );
+
+        // Set the color and translation
+        gl.uniform4fv(gl.getUniformLocation(program, "u_color"), color);
+        gl.uniform2f(gl.getUniformLocation(program, "u_translation"), 0, 0); // Translation is baked into vertices
+
+        // Draw the rectangle
+        gl.drawArrays(gl.TRIANGLES, 0, 6); // 6 vertices
+    }
+
+
+    // --- WebGL Utility Functions ---
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+        if (success) {
+            return shader;
+        }
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+    }
+
+    function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+        if (success) {
+            return program;
+        }
+        console.error(gl.getProgramInfoLog(program));
+        gl.deleteProgram(program);
+    }
+
+    main();
+</script>
+
+</body>
+</html>
