@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL 2D Platformer</title>
+    <style>
+        body { margin: 0; background-color: #333; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script>
+        // Entry point
+        window.onload = main;
+
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            const gl = canvas.getContext('webgl');
+
+            if (!gl) {
+                alert('Unable to initialize WebGL. Your browser may not support it.');
+                return;
+            }
+
+            // --- 1. Shaders (GLSL Code) ---
+            // These small programs run on the GPU.
+
+            // Vertex Shader: Positions vertices in the 2D space.
+            const vsSource = `
+                attribute vec4 aVertexPosition;
+                uniform mat4 uModelViewMatrix;
+                uniform mat4 uProjectionMatrix;
+                void main() {
+                    gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+                }
+            `;
+
+            // Fragment Shader: Assigns a color to each pixel of a shape.
+            const fsSource = `
+                precision mediump float;
+                uniform vec4 uObjectColor;
+                void main() {
+                    gl_FragColor = uObjectColor;
+                }
+            `;
+
+            // --- 2. Shader Program Setup ---
+            // Compiles and links the shaders into a program for the GPU.
+
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                    objectColor: gl.getUniformLocation(shaderProgram, 'uObjectColor'),
+                },
+            };
+
+            // --- 3. Geometry Buffer ---
+            // Defines a simple square (2x2 units) that we can scale and move.
+            const squareBuffer = initBuffers(gl);
+
+            // --- 4. Game State and Objects ---
+            const player = {
+                x: 100, y: 300, width: 30, height: 30,
+                vx: 0, vy: 0,
+                color: [1.0, 1.0, 1.0, 1.0], // White
+                canJump: false,
+                hasTrash: false
+            };
+
+            const trashCan = {
+                x: 600, y: 100, width: 25, height: 40,
+                color: [0.1, 0.8, 0.2, 1.0] // Green
+            };
+
+            const platforms = [
+                { x: 0, y: 0, width: 800, height: 50, color: [0.5, 0.5, 0.5, 1.0] }, // Floor
+                { x: 200, y: 150, width: 150, height: 20, color: [0.5, 0.5, 0.5, 1.0] },
+                { x: 450, y: 250, width: 200, height: 20, color: [0.5, 0.5, 0.5, 1.0] },
+                { x: 50, y: 350, width: 100, height: 20, color: [0.5, 0.5, 0.5, 1.0] }
+            ];
+
+            // --- 5. Game Logic Variables ---
+            const gravity = -0.5;
+            const jumpStrength = 12;
+            const moveSpeed = 5;
+            let keys = {};
+
+            // --- 6. Input Handling ---
+            window.addEventListener('keydown', (e) => { keys[e.key] = true; });
+            window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+            // --- 7. Main Game Loop ---
+            let lastTime = 0;
+            function gameLoop(currentTime) {
+                currentTime *= 0.001; // convert to seconds
+                const deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+
+                update(deltaTime);
+                drawScene(gl, programInfo, squareBuffer);
+
+                requestAnimationFrame(gameLoop);
+            }
+
+            // --- 8. Update Function ---
+            // Handles physics, controls, and game logic.
+            function update(deltaTime) {
+                // Horizontal movement
+                player.vx = 0;
+                if (keys['a'] || keys['ArrowLeft']) {
+                    player.vx = -moveSpeed;
+                }
+                if (keys['d'] || keys['ArrowRight']) {
+                    player.vx = moveSpeed;
+                }
+                player.x += player.vx;
+
+                // Jumping
+                if ((keys['w'] || keys['ArrowUp'] || keys[' ']) && player.canJump) {
+                    player.vy = jumpStrength;
+                    player.canJump = false;
+                }
+                
+                // Interaction (pickup/drop)
+                if (keys['e']) {
+                    const dist = Math.sqrt(Math.pow(player.x - trashCan.x, 2) + Math.pow(player.y - trashCan.y, 2));
+                    if (dist < 50 && !player.hasTrash) {
+                        player.hasTrash = true;
+                    } else if (player.hasTrash) {
+                        player.hasTrash = false;
+                        trashCan.x = player.x + player.width; // Drop it to the side
+                    }
+                    keys['e'] = false; // Prevent holding down key
+                }
+
+                // Apply gravity
+                player.vy += gravity;
+                player.y += player.vy;
+
+                // Collision detection with platforms
+                player.canJump = false;
+                for (const platform of platforms) {
+                    if (isColliding(player, platform)) {
+                        // Check if player landed on top of the platform
+                        if (player.vy <= 0 && (player.y - player.vy) >= (platform.y + platform.height)) {
+                           player.y = platform.y + platform.height;
+                           player.vy = 0;
+                           player.canJump = true;
+                        }
+                    }
+                }
+                
+                // Update trash can position if held
+                if (player.hasTrash) {
+                    trashCan.x = player.x;
+                    trashCan.y = player.y + player.height;
+                }
+            }
+
+            // --- 9. Drawing Function ---
+            function drawScene(gl, programInfo, buffer) {
+                resizeCanvasToDisplaySize(gl.canvas);
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+                gl.clearColor(0.1, 0.1, 0.2, 1.0); // Dark blue background
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
+                // Create a 2D projection matrix
+                const projectionMatrix = mat4.create();
+                mat4.ortho(projectionMatrix, 0, gl.canvas.width, 0, gl.canvas.height, -1, 1);
+
+                gl.useProgram(programInfo.program);
+                gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+
+                // Draw each platform
+                platforms.forEach(p => drawObject(gl, programInfo, buffer, p));
+                // Draw the trash can
+                drawObject(gl, programInfo, buffer, trashCan);
+                // Draw the player
+                drawObject(gl, programInfo, buffer, player);
+            }
+
+            // Start the game
+            requestAnimationFrame(gameLoop);
+        }
+
+
+        // ===================================================================
+        //                      HELPER FUNCTIONS
+        // ===================================================================
+
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function initBuffers(gl) {
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            // A simple 1x1 square
+            const positions = [
+                 0.5,  0.5,
+                -0.5,  0.5,
+                 0.5, -0.5,
+                -0.5, -0.5,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+            return positionBuffer;
+        }
+
+        function drawObject(gl, programInfo, buffer, object) {
+            const modelViewMatrix = mat4.create();
+            // 1. Translate to the object's position
+            mat4.translate(modelViewMatrix, modelViewMatrix, [object.x, object.y, 0]);
+            // 2. Scale to the object's size
+            mat4.scale(modelViewMatrix, modelViewMatrix, [object.width, object.height, 1]);
+            
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+            
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+            gl.uniform4fv(programInfo.uniformLocations.objectColor, object.color);
+            
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        function isColliding(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+        
+        function resizeCanvasToDisplaySize(canvas) {
+            const displayWidth  = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            if (canvas.width  !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width  = displayWidth;
+                canvas.height = displayHeight;
+                return true;
+            }
+            return false;
+        }
+
+        // Minimal matrix library (gl-matrix-min.js) to avoid external dependencies
+        const mat4 = {
+          create: function() { return new Float32Array(16); },
+          ortho: function(out, left, right, bottom, top, near, far) {
+            let lr = 1 / (left - right);
+            let bt = 1 / (bottom - top);
+            let nf = 1 / (near - far);
+            out[0] = -2 * lr; out[1] = 0; out[2] = 0; out[3] = 0;
+            out[4] = 0; out[5] = -2 * bt; out[6] = 0; out[7] = 0;
+            out[8] = 0; out[9] = 0; out[10] = 2 * nf; out[11] = 0;
+            out[12] = (left + right) * lr; out[13] = (top + bottom) * bt;
+            out[14] = (far + near) * nf; out[15] = 1;
+            return out;
+          },
+          translate: function(out, a, v) {
+            let x = v[0], y = v[1], z = v[2];
+            if (a === out) {
+              out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+              out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+              out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+              out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+            } else {
+              // Copy a to out and then translate
+              out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3];
+              out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+              out[8] = a[8]; out[9] = a[9]; out[10] = a[10]; out[11] = a[11];
+              out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+              out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+              out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+              out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+            }
+            return out;
+          },
+          scale: function(out, a, v) {
+            let x = v[0], y = v[1], z = v[2];
+            out[0] = a[0] * x; out[1] = a[1] * x; out[2] = a[2] * x; out[3] = a[3] * x;
+            out[4] = a[4] * y; out[5] = a[5] * y; out[6] = a[6] * y; out[7] = a[7] * y;
+            out[8] = a[8] * z; out[9] = a[9] * z; out[10] = a[10] * z; out[11] = a[11] * z;
+            out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+            return out;
+          }
+        };
+    </script>
+</body>
+</html>
