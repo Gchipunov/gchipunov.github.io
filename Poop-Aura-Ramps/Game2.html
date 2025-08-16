@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL 2D Platformer with Ramps</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+
+        /* NEW: Styles for the on-screen touch controls */
+        #touch-controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            -webkit-user-select: none; /* Safari */
+            -ms-user-select: none; /* IE 10+ */
+            user-select: none; /* Standard syntax */
+        }
+        .btn {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            background-color: rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            bottom: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3em;
+            font-family: monospace;
+            color: rgba(0, 0, 0, 0.6);
+            cursor: pointer;
+        }
+        #btn-left {
+            left: 20px;
+        }
+        #btn-right {
+            left: 120px;
+        }
+        #btn-jump {
+            right: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gl-canvas"></canvas>
+
+    <div id="touch-controls">
+        <div id="btn-left" class="btn">◀</div>
+        <div id="btn-right" class="btn">▶</div>
+        <div id="btn-jump" class="btn">▲</div>
+    </div>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        uniform mat3 u_transform;
+
+        void main() {
+            gl_Position = vec4((u_transform * vec3(a_position, 1.0)).xy, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform vec4 u_color;
+
+        void main() {
+            gl_FragColor = u_color;
+        }
+    </script>
+
+    <script>
+        // --- MAIN SCRIPT ---
+        const canvas = document.getElementById('gl-canvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert('WebGL not supported!');
+        }
+
+        // --- 1. Shader Setup ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vertexShader, fragmentShader) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Program linking error:', gl.getProgramInfoLog(program));
+                gl.deleteProgram(program);
+                return null;
+            }
+            return program;
+        }
+
+        const vertexShaderSource = document.getElementById('vertex-shader').text;
+        const fragmentShaderSource = document.getElementById('fragment-shader').text;
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+        const program = createProgram(gl, vertexShader, fragmentShader);
+
+        // --- 2. Shader Attributes & Uniforms ---
+        const positionAttributeLocation = gl.getAttribLocation(program, 'a_position');
+        const transformUniformLocation = gl.getUniformLocation(program, 'u_transform');
+        const colorUniformLocation = gl.getUniformLocation(program, 'u_color');
+
+        // --- 3. Geometry Buffers ---
+        const squareBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([ -0.5, -0.5, 0.5, -0.5, -0.5,  0.5, 0.5,  0.5 ]), gl.STATIC_DRAW);
+        
+        const rampVertices = [];
+        const rampSegments = 32;
+        for (let i = 0; i <= rampSegments; i++) {
+            const angle = (i / rampSegments) * (Math.PI / 2);
+            rampVertices.push(Math.cos(angle), Math.sin(angle));
+        }
+        const rampBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, rampBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rampVertices), gl.STATIC_DRAW);
+
+
+        // --- 4. Game State & Physics Variables ---
+        const world = {
+            width: 800,
+            height: 600,
+            gravity: 0.5,
+        };
+
+        const player = {
+            x: 100, y: 300,
+            width: 30, height: 30,
+            vx: 0, vy: 0,
+            speed: 4,
+            jumpForce: 12,
+            onGround: false
+        };
+
+        const ramp = {
+            cx: 400, cy: 100,
+            radius: 200,
+            startAngle: Math.PI,
+            endAngle: Math.PI * 1.5,
+            width: 200,
+            height: 200,
+        };
+        
+        const platform = {
+            x: 600, y: 100,
+            width: 200, height: 20
+        };
+
+
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.key] = true);
+        window.addEventListener('keyup', e => keys[e.key] = false);
+
+        // NEW: Setup touch controls
+        function setupTouchControls() {
+            const btnLeft = document.getElementById('btn-left');
+            const btnRight = document.getElementById('btn-right');
+            const btnJump = document.getElementById('btn-jump');
+
+            // --- Left Button ---
+            btnLeft.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                keys['ArrowLeft'] = true;
+            });
+            btnLeft.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                keys['ArrowLeft'] = false;
+            });
+
+            // --- Right Button ---
+            btnRight.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                keys['ArrowRight'] = true;
+            });
+            btnRight.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                keys['ArrowRight'] = false;
+            });
+
+            // --- Jump Button ---
+            btnJump.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                keys[' '] = true; // Use space key for jump
+            });
+            btnJump.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                keys[' '] = false;
+            });
+        }
+
+        // --- 5. Rendering & Game Loop ---
+        let lastTime = 0;
+        function gameLoop(currentTime) {
+            currentTime *= 0.001;
+            const deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+            
+            update(deltaTime);
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- 6. Update Function (Game Logic) ---
+        function update(deltaTime) {
+            // Horizontal movement
+            player.vx = 0;
+            if (keys['a'] || keys['ArrowLeft']) {
+                player.vx = -player.speed;
+            }
+            if (keys['d'] || keys['ArrowRight']) {
+                player.vx = player.speed;
+            }
+
+            // Jumping
+            if ((keys['w'] || keys['ArrowUp'] || keys[' ']) && player.onGround) {
+                player.vy = player.jumpForce;
+                player.onGround = false;
+            }
+            
+            // Apply gravity
+            player.vy -= world.gravity;
+
+            // Update position
+            player.x += player.vx;
+            player.y += player.vy;
+
+            player.onGround = false;
+
+            // --- Collision Detection & Response ---
+            
+            // Floor collision
+            if (player.y - player.height / 2 < 0) {
+                player.y = player.height / 2;
+                player.vy = 0;
+                player.onGround = true;
+            }
+
+            // Platform collision
+            const p_left = player.x - player.width / 2;
+            const p_right = player.x + player.width / 2;
+            const p_bottom = player.y - player.height / 2;
+            if (p_right > platform.x && p_left < platform.x + platform.width && p_bottom < platform.y + platform.height && p_bottom > platform.y && player.vy < 0) {
+                 player.y = platform.y + platform.height + player.height / 2;
+                 player.vy = 0;
+                 player.onGround = true;
+            }
+
+            // Ramp collision
+            const playerBottomY = player.y - player.height / 2;
+            const vecX = player.x - ramp.cx;
+            const vecY = playerBottomY - ramp.cy;
+            const dist = Math.sqrt(vecX * vecX + vecY * vecY);
+            
+            if (dist < ramp.radius && player.x > ramp.cx - ramp.radius && player.x < ramp.cx && playerBottomY > ramp.cy && playerBottomY < ramp.cy + ramp.radius) {
+                const normalX = vecX / dist;
+                const normalY = vecY / dist;
+                player.y = ramp.cy + normalY * ramp.radius + player.height / 2;
+                const dot = player.vx * normalX + player.vy * normalY;
+                if (dot < 0) {
+                    player.vx -= dot * normalX;
+                    player.vy -= dot * normalY;
+                }
+                player.onGround = true;
+            }
+        }
+
+        // --- 7. Draw Function ---
+        function draw() {
+            // NEW: Resize the WebGL drawing buffer to match the display size
+            if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+                canvas.width = canvas.clientWidth;
+                canvas.height = canvas.clientHeight;
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            }
+
+            gl.clearColor(0.1, 0.15, 0.2, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.useProgram(program);
+            
+            function drawObject(buffer, vertexCount, color, transformMatrix) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                gl.enableVertexAttribArray(positionAttributeLocation);
+                gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+                gl.uniform4fv(colorUniformLocation, color);
+                gl.uniformMatrix3fv(transformUniformLocation, false, transformMatrix);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, vertexCount);
+            }
+
+            // --- Camera/Projection ---
+            // NEW: Use the canvas dimensions for projection to handle resizing
+            const projMatrix = m3.projection(gl.canvas.width, gl.canvas.height);
+            
+            // NEW: To keep the game world centered and at a consistent scale, create a view matrix
+            const gameScale = gl.canvas.height / world.height;
+            let viewMatrix = m3.identity();
+            viewMatrix = m3.translate(viewMatrix, gl.canvas.width / 2, gl.canvas.height / 2);
+            viewMatrix = m3.scale(viewMatrix, gameScale, gameScale);
+            viewMatrix = m3.translate(viewMatrix, -world.width / 2, -world.height / 2);
+            
+            const viewProjectionMatrix = m3.multiply(projMatrix, viewMatrix);
+
+            // --- Draw Player ---
+            let playerMatrix = m3.identity();
+            playerMatrix = m3.translate(playerMatrix, player.x, player.y);
+            playerMatrix = m3.scale(playerMatrix, player.width, player.height);
+            playerMatrix = m3.multiply(viewProjectionMatrix, playerMatrix); // Use combined matrix
+            drawObject(squareBuffer, 4, [1, 0.5, 0.2, 1], playerMatrix);
+
+            // --- Draw Platform ---
+            let platformMatrix = m3.identity();
+            platformMatrix = m3.translate(platformMatrix, platform.x + platform.width / 2, platform.y + platform.height / 2);
+            platformMatrix = m3.scale(platformMatrix, platform.width, platform.height);
+            platformMatrix = m3.multiply(viewProjectionMatrix, platformMatrix); // Use combined matrix
+            drawObject(squareBuffer, 4, [0.4, 0.8, 0.3, 1], platformMatrix);
+
+            // --- Draw Ramp ---
+            let rampMatrix = m3.identity();
+            rampMatrix = m3.translate(rampMatrix, ramp.cx, ramp.cy);
+            rampMatrix = m3.scale(rampMatrix, -ramp.radius, ramp.radius);
+            rampMatrix = m3.multiply(viewProjectionMatrix, rampMatrix); // Use combined matrix
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, rampBuffer);
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+            gl.uniform4fv(colorUniformLocation, [0.4, 0.8, 0.3, 1]);
+            gl.uniformMatrix3fv(transformUniformLocation, false, rampMatrix);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, rampSegments + 1);
+        }
+
+        // --- 8. Matrix Math Helper ---
+        const m3 = {
+            identity: () => [1, 0, 0, 0, 1, 0, 0, 0, 1],
+            projection: (width, height) => [2 / width, 0, 0, 0, -2 / height, 0, -1, 1, 1],
+            translation: (tx, ty) => [1, 0, 0, 0, 1, 0, tx, ty, 1],
+            scaling: (sx, sy) => [sx, 0, 0, 0, sy, 0, 0, 0, 1],
+            multiply: (a, b) => {
+                const a00 = a[0*3+0], a01 = a[0*3+1], a02 = a[0*3+2], a10 = a[1*3+0], a11 = a[1*3+1], a12 = a[1*3+2], a20 = a[2*3+0], a21 = a[2*3+1], a22 = a[2*3+2];
+                const b00 = b[0*3+0], b01 = b[0*3+1], b02 = b[0*3+2], b10 = b[1*3+0], b11 = b[1*3+1], b12 = b[1*3+2], b20 = b[2*3+0], b21 = b[2*3+1], b22 = b[2*3+2];
+                return [b00*a00+b01*a10+b02*a20, b00*a01+b01*a11+b02*a21, b00*a02+b01*a12+b02*a22, b10*a00+b11*a10+b12*a20, b10*a01+b11*a11+b12*a21, b10*a02+b11*a12+b12*a22, b20*a00+b21*a10+b22*a20, b20*a01+b21*a11+b22*a21, b20*a02+b21*a12+b22*a22];
+            },
+            translate: function(m, tx, ty) { return this.multiply(m, this.translation(tx, ty)); },
+            scale: function(m, sx, sy) { return this.multiply(m, this.scaling(sx, sy)); }
+        };
+
+        // --- Initial Setup ---
+        // NEW: Removed the fixed resize function. Resizing now happens in the draw loop.
+        setupTouchControls(); // NEW: Call the setup function
+        requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
