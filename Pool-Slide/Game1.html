@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL 2D Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #333; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script>
+        // --- 1. SETUP ---
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+        if (!gl) {
+            alert('WebGL not supported!');
+        }
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0.1, 0.15, 0.2, 1.0); // Dark blue background
+
+        // --- 2. SHADERS (GLSL) ---
+        // The Vertex Shader positions the vertices.
+        const vsSource = `
+            attribute vec2 a_position;
+            uniform vec2 u_resolution;
+            uniform vec2 u_translation;
+            uniform vec2 u_scale;
+
+            void main() {
+                // Scale, then translate
+                vec2 scaledPosition = a_position * u_scale;
+                vec2 translatedPosition = scaledPosition + u_translation;
+                
+                // convert the position from pixels to 0.0 to 1.0
+                vec2 zeroToOne = translatedPosition / u_resolution;
+                
+                // convert from 0->1 to 0->2
+                vec2 zeroToTwo = zeroToOne * 2.0;
+                
+                // convert from 0->2 to -1->+1 (clipspace)
+                vec2 clipSpace = zeroToTwo - 1.0;
+                
+                gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+            }
+        `;
+
+        // The Fragment Shader colors each pixel.
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        // --- 3. SHADER COMPILATION HELPER ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Error compiling shader:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vs, fs) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Error linking program:', gl.getProgramInfoLog(program));
+                gl.deleteProgram(program);
+                return null;
+            }
+            return program;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        const program = createProgram(gl, vertexShader, fragmentShader);
+
+        // --- 4. GET ATTRIBUTE & UNIFORM LOCATIONS ---
+        const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+        const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+        const colorUniformLocation = gl.getUniformLocation(program, "u_color");
+        const translationUniformLocation = gl.getUniformLocation(program, "u_translation");
+        const scaleUniformLocation = gl.getUniformLocation(program, "u_scale");
+        
+        // --- 5. BUFFER SETUP FOR A RECTANGLE ---
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = [
+            0, 0,
+            1, 0,
+            0, 1,
+            0, 1,
+            1, 0,
+            1, 1,
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        // --- 6. GAME STATE & PHYSICS CONSTANTS ---
+        const gravity = 0.5;
+        const jumpStrength = -15;
+        const moveSpeed = 5;
+        const slideSpeedBoost = 8;
+        const friction = 0.9;
+
+        const player = {
+            x: 100,
+            y: 200,
+            width: 50,
+            height: 50,
+            vx: 0,
+            vy: 0,
+            isJumping: true,
+            isSliding: false
+        };
+        
+        const originalPlayerSize = { width: 50, height: 50 };
+        const slidePlayerSize = { width: 80, height: 25 };
+
+        const platforms = [
+            { x: 0, y: canvas.height - 20, width: canvas.width, height: 20 },
+            { x: 300, y: canvas.height - 150, width: 200, height: 20 },
+            { x: 600, y: canvas.height - 300, width: 250, height: 20 },
+            { x: 150, y: canvas.height - 450, width: 100, height: 20 }
+        ];
+
+        // --- 7. INPUT HANDLING ---
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.code] = true);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // --- 8. GAME LOOP ---
+        function gameLoop(timestamp) {
+            // -- UPDATE LOGIC --
+            
+            // Horizontal movement
+            if (keys['ArrowLeft'] || keys['KeyA']) {
+                player.vx = player.isSliding ? -slideSpeedBoost : -moveSpeed;
+            } else if (keys['ArrowRight'] || keys['KeyD']) {
+                player.vx = player.isSliding ? slideSpeedBoost : moveSpeed;
+            }
+            player.vx *= friction;
+
+            // Jump
+            if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space']) && !player.isJumping) {
+                player.vy = jumpStrength;
+                player.isJumping = true;
+            }
+
+            // Slide
+            if (keys['ArrowDown'] || keys['KeyS']) {
+                if (!player.isSliding) {
+                    player.isSliding = true;
+                    player.width = slidePlayerSize.width;
+                    player.height = slidePlayerSize.height;
+                }
+            } else {
+                if (player.isSliding) {
+                    player.isSliding = false;
+                    player.width = originalPlayerSize.width;
+                    player.height = originalPlayerSize.height;
+                }
+            }
+
+            // Apply physics
+            player.vy += gravity;
+            player.x += player.vx;
+            player.y += player.vy;
+            
+            // Collision detection
+            player.isJumping = true; // Assume falling until a platform is detected
+            platforms.forEach(platform => {
+                if (player.x < platform.x + platform.width &&
+                    player.x + player.width > platform.x &&
+                    player.y < platform.y + platform.height &&
+                    player.y + player.height > platform.y &&
+                    player.vy >= 0) { // Only collide from the top
+                        
+                    // Check if the player's bottom was above the platform's top in the previous frame
+                    const previousBottom = (player.y - player.vy) + player.height;
+                    if (previousBottom <= platform.y) {
+                        player.y = platform.y - player.height;
+                        player.vy = 0;
+                        player.isJumping = false;
+                    }
+                }
+            });
+
+            // -- DRAWING --
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.useProgram(program);
+
+            // Set general uniforms
+            gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+            // Tell the attribute how to get data out of positionBuffer
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+            // Draw player
+            gl.uniform4f(colorUniformLocation, 0.9, 0.2, 0.2, 1); // Red
+            gl.uniform2f(translationUniformLocation, player.x, player.y);
+            gl.uniform2f(scaleUniformLocation, player.width, player.height);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Draw platforms
+            gl.uniform4f(colorUniformLocation, 0.5, 0.8, 0.5, 1); // Green
+            platforms.forEach(p => {
+                gl.uniform2f(translationUniformLocation, p.x, p.y);
+                gl.uniform2f(scaleUniformLocation, p.width, p.height);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            });
+
+            // Request next frame
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game!
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
