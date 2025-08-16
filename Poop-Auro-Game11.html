@@ -1,11 +1,10 @@
 <---------------------- add score keeping , and scoreboard -------->
-
-  <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Poop Aura Game 4 WebGL 2D Platformer</title>
+    <title>Poop Aura Game 10 WebGL 2D Platformer</title>
     <style>
         body, html {
             margin: 0;
@@ -74,7 +73,7 @@
                 display: flex;
             }
         }
-        #end-screen {
+        #end-screen, #game-over-screen {
             position: absolute;
             top: 0;
             left: 0;
@@ -90,14 +89,14 @@
             text-align: center;
             gap: 20px;
         }
-        #end-screen h2 {
+        #end-screen h2, #game-over-screen h2 {
             font-size: 48px;
             margin-bottom: 10px;
         }
-        #end-screen p {
+        #end-screen p, #game-over-screen p {
             margin: 5px 0;
         }
-        #restart-button {
+        #restart-button, #game-over-button {
             padding: 10px 20px;
             font-size: 20px;
             border: none;
@@ -107,15 +106,36 @@
             cursor: pointer;
             margin-top: 20px;
         }
-        #restart-button:hover {
+        #restart-button:hover, #game-over-button:hover {
             background-color: #45a049;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            gap: 15px; /* Increased gap to separate elements */
+            align-items: center;
+        }
+        .heart {
+            color: red;
+            font-size: 30px;
+            text-shadow: 1px 1px 2px black;
+        }
+        .blocks-counter {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 20px;
         }
     </style>
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
     <div id="controls-overlay">
-        Use Arrow Keys to Move & Spacebar to Jump
+        Use Arrow Keys to Move, Spacebar to Jump, & Down Arrow to Spin Dash
     </div>
     <div id="touch-controls">
         <div class="control-group">
@@ -123,8 +143,15 @@
             <div class="touch-button" id="right-button">&gt;</div>
         </div>
         <div class="control-group">
+            <div class="touch-button" id="dash-button">↓</div>
             <div class="touch-button" id="jump-button">↑</div>
         </div>
+    </div>
+    <div id="hud">
+        <span id="heart1" class="heart">❤</span>
+        <span id="heart2" class="heart">❤</span>
+        <span id="heart3" class="heart">❤</span>
+        <span id="blocks-jumped-hud" class="blocks-counter">Blocks: 0</span>
     </div>
     <div id="end-screen">
         <h2>Level Complete!</h2>
@@ -133,6 +160,15 @@
         <p>Platforms Landed On: <span id="blocks-stat">0</span></p>
         <button id="restart-button">Restart</button>
     </div>
+    <div id="game-over-screen">
+        <h2>Game Over!</h2>
+        <p>Time: <span id="game-over-time-stat">0s</span></p>
+        <p>Platforms Landed On: <span id="game-over-blocks-stat">0</span></p>
+        <button id="game-over-button">Try Again</button>
+    </div>
+
+
+  
 <script>
     // Main entry point
     window.onload = function() {
