@@ -1,0 +1,312 @@
+'use strict';
+
+async function main() {
+    // --- WebGL Setup ---
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+    if (!gl) {
+        alert('WebGL not supported!');
+        return;
+    }
+
+    // Compile shaders and link program
+    const vsSource = document.getElementById('vertex-shader').text;
+    const fsSource = document.getElementById('fragment-shader').text;
+    const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+    // Get attribute and uniform locations
+    const positionAttributeLocation = gl.getAttribLocation(shaderProgram, 'a_position');
+    const texCoordAttributeLocation = gl.getAttribLocation(shaderProgram, 'a_texCoord');
+    const resolutionUniformLocation = gl.getUniformLocation(shaderProgram, 'u_resolution');
+    const imageUniformLocation = gl.getUniformLocation(shaderProgram, 'u_image');
+
+    // --- Buffers ---
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    // A rectangle that covers the entire canvas
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0, 0,
+        gl.canvas.width, 0,
+        0, gl.canvas.height,
+        0, gl.canvas.height,
+        gl.canvas.width, 0,
+        gl.canvas.width, gl.canvas.height,
+    ]), gl.STATIC_DRAW);
+
+    const texCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0.0, 0.0,
+        1.0, 0.0,
+        0.0, 1.0,
+        0.0, 1.0,
+        1.0, 0.0,
+        1.0, 1.0,
+    ]), gl.STATIC_DRAW);
+
+    // --- Textures and Framebuffer ---
+    const playerTexture = await loadTexture(gl, 'player.png');
+    const initialTerrainTexture = await loadTexture(gl, 'terrian.png');
+    const explosionTexture = await loadTexture(gl, 'explosion.png');
+
+    // Create a framebuffer to hold the destructible terrain texture
+    const terrainFBO = gl.createFramebuffer();
+    const terrainTexture = createAndSetupTexture(gl);
+    gl.bindTexture(gl.TEXTURE_2D, terrainTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.canvas.width, gl.canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+
+    // Attach texture to framebuffer
+    gl.bindFramebuffer(gl.FRAMEBUFFER, terrainFBO);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, terrainTexture, 0);
+
+    // Draw the initial terrain to our framebuffer texture
+    draw(initialTerrainTexture, gl.canvas.width, gl.canvas.height);
+    
+    // Unbind the framebuffer to draw to the screen again
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // --- Game State ---
+    const player = {
+        x: 100, y: 100,
+        width: 32, height: 48,
+        vx: 0, vy: 0,
+        onGround: false,
+        direction: 1 // 1 for right, -1 for left
+    };
+
+    const projectiles = [];
+    const gravity = 0.5;
+    const jumpPower = -12;
+    const moveSpeed = 4;
+    
+    const input = { left: false, right: false, up: false, shoot: false };
+    
+    // --- Input Handling ---
+    window.addEventListener('keydown', e => {
+        if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
+        if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+        if (e.key === 'ArrowUp' || e.key === 'w') input.up = true;
+        if (e.key === ' ' && !input.shoot) {
+             input.shoot = true;
+             shoot();
+        }
+    });
+
+    window.addEventListener('keyup', e => {
+        if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
+        if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+        if (e.key === 'ArrowUp' || e.key === 'w') input.up = false;
+        if (e.key === ' ') input.shoot = false;
+    });
+
+    // --- Game Logic ---
+    function shoot() {
+        projectiles.push({
+            x: player.x + player.width / 2,
+            y: player.y + player.height / 2,
+            vx: 10 * player.direction,
+            vy: 0,
+            width: 8,
+            height: 8
+        });
+    }
+
+    // Function to check collision with terrain by reading a pixel
+    function checkTerrainCollision(x, y) {
+        const pixel = new Uint8Array(4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, terrainFBO);
+        gl.readPixels(x, gl.canvas.height - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return pixel[3] > 128; // Check alpha channel
+    }
+
+    function destroyTerrain(x, y, radius) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, terrainFBO);
+        // Important: Enable blending to "subtract" from the alpha channel
+        gl.enable(gl.BLEND);
+        // This blend function subtracts the source alpha from the destination alpha
+        gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+        
+        draw(explosionTexture, radius * 2, radius * 2, x - radius, y - radius);
+
+        // Reset blend function to default for normal drawing
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.disable(gl.BLEND);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    // --- Main Game Loop ---
+    function gameLoop(timestamp) {
+        // --- Update Player ---
+        player.vx = 0;
+        if (input.left) { player.vx = -moveSpeed; player.direction = -1; }
+        if (input.right) { player.vx = moveSpeed; player.direction = 1; }
+        
+        // Apply gravity
+        player.vy += gravity;
+
+        // Jump
+        if (input.up && player.onGround) {
+            player.vy = jumpPower;
+            player.onGround = false;
+        }
+
+        // Horizontal collision
+        if (checkTerrainCollision(player.x + player.vx, player.y + player.height / 2)) {
+            player.vx = 0;
+        }
+        player.x += player.vx;
+
+        // Vertical collision
+        player.onGround = false;
+        if (checkTerrainCollision(player.x + player.width / 2, player.y + player.height + player.vy)) {
+            player.vy = 0;
+            player.onGround = true;
+        }
+         // Ceiling collision
+        if (player.vy < 0 && checkTerrainCollision(player.x + player.width / 2, player.y + player.vy)) {
+            player.vy = 0;
+        }
+        player.y += player.vy;
+
+        // --- Update Projectiles ---
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+
+            // Check for collision with terrain
+            if (checkTerrainCollision(p.x, p.y)) {
+                destroyTerrain(p.x, p.y, 30); // Destroy a 30-pixel radius
+                projectiles.splice(i, 1); // Remove projectile
+            }
+        }
+        
+        // --- Drawing ---
+        resizeCanvasToDisplaySize(gl.canvas);
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0.2, 0.5, 0.8, 1.0); // Sky blue background
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Draw the terrain
+        draw(terrainTexture, gl.canvas.width, gl.canvas.height);
+
+        // Draw the player
+        draw(playerTexture, player.width, player.height, player.x, player.y);
+        
+        // Draw projectiles
+        gl.bindTexture(gl.TEXTURE_2D, null); // Or use a projectile texture
+        for (const p of projectiles) {
+            // For simplicity, we'll draw projectiles as colored quads
+            // (A proper implementation would use another texture)
+            // This part is left as an exercise. For now, they are invisible but functional.
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+    
+    // --- WebGL Helper Functions ---
+    function draw(texture, width, height, x = 0, y = 0) {
+        gl.useProgram(shaderProgram);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+        gl.enableVertexAttribArray(texCoordAttributeLocation);
+        gl.vertexAttribPointer(texCoordAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+        
+        // Set new quad position and size
+        setRectangle(gl, x, y, width, height);
+        
+        gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.uniform1i(imageUniformLocation, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    
+    function setRectangle(gl, x, y, width, height) {
+        const x1 = x;
+        const x2 = x + width;
+        const y1 = y;
+        const y2 = y + height;
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            x1, y1,
+            x2, y1,
+            x1, y2,
+            x1, y2,
+            x2, y1,
+            x2, y2,
+        ]), gl.STATIC_DRAW);
+    }
+
+    // Start the game
+    requestAnimationFrame(gameLoop);
+}
+
+// --- Generic WebGL Utilities (can be reused) ---
+
+function initShaderProgram(gl, vsSource, fsSource) {
+    const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    gl.linkProgram(shaderProgram);
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+        return null;
+    }
+    return shaderProgram;
+}
+
+function loadShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+function loadTexture(gl, url) {
+    return new Promise(resolve => {
+        const texture = createAndSetupTexture(gl);
+        const image = new Image();
+        image.onload = function() {
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            resolve(texture);
+        };
+        image.src = url;
+    });
+}
+
+function createAndSetupTexture(gl) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return texture;
+}
+
+function resizeCanvasToDisplaySize(canvas) {
+    const displayWidth  = canvas.clientWidth;
+    const displayHeight = canvas.clientHeight;
+    if (canvas.width  !== displayWidth || canvas.height !== displayHeight) {
+        canvas.width  = displayWidth;
+        canvas.height = displayHeight;
+        return true;
+    }
+    return false;
+}
+
+main();
