@@ -148,9 +148,9 @@ window.onload = function() {
 
     // Array of image URLs to load
     const imageUrls = [
-        'https://webgl2fundamentals.org/webgl/resources/f-texture.png', // Example image 1
-        'https://webgl2fundamentals.org/webgl/resources/flower-1.jpg', // Example image 2
-        'https://webgl2fundamentals.org/webgl/resources/leaves.jpg'    // Example image 3
+        'enemy.png', // Example image 1
+        'terrian.png', // Example image 2
+        'platform.png'    // Example image 3
     ];
 
     let imagesLoaded = 0;
