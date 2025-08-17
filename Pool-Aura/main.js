@@ -46,7 +46,7 @@ async function main() {
 
     // --- Textures and Framebuffer ---
     const playerTexture = await loadTexture(gl, 'player.png');
-    const initialTerrainTexture = await loadTexture(gl, 'terrain.png');
+    const initialTerrainTexture = await loadTexture(gl, 'IMG_8486.png');
     const explosionTexture = await loadTexture(gl, 'explosion.png');
 
     // Create a framebuffer to hold the destructible terrain texture
