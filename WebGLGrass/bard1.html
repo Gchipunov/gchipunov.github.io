@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Grass</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        // Attributes for each vertex of a SINGLE blade
+        attribute vec3 a_position;
+        attribute vec2 a_texcoord;
+
+        // Attributes for each INSTANCE (each blade of grass)
+        attribute vec2 a_offset;    // Where to place the blade on the ground
+        attribute float a_rotation; // Random rotation for variety
+        attribute float a_height;   // Random height for variety
+
+        // Uniforms (global variables)
+        uniform mat4 u_projection;
+        uniform mat4 u_view;
+        uniform float u_time;
+
+        // Varying to pass color info to fragment shader
+        varying vec2 v_texcoord;
+
+        // Rotation matrix function
+        mat4 rotationY(float angle) {
+            float s = sin(angle);
+            float c = cos(angle);
+            return mat4(
+                c, 0, -s, 0,
+                0, 1, 0, 0,
+                s, 0, c, 0,
+                0, 0, 0, 1
+            );
+        }
+
+        void main() {
+            v_texcoord = a_texcoord;
+
+            // --- Animation ---
+            // Use sine wave for a simple sway effect
+            // The sway is stronger at the top of the blade (a_position.y)
+            float sway = sin(u_time + a_offset.x) * a_position.y * 0.3;
+            vec3 animatedPosition = a_position + vec3(sway, 0.0, 0.0);
+
+            // Scale blade by its random height
+            animatedPosition.y *= a_height;
+
+            // Apply instance rotation and position
+            gl_Position = u_projection * u_view * rotationY(a_rotation) * vec4(animatedPosition + vec3(a_offset.x, 0.0, a_offset.y), 1.0);
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_texcoord;
+
+        void main() {
+            // Create a simple vertical gradient for the grass blade
+            // Darker green at the bottom (v_texcoord.y is 0)
+            // Lighter green at the top (v_texcoord.y is 1)
+            vec3 bottomColor = vec3(0.0, 0.5, 0.1);
+            vec3 topColor = vec3(0.5, 1.0, 0.2);
+            
+            gl_FragColor = vec4(mix(bottomColor, topColor, v_texcoord.y), 1.0);
+        }
+    </script>
+
+    <script src="main.js"></script>
+</body>
+</html>
