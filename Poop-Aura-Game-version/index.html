@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poop Aura Coin - intmain game studio</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Press Start 2P', monospace;
+            background-color: #1a1a2e;
+            color: #e94560;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+            touch-action: none;
+            cursor: move;
+        }
+        #game-container {
+            position: relative;
+            width: 95vw;
+            height: 95vh;
+            border: 5px solid #e94560;
+            border-radius: 15px;
+            box-shadow: 0 0 20px #e94560, inset 0 0 10px #e94560;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #0f3460;
+        }
+        .ui {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(15, 52, 96, 0.7);
+            border: 2px solid #e94560;
+            border-radius: 10px;
+            padding: 10px 20px;
+            backdrop-filter: blur(5px);
+        }
+        #score-display {
+            font-size: 1.2em;
+            color: #ffc400;
+        }
+        #message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(26, 26, 46, 0.9);
+            border: 2px solid #e94560;
+            border-radius: 15px;
+            padding: 30px;
+            text-shadow: 2px 2px #0f3460;
+            z-index: 10;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        .btn {
+            background-color: #e94560;
+            color: #1a1a2e;
+            padding: 10px 20px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-family: 'Press Start 2P', monospace;
+            font-size: 0.8em;
+            text-shadow: none;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 5px #c6344d;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 7px #c6344d;
+        }
+        .btn:active {
+            transform: translateY(3px);
+            box-shadow: 0 2px #c6344d;
+        }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+        }
+        .game-title {
+            font-size: 2.5em;
+            color: #ffc400;
+            text-shadow: 4px 4px #e94560;
+            margin-bottom: 20px;
+        }
+        p {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div class="ui">
+            <p id="score-display">Score: 0</p>
+        </div>
+        <div id="message-box">
+            <h1 class="game-title">Poop Aura Coin</h1>
+            <p>Use WASD or Arrow Keys to move.</p>
+            <p>Collect the glowing brown coins!</p>
+            <button id="startBtn" class="btn">Start Game</button>
+        </div>
+        <div id="game-over-box" class="message-box" style="display: none;">
+            <h1 class="game-title">Game Over!</h1>
+            <p id="final-score"></p>
+            <button id="restartBtn" class="btn">Restart</button>
+        </div>
+    </div>
+
+    <!-- 3D Physics and Graphics Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <!-- Sound Library -->
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.58/build/Tone.min.js"></script>
+
+    <script>
+        // Use an IIFE (Immediately Invoked Function Expression) to avoid global scope pollution.
+        (function() {
+            // --- Global Variables ---
+            let scene, camera, renderer;
+            let world, playerBody, playerMesh, groundBody, groundMesh;
+            let coins = [];
+            let obstacles = [];
+            let score = 0;
+            let isPlaying = false;
+            const coinCount = 25; // Number of coins to be rendered
+            let mouseX = 0, mouseY = 0;
+            const mouseSensitivity = 0.002;
+            let isDragging = false;
+            let keys = {};
+
+            // Game UI elements
+            const scoreDisplay = document.getElementById('score-display');
+            const messageBox = document.getElementById('message-box');
+            const startBtn = document.getElementById('startBtn');
+            const gameOverBox = document.getElementById('game-over-box');
+            const restartBtn = document.getElementById('restartBtn');
+            const finalScore = document.getElementById('final-score');
+            const gameContainer = document.getElementById('game-container');
+            const canvas = document.getElementById('gameCanvas');
+
+            // Sound effects using Tone.js
+            const coinSynth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: 'sine' },
+                envelope: {
+                    attack: 0.01,
+                    decay: 0.1,
+                    sustain: 0.2,
+                    release: 0.5
+                }
+            }).toDestination();
+
+            const gameOverSynth = new Tone.NoiseSynth({
+                noise: { type: 'pink' },
+                envelope: {
+                    attack: 0.005,
+                    decay: 0.1,
+                    sustain: 0,
+                    release: 0.2
+                }
+            }).toDestination();
+
+            const backgroundMusic = new Tone.Loop(time => {
+                const notes = ['C3', 'E3', 'G3', 'B3'];
+                const note = notes[Math.floor(Math.random() * notes.length)];
+                coinSynth.triggerAttackRelease(note, '8n', time);
+            }, '1n').start(0);
+
+            // --- Game Initialization ---
+            function init() {
+                // Initialize the scene
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x0f3460);
+                
+                // Initialize the physics world
+                world = new CANNON.World();
+                world.gravity.set(0, -9.82, 0); // Standard gravity
+                world.broadphase = new CANNON.NaiveBroadphase();
+                world.solver.iterations = 10;
+
+                // Set up the camera
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                camera.position.set(0, 10, 20);
+                camera.lookAt(new THREE.Vector3(0, 0, 0));
+
+                // Set up the renderer
+                renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+                renderer.setSize(gameContainer.clientWidth, gameContainer.clientHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                
+                // Set up lighting
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 20, 10);
+                scene.add(directionalLight);
+                
+                // Create the ground
+                createGround();
+                
+                // Create the player
+                createPlayer();
+                
+                // Create the coins
+                createCoins();
+
+                // Create the obstacles
+                createObstacles();
+
+                // Set up event listeners
+                setupEventListeners();
+
+                // Initially, show the start message
+                messageBox.style.display = 'flex';
+                gameOverBox.style.display = 'none';
+
+                // Handle window resize
+                window.addEventListener('resize', onWindowResize, false);
+            }
+
+            // Function to handle window resizing
+            function onWindowResize() {
+                camera.aspect = gameContainer.clientWidth / gameContainer.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(gameContainer.clientWidth, gameContainer.clientHeight);
+            }
+
+            // Function to create the ground plane
+            function createGround() {
+                const groundShape = new CANNON.Plane();
+                groundBody = new CANNON.Body({ mass: 0 }); // mass = 0 makes it static
+                groundBody.addShape(groundShape);
+                groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2); // Rotate to be horizontal
+                world.addBody(groundBody);
+
+                const groundGeometry = new THREE.PlaneGeometry(100, 100);
+                const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x472836, side: THREE.DoubleSide });
+                groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+                groundMesh.rotation.x = -Math.PI / 2;
+                groundMesh.receiveShadow = true;
+                scene.add(groundMesh);
+            }
+
+            // Function to create the player character
+            function createPlayer() {
+                const playerShape = new CANNON.Sphere(1);
+                playerBody = new CANNON.Body({ mass: 5, shape: playerShape });
+                playerBody.position.set(0, 5, 0);
+                world.addBody(playerBody);
+                
+                const playerGeometry = new THREE.IcosahedronGeometry(1);
+                const playerMaterial = new THREE.MeshStandardMaterial({ color: 0xe94560, flatShading: true });
+                playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
+                scene.add(playerMesh);
+            }
+
+            // Function to create the Poop Aura Coins
+            function createCoins() {
+                const coinGeometry = new THREE.IcosahedronGeometry(0.5);
+                const coinMaterial = new THREE.MeshStandardMaterial({ color: 0x735749, flatShading: true, emissive: 0x735749, emissiveIntensity: 0.5 });
+                
+                for (let i = 0; i < coinCount; i++) {
+                    const coin = {
+                        mesh: new THREE.Mesh(coinGeometry, coinMaterial),
+                        body: new CANNON.Body({ mass: 0, shape: new CANNON.Sphere(0.5) })
+                    };
+
+                    // Set coin position
+                    const x = (Math.random() - 0.5) * 80;
+                    const z = (Math.random() - 0.5) * 80;
+                    coin.body.position.set(x, 1, z);
+                    coin.mesh.position.copy(coin.body.position);
+
+                    // Add coin body to the world
+                    world.addBody(coin.body);
+                    // Add coin mesh to the scene
+                    scene.add(coin.mesh);
+                    coins.push(coin);
+                }
+            }
+            
+            // Function to create obstacles
+            function createObstacles() {
+                const obstacleCount = 10;
+                const obstacleGeometry = new THREE.BoxGeometry(2, 5, 2);
+                const obstacleMaterial = new THREE.MeshStandardMaterial({ color: 0x3e174b, flatShading: true });
+
+                for (let i = 0; i < obstacleCount; i++) {
+                    const obstacle = {
+                        mesh: new THREE.Mesh(obstacleGeometry, obstacleMaterial),
+                        body: new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(1, 2.5, 1)) })
+                    };
+                    const x = (Math.random() - 0.5) * 80;
+                    const z = (Math.random() - 0.5) * 80;
+                    obstacle.body.position.set(x, 2.5, z);
+                    obstacle.mesh.position.copy(obstacle.body.position);
+                    
+                    world.addBody(obstacle.body);
+                    scene.add(obstacle.mesh);
+                    obstacles.push(obstacle);
+                }
+            }
+
+            // Function to handle player input and movement
+            function handlePlayerMovement() {
+                const impulse = new CANNON.Vec3(0, 0, 0);
+                const strength = 15;
+                
+                if (keys['KeyW'] || keys['ArrowUp']) {
+                    impulse.z -= strength;
+                }
+                if (keys['KeyS'] || keys['ArrowDown']) {
+                    impulse.z += strength;
+                }
+                if (keys['KeyA'] || keys['ArrowLeft']) {
+                    impulse.x -= strength;
+                }
+                if (keys['KeyD'] || keys['ArrowRight']) {
+                    impulse.x += strength;
+                }
+                
+                if (impulse.length() > 0) {
+                    // Apply a force to the player body
+                    playerBody.applyImpulse(impulse, playerBody.position);
+                }
+            }
+
+            // Function to check for collisions and update game state
+            function checkCollisions() {
+                const playerPos = playerBody.position;
+                
+                // Check for coin collisions
+                for (let i = coins.length - 1; i >= 0; i--) {
+                    const coinPos = coins[i].body.position;
+                    const distance = playerPos.distanceTo(coinPos);
+                    
+                    if (distance < 1.5) { // Collision radius
+                        score += 10;
+                        scoreDisplay.textContent = `Score: ${score}`;
+                        coinSynth.triggerAttackRelease(['C5', 'E5'], '8n');
+                        resetCoinPosition(i);
+                    }
+                }
+                
+                // Check for obstacle collisions (end game)
+                for (let i = 0; i < obstacles.length; i++) {
+                    const obstaclePos = obstacles[i].body.position;
+                    const distance = playerPos.distanceTo(obstaclePos);
+                    
+                    if (distance < 2.5) { // Collision with obstacle
+                        endGame();
+                        break;
+                    }
+                }
+            }
+
+            // Function to reset a coin's position
+            function resetCoinPosition(index) {
+                const x = (Math.random() - 0.5) * 80;
+                const z = (Math.random() - 0.5) * 80;
+                coins[index].body.position.set(x, 1, z);
+            }
+            
+            // Function to update the game loop
+            function animate() {
+                requestAnimationFrame(animate);
+                
+                if (isPlaying) {
+                    // Step the physics world
+                    world.step(1 / 60);
+
+                    // Update Three.js mesh positions from Cannon.js bodies
+                    playerMesh.position.copy(playerBody.position);
+                    playerMesh.quaternion.copy(playerBody.quaternion);
+                    
+                    coins.forEach(coin => {
+                        coin.mesh.position.copy(coin.body.position);
+                    });
+
+                    obstacles.forEach(obstacle => {
+                        obstacle.mesh.position.copy(obstacle.body.position);
+                        obstacle.mesh.quaternion.copy(obstacle.body.quaternion);
+                    });
+                    
+                    handlePlayerMovement();
+                    checkCollisions();
+                }
+                
+                // Update the camera based on mouse movement (if dragging)
+                if (isDragging) {
+                    const target = new THREE.Vector3(0, 0, 0);
+                    camera.position.x += (mouseX * 0.1 - camera.position.x) * 0.05;
+                    camera.position.y += (-mouseY * 0.1 - camera.position.y + 10) * 0.05;
+                    camera.lookAt(target);
+                } else {
+                    camera.lookAt(playerMesh.position);
+                }
+
+                // Render the scene
+                renderer.render(scene, camera);
+            }
+
+            // Function to start the game
+            function startGame() {
+                isPlaying = true;
+                score = 0;
+                scoreDisplay.textContent = `Score: 0`;
+                messageBox.style.display = 'none';
+                gameOverBox.style.display = 'none';
+                playerBody.position.set(0, 5, 0);
+                playerBody.velocity.set(0, 0, 0);
+                playerBody.quaternion.set(0, 0, 0, 1);
+                coins.forEach( (coin, i) => resetCoinPosition(i) );
+            }
+
+            // Function to end the game
+            function endGame() {
+                isPlaying = false;
+                gameOverSynth.triggerAttackRelease('16n');
+                finalScore.textContent = `Your Score: ${score}`;
+                gameOverBox.style.display = 'flex';
+                messageBox.style.display = 'none';
+            }
+            
+            // Function to set up all event listeners
+            function setupEventListeners() {
+                startBtn.addEventListener('click', startGame);
+                restartBtn.addEventListener('click', startGame);
+
+                // Keyboard input for movement
+                document.addEventListener('keydown', (event) => {
+                    keys[event.code] = true;
+                });
+                document.addEventListener('keyup', (event) => {
+                    keys[event.code] = false;
+                });
+
+                // Mouse input for camera rotation
+                canvas.addEventListener('mousedown', (event) => {
+                    isDragging = true;
+                });
+                canvas.addEventListener('mouseup', (event) => {
+                    isDragging = false;
+                });
+                canvas.addEventListener('mousemove', (event) => {
+                    if (isDragging) {
+                        mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+                        mouseY = (event.clientY / window.innerHeight) * 2 - 1;
+                    }
+                });
+
+                // Touch events for mobile
+                canvas.addEventListener('touchstart', (event) => {
+                    isDragging = true;
+                });
+                canvas.addEventListener('touchend', (event) => {
+                    isDragging = false;
+                });
+                canvas.addEventListener('touchmove', (event) => {
+                    if (isDragging && event.touches.length > 0) {
+                        mouseX = (event.touches[0].clientX / window.innerWidth) * 2 - 1;
+                        mouseY = (event.touches[0].clientY / window.innerHeight) * 2 - 1;
+                    }
+                });
+            }
+
+            // Wait for the window to load before initializing
+            window.onload = function() {
+                init();
+                animate();
+            };
+        })();
+    </script>
+</body>
+</html>
