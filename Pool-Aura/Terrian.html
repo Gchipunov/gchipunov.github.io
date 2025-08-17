@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        attribute vec2 a_texCoord;
+        uniform vec2 u_resolution;
+        varying vec2 v_texCoord;
+
+        void main() {
+           // convert the position from pixels to 0.0 to 1.0
+           vec2 zeroToOne = a_position / u_resolution;
+           // convert from 0->1 to 0->2
+           vec2 zeroToTwo = zeroToOne * 2.0;
+           // convert from 0->2 to -1->+1 (clip space)
+           vec2 clipSpace = zeroToTwo - 1.0;
+
+           gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+           v_texCoord = a_texCoord;
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform sampler2D u_image;
+        varying vec2 v_texCoord;
+
+        void main() {
+           gl_FragColor = texture2D(u_image, v_texCoord);
+        }
+    </script>
+
+    <script src="main.js"></script>
+</body>
+</html>
