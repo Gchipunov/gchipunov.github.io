@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL 2D Platformer (Fixed)</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden; /* Prevent scrolling on mobile */
+        }
+        canvas {
+            border: 1px solid #555;
+            width: 100%;
+            height: 100%;
+            display: block; /* Fixes potential layout issues */
+            /* Improve mobile touch experience */
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas> <script>
+    // --- Main Game Logic ---
+    window.onload = main;
+
+    function main() {
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert('Unable to initialize WebGL. Your browser or machine may not support it.');
+            return;
+        }
+
+        // --- 1. Shaders ---
+        const vsSource = `
+            attribute vec4 a_position;
+            uniform mat4 u_modelMatrix;
+            uniform mat4 u_viewMatrix;
+            uniform mat4 u_projectionMatrix;
+            void main() {
+                gl_Position = u_projectionMatrix * u_viewMatrix * u_modelMatrix * a_position;
+            }
+        `;
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        // --- 2. Shader Program Setup ---
+        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+        if (!shaderProgram) return; // Stop if shaders failed
+
+        const programInfo = {
+            program: shaderProgram,
+            attribLocations: {
+                vertexPosition: gl.getAttribLocation(shaderProgram, 'a_position'),
+            },
+            uniformLocations: {
+                projectionMatrix: gl.getUniformLocation(shaderProgram, 'u_projectionMatrix'),
+                viewMatrix: gl.getUniformLocation(shaderProgram, 'u_viewMatrix'),
+                modelMatrix: gl.getUniformLocation(shaderProgram, 'u_modelMatrix'),
+                color: gl.getUniformLocation(shaderProgram, 'u_color'),
+            },
+        };
+
+        // --- 3. Geometry Buffer ---
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = [-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.5, 0.5, 0.0, -0.5, 0.5, 0.0];
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        const indices = [0, 1, 2, 0, 2, 3];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+        // --- 4. Game State ---
+        const player = {
+            x: 0, y: 0, z: 0,
+            width: 0.8, height: 1.0,
+            velocityX: 0, velocityY: 0,
+            color: [0.9, 0.2, 0.2, 1.0], // Red
+            isOnGround: false,
+            jumpStrength: 0.25
+        };
+
+        const platforms = [
+            { x: 0, y: -6, z: 0, width: 25, height: 0.5, color: [0.5, 0.5, 0.5, 1.0] }, // Ground
+            { x: 0, y: -4, z: 0, width: 10, height: 0.5, color: [0.4, 0.8, 0.4, 1.0] }, // Green
+            { x: -5, y: -1, z: 1, width: 4, height: 0.5, color: [0.4, 0.6, 0.8, 1.0] }, // Blue
+            { x: 5, y: 2, z: -1, width: 4, height: 0.5, color: [0.4, 0.6, 0.8, 1.0] }, // Blue
+        ];
+
+        const gravity = -0.01;
+        const moveSpeed = 0.1;
+        const input = { left: false, right: false };
+
+        // --- 5. Input Handling ---
+
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
+            if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+            if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') && player.isOnGround) {
+                player.velocityY = player.jumpStrength;
+                player.isOnGround = false;
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
+            if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+        });
+
+        // FIX: Reworked Mobile Touch Controls
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            // JUMP action happens only on the initial touch
+            const touchX = e.touches[0].clientX;
+            const canvasWidth = canvas.clientWidth;
+            if (touchX >= canvasWidth / 2) { // Right half of screen
+                if (player.isOnGround) {
+                    player.velocityY = player.jumpStrength;
+                    player.isOnGround = false;
+                }
+            }
+            handleMove(e.touches);
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            handleMove(e.touches); // Only update movement, don't jump
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            input.left = false;
+            input.right = false;
+        });
+
+        // This function now ONLY handles left/right movement
+        function handleMove(touches) {
+            const touchX = touches[0].clientX;
+            const canvasWidth = canvas.clientWidth;
+            if (touchX < canvasWidth / 2) { // Left half of screen
+                input.left = true;
+                input.right = false;
+            } else { // Right half of screen (don't move, this is jump area)
+                input.left = false;
+                input.right = false;
+            }
+        }
+
+        // --- 6. Game Loop ---
+        function gameLoop(now) {
+            update();
+            drawScene();
+            requestAnimationFrame(gameLoop);
+        }
+        requestAnimationFrame(gameLoop);
+
+        // --- 7. Update Function (Game Logic) ---
+        function update() {
+            if (input.left) player.velocityX = -moveSpeed;
+            else if (input.right) player.velocityX = moveSpeed;
+            else player.velocityX = 0;
+            player.x += player.velocityX;
+
+            player.velocityY += gravity;
+            player.y += player.velocityY;
+
+            player.isOnGround = false;
+            for (const platform of platforms) {
+                const isCollidingX = player.x + player.width / 2 > platform.x - platform.width / 2 && player.x - player.width / 2 < platform.x + platform.width / 2;
+                const isAbove = player.y - player.height / 2 >= platform.y - platform.height / 2;
+                const willCollideY = (player.y - player.height / 2 + player.velocityY) <= (platform.y + platform.height / 2);
+
+                if (isCollidingX && isAbove && willCollideY) {
+                    player.y = platform.y + platform.height / 2 + player.height / 2;
+                    player.velocityY = 0;
+                    player.isOnGround = true;
+                    break;
+                }
+            }
+        }
+
+        // --- 8. Draw Function (Rendering) ---
+        function drawScene() {
+            // FIX: Call the resize helper before drawing
+            resizeCanvasToDisplaySize(gl.canvas);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+            gl.clearColor(0.1, 0.1, 0.15, 1.0);
+            gl.clearDepth(1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const fieldOfView = 45 * Math.PI / 180;
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const projectionMatrix = mat4.create();
+            mat4.perspective(projectionMatrix, fieldOfView, aspect, 0.1, 100.0);
+
+            const viewMatrix = mat4.create();
+            mat4.lookAt(viewMatrix, [0, 0, 15], [0, 0, 0], [0, 1, 0]);
+
+            const allObjects = [player, ...platforms];
+            gl.useProgram(programInfo.program);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.viewMatrix, false, viewMatrix);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+            allObjects.forEach(obj => {
+                const modelMatrix = mat4.create();
+                mat4.translate(modelMatrix, modelMatrix, [obj.x, obj.y, obj.z]);
+                mat4.scale(modelMatrix, modelMatrix, [obj.width, obj.height, 1.0]);
+                gl.uniformMatrix4fv(programInfo.uniformLocations.modelMatrix, false, modelMatrix);
+                gl.uniform4fv(programInfo.uniformLocations.color, obj.color);
+                gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+            });
+        }
+    }
+
+    // --- Helper Functions ---
+
+    // FIX: Added a robust canvas resize helper function
+    function resizeCanvasToDisplaySize(canvas) {
+        const displayWidth  = canvas.clientWidth;
+        const displayHeight = canvas.clientHeight;
+        if (canvas.width  !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width  = displayWidth;
+            canvas.height = displayHeight;
+            return true;
+        }
+        return false;
+    }
+
+    function initShaderProgram(gl, vsSource, fsSource) {
+        const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        if (!vertexShader || !fragmentShader) return null;
+
+        const shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+            return null;
+        }
+        return shaderProgram;
+    }
+
+    function loadShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+    </script>
+    <script>
+        var mat4={};mat4.create=function(){return new Float32Array(16)};mat4.translate=function(t,a,e){let n,o,r,i,s,l,c,u,h,d,m,p,v=e[0],f=e[1],g=e[2];return a===t?(t[12]=a[0]*v+a[4]*f+a[8]*g+a[12],t[13]=a[1]*v+a[5]*f+a[9]*g+a[13],t[14]=a[2]*v+a[6]*f+a[10]*g+a[14],t[15]=a[3]*v+a[7]*f+a[11]*g+a[15]):(n=a[0],o=a[1],r=a[2],i=a[3],s=a[4],l=a[5],c=a[6],u=a[7],h=a[8],d=a[9],m=a[10],p=a[11],t[0]=n,t[1]=o,t[2]=r,t[3]=i,t[4]=s,t[5]=l,t[6]=c,t[7]=u,t[8]=h,t[9]=d,t[10]=m,t[11]=p,t[12]=n*v+s*f+h*g+a[12],t[13]=o*v+l*f+d*g+a[13],t[14]=r*v+c*f+m*g+a[14],t[15]=i*v+u*f+p*g+a[15]),t};mat4.scale=function(t,a,e){let n=e[0],o=e[1],r=e[2];return t[0]=a[0]*n,t[1]=a[1]*n,t[2]=a[2]*n,t[3]=a[3]*n,t[4]=a[4]*o,t[5]=a[5]*o,t[6]=a[6]*o,t[7]=a[7]*o,t[8]=a[8]*r,t[9]=a[9]*r,t[10]=a[10]*r,t[11]=a[11]*r,t[12]=a[12],t[13]=a[13],t[14]=a[14],t[15]=a[15],t};mat4.perspective=function(t,a,e,n,o){const r=1/Math.tan(a/2);t[0]=r/e,t[1]=0,t[2]=0,t[3]=0,t[4]=0,t[5]=r,t[6]=0,t[7]=0,t[8]=0,t[9]=0,t[11]=-1,t[12]=0,t[13]=0,t[15]=0,null!=o&&o!==1/0?(t[10]=(o+n)/(n-o),t[14]=2*o*n/(n-o)):(t[10]=-1,t[14]=-2*n);return t};mat4.lookAt=function(t,a,e,n){let o,r,i,s,l,c,u,h,d,m,p=a[0],v=a[1],f=a[2],g=n[0],b=n[1],x=n[2],y=e[0],_=e[1],w=e[2];return u=p-y,h=v-_,d=f-w,m=1/Math.sqrt(u*u+h*h+d*d),u*=m,h*=m,d*=m,o=b*d-x*h,r=x*u-g*d,i=g*h-b*u,(m=Math.sqrt(o*o+r*r+i*i))?(m=1/m,o*=m,r*=m,i*=m):i=r=o=0,s=h*i-d*r,l=d*o-u*i,c=u*r-h*o,(m=Math.sqrt(s*s+l*l+c*c))?(m=1/m,s*=m,l*=m,c*=m):c=l=s=0,t[0]=o,t[1]=s,t[2]=u,t[3]=0,t[4]=r,t[5]=l,t[6]=h,t[7]=0,t[8]=i,t[9]=c,t[10]=d,t[11]=0,t[12]=-(o*p+r*v+i*f),t[13]=-(s*p+l*v+c*f),t[14]=-(u*p+h*v+d*f),t[15]=1,t};
+    </script>
+</body>
+</html>
