@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Responsive WebGL Canvas</title>
+    <style>
+        /* Basic reset and body styling to center the canvas */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Prevents scrollbars */
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* * This container div is crucial for responsive scaling.
+         * It will hold the canvas and its aspect ratio will be set via JavaScript
+         * to match the canvas's internal resolution.
+         * It shrinks to fit the viewport while maintaining the aspect ratio.
+        */
+        #canvas-container {
+            max-width: 100vw;
+            max-height: 100vh;
+            display: flex; /* Helps contain the canvas */
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border-radius: 12px;
+            overflow: hidden; /* Ensures canvas corners are rounded */
+        }
+
+        /*
+         * The canvas itself will fill the container.
+         * Its actual pixel dimensions (drawing buffer) are set in JS,
+         * but its display size is controlled by the container.
+        */
+        #gl-canvas {
+            width: 100%;
+            height: 100%;
+            display: block; /* Removes any extra space below the canvas */
+        }
+    </style>
+    <!-- Using Google Fonts for a clean look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- The container that will manage the canvas's size and aspect ratio -->
+    <div id="canvas-container">
+        <canvas id="gl-canvas"></canvas>
+    </div>
+
+    <script>
+        // --- 1. SETUP ---
+        const canvas = document.getElementById('gl-canvas');
+        const container = document.getElementById('canvas-container');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            // Inform the user if WebGL is not supported
+            container.innerHTML = '<p style="color: white; padding: 20px;">WebGL is not supported by your browser.</p>';
+            throw new Error("WebGL not supported");
+        }
+
+        // --- 2. DETERMINE DEVICE AND SET RESOLUTION ---
+
+        // A simple check to see if the user is on a mobile device
+        const isMobile = /Mobi/i.test(window.navigator.userAgent);
+
+        let canvasWidth, canvasHeight;
+
+        if (isMobile) {
+            // Set dimensions for mobile devices
+            canvasWidth = 2000;
+            canvasHeight = 4000;
+        } else {
+            // Set dimensions for desktop/computer
+            canvasWidth = 4000;
+            canvasHeight = 3000;
+        }
+
+        // --- 3. APPLY DIMENSIONS AND ASPECT RATIO ---
+
+        // Set the internal resolution of the canvas (the drawing buffer size)
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+
+        // Set the aspect ratio of the container div. This is the key to making
+        // the canvas scale correctly while maintaining its shape.
+        container.style.aspectRatio = canvasWidth / canvasHeight;
+
+        console.log(`Device detected as: ${isMobile ? 'Mobile' : 'Desktop'}`);
+        console.log(`Canvas resolution set to: ${canvas.width}x${canvas.height}`);
+
+        // --- 4. CONFIGURE WEBGL VIEWPORT ---
+
+        // Tell WebGL how to convert from clip space to pixels.
+        // It's crucial to use the canvas's actual width and height here
+        // to render to the entire high-resolution buffer.
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+        // --- 5. RENDER SOMETHING ---
+
+        // A simple function to clear the canvas to a solid color.
+        // This demonstrates that WebGL is working and covering the entire canvas area.
+        function drawScene() {
+            // Set the clear color to a dark slate blue
+            gl.clearColor(0.2, 0.25, 0.35, 1.0);
+            // Clear the color buffer with the specified clear color
+            gl.clear(gl.COLOR_BUFFER_BIT);
+        }
+
+        // Initial draw call
+        drawScene();
+
+        // Note: For a continuous animation, you would use requestAnimationFrame(drawScene).
+        // For this example, a single draw is sufficient to show the setup works.
+
+    </script>
+</body>
+</html>
