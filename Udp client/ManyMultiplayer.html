@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL 2D Platformer Client (Multi-Player Conceptual)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+        }
+        canvas {
+            background-color: #2d3748; /* Slightly lighter dark blue */
+            border-radius: 1rem; /* Rounded corners */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+            display: block;
+            touch-action: none; /* Prevent browser touch actions */
+        }
+        .info-box {
+            background-color: #2d3748;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.15);
+            margin-top: 1rem;
+            width: 90%;
+            max-width: 600px; /* Increased max-width */
+            text-align: center;
+        }
+        #playerInfoContainer {
+            display: flex;
+            flex-wrap: wrap; /* Allow wrapping for many players */
+            justify-content: center; /* Center player info blocks */
+            gap: 1rem; /* Space between player info blocks */
+            margin-top: 1rem;
+        }
+        .player-status {
+            background-color: #4a5568; /* Slightly darker grey for individual status */
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            min-width: 120px; /* Ensure consistent width */
+        }
+        .player-status span {
+            font-weight: bold;
+            color: #63b3ed; /* Blue for values */
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center p-4">
+    <h1 class="text-3xl font-bold text-white mb-4">WebGL 2D Platformer (Multi-Player Conceptual Client)</h1>
+    <p class="text-gray-400 text-center mb-6 max-w-xl">
+        This demonstration illustrates the client-side concepts for a 2D platformer with WebGL rendering and a simulated WebTransport API for **multiple player state synchronization**.
+        <strong>It does not connect to a real server.</strong>
+    </p>
+
+    <canvas id="gameCanvas" width="800" height="400" class="w-full max-w-4xl h-auto"></canvas>
+
+    <div class="info-box mt-6">
+        <h2 class="text-xl font-semibold mb-2">Simulation Status</h2>
+        <p class="text-sm mb-4">
+            Below you'll see the simulated player states. The "Local Player" is controlled here, while "Remote Players" are simulated as if received from a server.
+        </p>
+        <div id="playerInfoContainer">
+            <!-- Player info will be dynamically added here -->
+            <div class="player-status">
+                <p><strong>Local Player (You):</strong></p>
+                <p>X: <span id="localPlayerX">0</span> Y: <span id="localPlayerY">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        let gl;
+        let program;
+
+        // PlayerState Class Definition
+        class PlayerState {
+            constructor(id, x, y, vx, vy, isJumping, color) {
+                this.id = id; // Unique identifier for the player
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.isJumping = isJumping;
+                this.color = color; // Array [r, g, b, a] for player color
+            }
+        }
+
+        // Generate a random ID for this client's local player
+        const localPlayerId = 'player_' + Math.random().toString(36).substring(2, 9);
+        const playerColors = [
+            [1.0, 0.0, 0.0, 1.0], // Red (Local Player)
+            [0.0, 0.0, 1.0, 1.0], // Blue
+            [0.0, 1.0, 0.0, 1.0], // Green
+            [1.0, 1.0, 0.0, 1.0], // Yellow
+            [1.0, 0.5, 0.0, 1.0], // Orange
+            [0.5, 0.0, 1.0, 1.0], // Purple
+            [0.0, 1.0, 1.0, 1.0], // Cyan
+        ];
+        let colorIndex = 0; // For assigning unique colors
+
+        // Game State:
+        // localPlayer: The player controlled by this client.
+        // remotePlayers: A Map to store all other players, keyed by their ID.
+        let localPlayer = new PlayerState(localPlayerId, -0.5, 0.0, 0.0, 0.0, false, playerColors[colorIndex++]);
+        const remotePlayers = new Map(); // Map<string, PlayerState>
+
+        // Simulate some initial remote players for demonstration
+        function addSimulatedRemotePlayers(count) {
+            for (let i = 0; i < count; i++) {
+                const id = 'sim_player_' + Math.random().toString(36).substring(2, 9);
+                const x = Math.random() * 1.5 - 0.75; // Random X position
+                const y = Math.random() * 0.5 - 0.5; // Random Y position
+                const color = playerColors[colorIndex++ % playerColors.length]; // Cycle through colors
+                const newPlayer = new PlayerState(id, x, y, 0, 0, false, color);
+                remotePlayers.set(id, newPlayer);
+            }
+        }
+        addSimulatedRemotePlayers(3); // Add 3 simulated remote players initially
+
+        const platforms = [
+            [-0.7, -0.8, 0.4, 0.05],
+            [0.0, -0.4, 0.3, 0.05],
+            [0.6, -0.1, 0.4, 0.05]
+        ];
+
+        // WebGL Initialization (unchanged)
+        function initWebGL() {
+            gl = canvas.getContext('webgl');
+            if (!gl) {
+                console.error('WebGL not supported, falling back to experimental-webgl');
+                gl = canvas.getContext('experimental-webgl');
+                if (!gl) {
+                    // Use a custom modal or message box instead of alert()
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center';
+                    messageDiv.innerHTML = `
+                        <div class="bg-red-700 text-white p-6 rounded-lg shadow-lg">
+                            <h3 class="text-xl font-bold mb-2">WebGL Error</h3>
+                            <p>Your browser does not support WebGL. Please try a different browser or update your current one.</p>
+                            <button class="mt-4 px-4 py-2 bg-blue-500 rounded hover:bg-blue-600" onclick="this.parentElement.parentElement.remove()">Dismiss</button>
+                        </div>
+                    `;
+                    document.body.appendChild(messageDiv);
+                    return;
+                }
+            }
+
+            const vsSource = `
+                attribute vec2 aVertexPosition;
+                uniform vec2 uOffset;
+                uniform vec2 uScale;
+
+                void main() {
+                    vec2 clipSpace = (aVertexPosition * uScale + uOffset) * 2.0 - 1.0;
+                    gl_Position = vec4(clipSpace, 0.0, 1.0);
+                }
+            `;
+
+            const fsSource = `
+                precision mediump float;
+                uniform vec4 uColor;
+
+                void main() {
+                    gl_FragColor = uColor;
+                }
+            `;
+
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+            program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+                return null;
+            }
+
+            gl.useProgram(program);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+
+        // Helper function to compile shaders (unchanged)
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        // Function to draw a rectangle (unchanged)
+        function drawRectangle(x, y, width, height, color) {
+            const positions = [
+                0, 0, 1, 0, 0, 1,
+                0, 1, 1, 0, 1, 1,
+            ];
+
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            const aVertexPosition = gl.getAttribLocation(program, 'aVertexPosition');
+            gl.vertexAttribPointer(aVertexPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(aVertexPosition);
+
+            const uOffset = gl.getUniformLocation(program, 'uOffset');
+            const uScale = gl.getUniformLocation(program, 'uScale');
+            const uColor = gl.getUniformLocation(program, 'uColor');
+
+            gl.uniform2f(uOffset, x, y);
+            gl.uniform2f(uScale, width, height);
+            gl.uniform4fv(uColor, color);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        let lastTime = 0;
+        const playerSpeed = 0.002;
+        const gravity = -0.0005;
+        const jumpStrength = 0.015;
+
+        const keysPressed = {};
+        window.addEventListener('keydown', (e) => {
+            keysPressed[e.key] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            keysPressed[e.key] = false;
+        });
+
+        // Update the UI with player information
+        function updatePlayerInfoUI() {
+            const container = document.getElementById('playerInfoContainer');
+            container.innerHTML = `
+                <div class="player-status">
+                    <p><strong>Local Player (${localPlayer.id.substring(0, 8)}):</strong></p>
+                    <p>X: <span id="localPlayerX">${localPlayer.x.toFixed(2)}</span> Y: <span id="localPlayerY">${localPlayer.y.toFixed(2)}</span></p>
+                </div>
+            `;
+            remotePlayers.forEach(player => {
+                const playerDiv = document.createElement('div');
+                playerDiv.className = 'player-status';
+                playerDiv.innerHTML = `
+                    <p><strong>Remote (${player.id.substring(0, 8)}):</strong></p>
+                    <p>X: <span id="remotePlayerX_${player.id}">${player.x.toFixed(2)}</span> Y: <span id="remotePlayerY_${player.id}">${player.y.toFixed(2)}</span></p>
+                `;
+                container.appendChild(playerDiv);
+            });
+        }
+
+
+        // Main game loop
+        function gameLoop(currentTime) {
+            const deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+
+            gl.clearColor(0.2, 0.25, 0.3, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // --- Local Player Logic ---
+            localPlayer.vx = 0;
+
+            if (keysPressed['ArrowLeft']) {
+                localPlayer.vx = -playerSpeed;
+            }
+            if (keysPressed['ArrowRight']) {
+                localPlayer.vx = playerSpeed;
+            }
+            if (keysPressed['ArrowUp'] && !localPlayer.isJumping) {
+                localPlayer.vy = jumpStrength;
+                localPlayer.isJumping = true;
+            }
+
+            localPlayer.vy += gravity;
+            localPlayer.x += localPlayer.vx * deltaTime;
+            localPlayer.y += localPlayer.vy * deltaTime;
+
+            if (localPlayer.y < -0.8) {
+                localPlayer.y = -0.8;
+                localPlayer.vy = 0;
+                localPlayer.isJumping = false;
+            }
+            if (localPlayer.x < -1.0) localPlayer.x = -1.0;
+            if (localPlayer.x > 1.0 - 0.1) localPlayer.x = 1.0 - 0.1;
+
+            // --- Remote Players Logic (Simulated) ---
+            // In a real app, this would be updated by network messages.
+            // Here, we're just simulating some movement for each remote player.
+            remotePlayers.forEach(player => {
+                if (Math.random() < 0.005) { // Smaller chance to jump randomly
+                    if (!player.isJumping) {
+                        player.vy = jumpStrength * 0.8;
+                        player.isJumping = true;
+                    }
+                }
+                player.vy += gravity;
+                player.y += player.vy * deltaTime;
+
+                if (player.y < -0.8) {
+                    player.y = -0.8;
+                    player.vy = 0;
+                    player.isJumping = false;
+                }
+                // Random horizontal drift for simulation
+                player.x += (Math.random() - 0.5) * 0.001 * deltaTime;
+                if (player.x < -1.0) player.x = -1.0;
+                if (player.x > 1.0 - 0.1) player.x = 1.0 - 0.1;
+            });
+
+
+            // --- Rendering ---
+            platforms.forEach(p => {
+                drawRectangle(p[0], p[1], p[2], p[3], [0.4, 0.4, 0.4, 1.0]); // Grey platforms
+            });
+
+            // Draw local player
+            drawRectangle(localPlayer.x, localPlayer.y, 0.1, 0.2, localPlayer.color);
+
+            // Draw all remote players
+            remotePlayers.forEach(player => {
+                drawRectangle(player.x, player.y, 0.1, 0.2, player.color);
+            });
+
+
+            // --- Update UI for debug/info ---
+            document.getElementById('localPlayerX').textContent = localPlayer.x.toFixed(2);
+            document.getElementById('localPlayerY').textContent = localPlayer.y.toFixed(2);
+            // Update UI for remote players
+            remotePlayers.forEach(player => {
+                const xSpan = document.getElementById(`remotePlayerX_${player.id}`);
+                const ySpan = document.getElementById(`remotePlayerY_${player.id}`);
+                if (xSpan) xSpan.textContent = player.x.toFixed(2);
+                if (ySpan) ySpan.textContent = player.y.toFixed(2);
+            });
+            updatePlayerInfoUI(); // Refresh the entire UI container
+
+            // --- WebTransport Simulation (Conceptual) ---
+            // sendPlayerState(localPlayer); // Would be called here if WebTransport was live
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = function() {
+            initWebGL();
+            if (gl) {
+                const adjustCanvasSize = () => {
+                    const rect = canvas.getBoundingClientRect();
+                    canvas.width = rect.width;
+                    canvas.height = rect.height;
+                    gl.viewport(0, 0, canvas.width, canvas.height);
+                };
+                adjustCanvasSize();
+                window.addEventListener('resize', adjustCanvasSize);
+
+                updatePlayerInfoUI(); // Initial UI update
+                gameLoop(0);
+            }
+        };
+
+        // Conceptual WebTransport API usage
+        // Note: This part is purely illustrative and will not establish a real connection
+        // without a compatible WebTransport server and appropriate browser flags.
+        async function setupWebTransport() {
+            const url = 'https://localhost:4433/game'; // Replace with your actual server endpoint
+
+            try {
+                const transport = new WebTransport(url);
+                console.log('Attempting to connect to WebTransport server...');
+
+                await transport.ready;
+                console.log('WebTransport connection established! Local Player ID:', localPlayerId);
+
+                const bidirectionalStream = await transport.createBidirectionalStream();
+
+                // Reader for incoming messages from the server
+                const reader = bidirectionalStream.readable.getReader();
+                async function readLoop() {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) {
+                            console.log('Reader closed.');
+                            break;
+                        }
+                        const message = new TextDecoder().decode(value);
+                        try {
+                            const receivedState = JSON.parse(message);
+                            // Ensure the received state has an ID and is not our own local player's state
+                            if (receivedState.id && receivedState.id !== localPlayerId) {
+                                // Update or add the remote player
+                                remotePlayers.set(receivedState.id, new PlayerState(
+                                    receivedState.id,
+                                    receivedState.x,
+                                    receivedState.y,
+                                    receivedState.vx,
+                                    receivedState.vy,
+                                    receivedState.isJumping,
+                                    // Assign a color if new, or keep existing color
+                                    remotePlayers.has(receivedState.id) ? remotePlayers.get(receivedState.id).color : playerColors[colorIndex++ % playerColors.length]
+                                ));
+                                // Trigger UI update
+                                updatePlayerInfoUI();
+                            } else if (receivedState.id === localPlayerId) {
+                                // This is an echo of our own state, useful for server authoritative games
+                                // but we typically wouldn't render based on it to avoid self-lag.
+                            } else if (receivedState.type === 'PLAYER_DISCONNECTED' && receivedState.id) {
+                                remotePlayers.delete(receivedState.id);
+                                updatePlayerInfoUI();
+                                console.log(`Player ${receivedState.id} disconnected.`);
+                            }
+                        } catch (e) {
+                            console.error('Failed to parse incoming message:', e, message);
+                        }
+                        console.log('Received from server (simulated):', message);
+                    }
+                }
+                readLoop();
+
+                // Writer for outgoing messages to the server
+                const writer = bidirectionalStream.writable.getWriter();
+                window.sendPlayerState = async function(playerState) { // Expose globally for game loop
+                    try {
+                        const serializedState = JSON.stringify(playerState);
+                        const data = new TextEncoder().encode(serializedState);
+                        await writer.write(data);
+                        // console.log('Sent local state:', serializedState);
+                    } catch (error) {
+                        console.error('Failed to send player state:', error);
+                    }
+                };
+
+                // Example of how you would call sendPlayerState inside your gameLoop:
+                // Call `sendPlayerState(localPlayer)` periodically (e.g., at 60Hz)
+
+                await transport.closed;
+                console.log('WebTransport connection closed.');
+
+            } catch (error) {
+                console.error('WebTransport connection failed:', error);
+                console.info('To enable WebTransport locally, visit chrome://flags and enable "Experimental WebTransport" or ensure you are using an HTTPS server with a valid certificate.');
+            }
+        }
+
+        // Uncomment this line to try and set up a real WebTransport connection (requires a server)
+        // setupWebTransport();
+
+    </script>
+</body>
+</html>
