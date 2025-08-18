@@ -1,0 +1,15 @@
+/* The canvas will stretch to fill its parent container */
+#gl-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+/* This container will hold our canvas */
+#canvas-container {
+    /* It won't be bigger than the screen */
+    max-width: 100vw;
+    max-height: 100vh;
+
+    /* This is the magic property! */
+    aspect-ratio: 4000 / 3000; /* Or 4 / 3 */
+}
