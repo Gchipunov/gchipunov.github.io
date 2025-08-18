@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL 2D Platformer Client (Conceptual)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            display: flex;
+            justify-content.center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+        }
+        canvas {
+            background-color: #2d3748; /* Slightly lighter dark blue */
+            border-radius: 1rem; /* Rounded corners */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+            display: block;
+            touch-action: none; /* Prevent browser touch actions */
+        }
+        .info-box {
+            background-color: #2d3748;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.15);
+            margin-top: 1rem;
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+        }
+        .player-info {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1rem;
+        }
+        .player-status {
+            font-size: 0.875rem;
+        }
+        .player-status span {
+            font-weight: bold;
+            color: #63b3ed; /* Blue for values */
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center p-4">
+    <h1 class="text-3xl font-bold text-white mb-4">WebGL 2D Platformer (Conceptual Client)</h1>
+    <p class="text-gray-400 text-center mb-6 max-w-xl">
+        This demonstration illustrates the client-side concepts for a 2D platformer with WebGL rendering and a simulated WebTransport API for player state synchronization.
+        <strong>It does not connect to a real server.</strong>
+    </p>
+
+    <canvas id="gameCanvas" width="800" height="400" class="w-full max-w-4xl h-auto"></canvas>
+
+    <div class="info-box mt-6">
+        <h2 class="text-xl font-semibold mb-2">Simulation Status</h2>
+        <p class="text-sm mb-4">
+            Below you'll see the simulated player states being "sent" and "received" within this client.
+            In a real application, these states would travel over WebTransport to/from a server.
+        </p>
+        <div class="player-info">
+            <div class="player-status">
+                <p><strong>Local Player (P1):</strong></p>
+                <p>X: <span id="localPlayerX">0</span> Y: <span id="localPlayerY">0</span></p>
+            </div>
+            <div class="player-status">
+                <p><strong>Remote Player (P2):</strong></p>
+                <p>X: <span id="remotePlayerX">0</span> Y: <span id="remotePlayerY">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Ensure the canvas fits the screen and is responsive
+        const canvas = document.getElementById('gameCanvas');
+        let gl;
+        let program;
+
+        // PlayerState Class Definition
+        // This class defines the data structure for a player's state that would be sent over the network.
+        class PlayerState {
+            constructor(id, x, y, vx, vy, isJumping) {
+                this.id = id; // Unique identifier for the player
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.isJumping = isJumping;
+            }
+        }
+
+        // Game State
+        // This client simulates two players:
+        // - player1: The local player controlled by this client (simulated movement).
+        // - player2: The remote player whose state would be received from the server.
+        let player1 = new PlayerState('player1', -0.5, 0.0, 0.0, 0.0, false);
+        let player2 = new PlayerState('player2', 0.5, 0.0, 0.0, 0.0, false);
+
+        // Platform coordinates (normalized device coordinates, -1 to 1)
+        // For a 2D platformer, you'd typically have more complex collision detection.
+        // These are just for visual representation.
+        const platforms = [
+            // [x, y, width, height]
+            [-0.7, -0.8, 0.4, 0.05], // Left platform
+            [0.0, -0.4, 0.3, 0.05],  // Middle platform
+            [0.6, -0.1, 0.4, 0.05]   // Right platform
+        ];
+
+        // WebGL Initialization
+        function initWebGL() {
+            gl = canvas.getContext('webgl');
+            if (!gl) {
+                console.error('WebGL not supported, falling back to experimental-webgl');
+                gl = canvas.getContext('experimental-webgl');
+                if (!gl) {
+                    alert('Your browser does not support WebGL.');
+                    return;
+                }
+            }
+
+            // Vertex Shader: Transforms vertex positions
+            const vsSource = `
+                attribute vec2 aVertexPosition;
+                uniform vec2 uResolution;
+                uniform vec2 uOffset;
+                uniform vec2 uScale;
+
+                void main() {
+                    // Convert position from game coordinates to clip space (-1 to 1)
+                    // The scale and offset are used to position and size the rectangles
+                    vec2 clipSpace = (aVertexPosition * uScale + uOffset) * 2.0 - 1.0;
+                    gl_Position = vec4(clipSpace, 0.0, 1.0);
+                }
+            `;
+
+            // Fragment Shader: Determines pixel color
+            const fsSource = `
+                precision mediump float;
+                uniform vec4 uColor;
+
+                void main() {
+                    gl_FragColor = uColor;
+                }
+            `;
+
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+            program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+                return null;
+            }
+
+            gl.useProgram(program);
+
+            // Set the viewport to the size of the canvas
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+
+        // Helper function to compile shaders
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        // Function to draw a rectangle
+        function drawRectangle(x, y, width, height, color) {
+            const positions = [
+                0, 0,
+                1, 0,
+                0, 1,
+                0, 1,
+                1, 0,
+                1, 1,
+            ];
+
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            const aVertexPosition = gl.getAttribLocation(program, 'aVertexPosition');
+            gl.vertexAttribPointer(aVertexPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(aVertexPosition);
+
+            const uOffset = gl.getUniformLocation(program, 'uOffset');
+            const uScale = gl.getUniformLocation(program, 'uScale');
+            const uColor = gl.getUniformLocation(program, 'uColor');
+
+            // Set uniforms for position, size, and color
+            gl.uniform2f(uOffset, x, y);
+            gl.uniform2f(uScale, width, height);
+            gl.uniform4fv(uColor, color);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        // Game Loop Variables
+        let lastTime = 0;
+        const playerSpeed = 0.002; // Player movement speed
+        const gravity = -0.0005;  // Gravity affecting players
+        const jumpStrength = 0.015; // How high a player jumps
+
+        // Keyboard input handling for player1
+        const keysPressed = {};
+        window.addEventListener('keydown', (e) => {
+            keysPressed[e.key] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            keysPressed[e.key] = false;
+        });
+
+        // Main game loop
+        function gameLoop(currentTime) {
+            const deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+
+            // Clear the canvas
+            gl.clearColor(0.2, 0.25, 0.3, 1.0); // Background color
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // --- Player 1 (Local Player) Logic ---
+            // Simulate movement for local player (player1)
+            player1.vx = 0; // Reset horizontal velocity
+
+            if (keysPressed['ArrowLeft']) {
+                player1.vx = -playerSpeed;
+            }
+            if (keysPressed['ArrowRight']) {
+                player1.vx = playerSpeed;
+            }
+            if (keysPressed['ArrowUp'] && !player1.isJumping) {
+                player1.vy = jumpStrength;
+                player1.isJumping = true;
+            }
+
+            // Apply gravity
+            player1.vy += gravity;
+
+            // Update position
+            player1.x += player1.vx * deltaTime;
+            player1.y += player1.vy * deltaTime;
+
+            // Basic collision with floor (or platforms in a real game)
+            // Prevent falling off the bottom of the screen (game boundary)
+            if (player1.y < -0.8) {
+                player1.y = -0.8;
+                player1.vy = 0;
+                player1.isJumping = false;
+            }
+
+            // Prevent going off screen horizontally
+            if (player1.x < -1.0) player1.x = -1.0;
+            if (player1.x > 1.0 - 0.1) player1.x = 1.0 - 0.1; // Assuming player width 0.1
+
+            // --- Player 2 (Remote Player) Logic ---
+            // In a real application, player2's state would be updated here
+            // based on received WebTransport messages from the server.
+            // For this simulation, we'll make player2 randomly move for demonstration.
+            if (Math.random() < 0.01) { // Small chance to jump
+                if (!player2.isJumping) {
+                    player2.vy = jumpStrength * 0.8; // Slightly less jump
+                    player2.isJumping = true;
+                }
+            }
+            player2.vy += gravity;
+            player2.y += player2.vy * deltaTime;
+
+            if (player2.y < -0.8) {
+                player2.y = -0.8;
+                player2.vy = 0;
+                player2.isJumping = false;
+            }
+            // Basic horizontal oscillation for remote player
+            player2.x = Math.sin(currentTime * 0.0005) * 0.7;
+
+
+            // --- Rendering ---
+            // Draw platforms
+            platforms.forEach(p => {
+                drawRectangle(p[0], p[1], p[2], p[3], [0.4, 0.4, 0.4, 1.0]); // Grey platforms
+            });
+
+            // Draw player1 (red)
+            drawRectangle(player1.x, player1.y, 0.1, 0.2, [1.0, 0.0, 0.0, 1.0]);
+
+            // Draw player2 (blue)
+            drawRectangle(player2.x, player2.y, 0.1, 0.2, [0.0, 0.0, 1.0, 1.0]);
+
+
+            // --- Update UI for debug/info ---
+            document.getElementById('localPlayerX').textContent = player1.x.toFixed(2);
+            document.getElementById('localPlayerY').textContent = player1.y.toFixed(2);
+            document.getElementById('remotePlayerX').textContent = player2.x.toFixed(2);
+            document.getElementById('remotePlayerY').textContent = player2.y.toFixed(2);
+
+
+            // --- WebTransport Simulation (Conceptual) ---
+            // This section demonstrates *how* WebTransport would conceptually work.
+            // In a real scenario, this would involve actual network calls.
+
+            // Simulate sending player1's state
+            // const player1StateToSend = new PlayerState(player1.id, player1.x, player1.y, player1.vx, player1.vy, player1.isJumping);
+            // const serializedState = JSON.stringify(player1StateToSend);
+            // Example: webTransportStream.write(new TextEncoder().encode(serializedState));
+
+            // Simulate receiving player2's state
+            // In a real app, this would be an async operation, reacting to incoming data.
+            // For now, player2's movement is client-side simulated.
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize WebGL and start the game loop when the window loads
+        window.onload = function() {
+            initWebGL();
+            if (gl) {
+                // Adjust canvas resolution to match its displayed size for better rendering quality
+                const adjustCanvasSize = () => {
+                    const rect = canvas.getBoundingClientRect();
+                    canvas.width = rect.width;
+                    canvas.height = rect.height;
+                    gl.viewport(0, 0, canvas.width, canvas.height);
+                };
+                adjustCanvasSize(); // Set initial size
+                window.addEventListener('resize', adjustCanvasSize); // Adjust on resize
+
+                gameLoop(0); // Start the game loop
+            }
+        };
+
+        // Conceptual WebTransport API usage
+        // Note: This part is purely illustrative and will not establish a real connection
+        // without a compatible WebTransport server and appropriate browser flags.
+        // WebTransport is designed for high-performance, low-latency, and secure data transfer.
+        async function setupWebTransport() {
+            // A dummy URL, replace with your actual server endpoint (e.g., 'https://your-server.com/game')
+            const url = 'https://localhost:4433/game';
+
+            try {
+                // Create a WebTransport connection
+                // Requires an HTTPS server with a valid certificate or local trust.
+                // In Chrome, you might need to enable '#enable-webtransport' flag in chrome://flags.
+                const transport = new WebTransport(url);
+                console.log('Attempting to connect to WebTransport server...');
+
+                // Wait for the connection to be ready
+                await transport.ready;
+                console.log('WebTransport connection established!');
+
+                // Bidirectional stream for sending and receiving data
+                const bidirectionalStream = await transport.createBidirectionalStream();
+
+                // Reader for incoming messages from the server
+                const reader = bidirectionalStream.readable.getReader();
+                async function readLoop() {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) {
+                            console.log('Reader closed.');
+                            break;
+                        }
+                        const message = new TextDecoder().decode(value);
+                        // In a real game, you would parse this message
+                        // and update the state of the remote player (player2).
+                        // Example: const remotePlayerState = JSON.parse(message);
+                        // player2.x = remotePlayerState.x;
+                        // player2.y = remotePlayerState.y;
+                        // ... etc.
+                        console.log('Received from server (simulated):', message);
+                    }
+                }
+                readLoop();
+
+                // Writer for outgoing messages to the server
+                const writer = bidirectionalStream.writable.getWriter();
+                async function sendPlayerState(playerState) {
+                    const serializedState = JSON.stringify(playerState);
+                    const data = new TextEncoder().encode(serializedState);
+                    await writer.write(data);
+                    // console.log('Sent to server (simulated):', serializedState);
+                }
+
+                // Attach sendPlayerState to your game loop to send updates frequently
+                // For instance, you could call this inside gameLoop after player1's state updates:
+                // sendPlayerState(player1);
+
+                // Handle connection closure
+                await transport.closed;
+                console.log('WebTransport connection closed.');
+
+            } catch (error) {
+                console.error('WebTransport connection failed:', error);
+                console.info('To enable WebTransport locally, visit chrome://flags and enable "Experimental WebTransport" or ensure you are using an HTTPS server with a valid certificate.');
+            }
+        }
+
+        // You would uncomment this line to try and set up a real WebTransport connection
+        // setupWebTransport();
+
+    </script>
+</body>
+</html>
