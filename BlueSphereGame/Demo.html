@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blue Sphere 3D</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+        }
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #score-board {
+            padding: 20px;
+            font-size: 2rem;
+            font-weight: bold;
+        }
+        #message-box {
+            font-size: 3rem;
+            font-weight: bold;
+            background-color: rgba(0,0,0,0.5);
+            padding: 20px 40px;
+            border-radius: 15px;
+            display: none; /* Hidden by default */
+        }
+        #mobile-controls {
+            width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 10px;
+            max-width: 300px;
+            margin: 0 auto;
+            pointer-events: auto;
+        }
+        .control-btn {
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            color: white;
+            font-size: 1.5rem;
+            border-radius: 50%;
+            width: 70px;
+            height: 70px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+        .control-btn:active {
+            background-color: rgba(255, 255, 255, 0.4);
+        }
+        #btn-up { grid-column: 2 / 3; grid-row: 1 / 2; }
+        #btn-left { grid-column: 1 / 2; grid-row: 2 / 3; }
+        #btn-right { grid-column: 3 / 4; grid-row: 2 / 3; }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="ui-container">
+            <div id="score-board">Blue Spheres: 0 / 0</div>
+            <div id="message-box"></div>
+            <div id="mobile-controls" class="sm:hidden">
+                <button id="btn-up" class="control-btn">&#9650;</button>
+                <button id="btn-left" class="control-btn">&#9664;</button>
+                <button id="btn-right" class="control-btn">&#9654;</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Basic Setup ---
+        let scene, camera, renderer, player, clock;
+        let worldObjects = [];
+        const SPHERE_RADIUS = 2.5;
+        const GRID_SPACING = SPHERE_RADIUS * 2.5;
+
+        // --- Game State ---
+        let playerPosition = new THREE.Vector2(0, 0); // Grid coordinates (x, z)
+        let playerDirection = new THREE.Vector3(0, 0, -1); // Initial direction (forward)
+        let isMoving = false;
+        let moveQueue = [];
+        const MOVE_SPEED = 25;
+        let gameOver = false;
+        let blueSpheresTotal = 0;
+        let blueSpheresCollected = 0;
+
+        // --- Level Data ---
+        // 0: Empty, 1: Blue Sphere, 2: Bumper, 3: Yellow Sphere
+        const levelGrid = [
+            [2, 2, 1, 1, 1, 1, 1, 2, 2],
+            [2, 1, 1, 3, 1, 3, 1, 1, 2],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 3, 1, 2, 2, 2, 1, 3, 1],
+            [1, 1, 1, 2, 0, 2, 1, 1, 1],
+            [1, 3, 1, 2, 2, 2, 1, 3, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [2, 1, 1, 3, 1, 3, 1, 1, 2],
+            [2, 2, 1, 1, 1, 1, 1, 2, 2],
+        ];
+        const gridWidth = levelGrid[0].length;
+        const gridHeight = levelGrid.length;
+        const gridSpheres = [];
+
+        // --- Initialization ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+            scene.fog = new THREE.Fog(0x111827, 50, 150);
+
+            // Clock
+            clock = new THREE.Clock();
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 20, 20);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('game-container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(-10, 20, 10);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            // Create Game Elements
+            createGrid();
+            createPlayer();
+            updateScore();
+
+            // Controls
+            setupControls();
+
+            // Handle Window Resize
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Start Animation Loop
+            animate();
+        }
+
+        // --- World Creation ---
+        function createGrid() {
+            const sphereGeometry = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 32);
+            
+            const materials = {
+                blue: new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.3, metalness: 0.5 }),
+                red: new THREE.MeshStandardMaterial({ color: 0xff4444, roughness: 0.3, metalness: 0.5 }),
+                bumper: new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.8, metalness: 0.2 }),
+                yellow: new THREE.MeshStandardMaterial({ color: 0xffdd00, roughness: 0.3, metalness: 0.5 }),
+            };
+
+            for (let z = 0; z < gridHeight; z++) {
+                gridSpheres[z] = [];
+                for (let x = 0; x < gridWidth; x++) {
+                    const type = levelGrid[z][x];
+                    if (type === 0) {
+                        gridSpheres[z][x] = null;
+                        continue;
+                    }
+
+                    let material;
+                    switch (type) {
+                        case 1: material = materials.blue.clone(); blueSpheresTotal++; break;
+                        case 2: material = materials.bumper.clone(); break;
+                        case 3: material = materials.yellow.clone(); break;
+                    }
+
+                    const sphere = new THREE.Mesh(sphereGeometry, material);
+                    sphere.position.set(
+                        (x - Math.floor(gridWidth / 2)) * GRID_SPACING,
+                        0,
+                        (z - Math.floor(gridHeight / 2)) * GRID_SPACING
+                    );
+                    sphere.castShadow = true;
+                    sphere.receiveShadow = true;
+                    sphere.userData = { type: type, originalType: type, gridX: x, gridZ: z };
+                    scene.add(sphere);
+                    worldObjects.push(sphere);
+                    gridSpheres[z][x] = sphere;
+                }
+            }
+        }
+
+        function createPlayer() {
+            const geometry = new THREE.IcosahedronGeometry(SPHERE_RADIUS * 0.8, 1);
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x333333, roughness: 0.1, metalness: 0.8 });
+            player = new THREE.Mesh(geometry, material);
+            
+            const startZ = Math.floor(gridHeight / 2);
+            const startX = Math.floor(gridWidth / 2) + 1; // Start one tile right of center
+            
+            playerPosition.set(startX, startZ);
+
+            const startSphere = gridSpheres[startZ][startX];
+            if (startSphere) {
+                 player.position.copy(startSphere.position).y += SPHERE_RADIUS;
+                 handleCollision(startSphere, true);
+            }
+           
+            player.castShadow = true;
+            scene.add(player);
+        }
+
+        // --- Controls ---
+        function setupControls() {
+            document.addEventListener('keydown', (event) => {
+                if (gameOver) return;
+                switch (event.key) {
+                    case 'ArrowUp':
+                    case 'w':
+                        queueMove('forward');
+                        break;
+                    case 'ArrowLeft':
+                    case 'a':
+                        queueMove('left');
+                        break;
+                    case 'ArrowRight':
+                    case 'd':
+                        queueMove('right');
+                        break;
+                }
+            });
+
+            document.getElementById('btn-up').addEventListener('click', () => queueMove('forward'));
+            document.getElementById('btn-left').addEventListener('click', () => queueMove('left'));
+            document.getElementById('btn-right').addEventListener('click', () => queueMove('right'));
+        }
+
+        function queueMove(direction) {
+            if (isMoving || gameOver) return;
+            moveQueue.push(direction);
+        }
+
+        // --- Game Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            updatePlayer(delta);
+            updateCamera();
+
+            renderer.render(scene, camera);
+        }
+
+        function updatePlayer(delta) {
+            if (gameOver) return;
+
+            if (!isMoving && moveQueue.length > 0) {
+                const move = moveQueue.shift();
+                if (move === 'left') {
+                    playerDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+                } else if (move === 'right') {
+                    playerDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+                }
+                
+                // Always move forward after turning
+                const nextGridPos = new THREE.Vector2(
+                    playerPosition.x + Math.round(playerDirection.x),
+                    playerPosition.y + Math.round(playerDirection.z)
+                );
+                
+                // Toroidal world wrapping
+                nextGridPos.x = (nextGridPos.x + gridWidth) % gridWidth;
+                nextGridPos.y = (nextGridPos.y + gridHeight) % gridHeight;
+
+                const targetSphere = gridSpheres[nextGridPos.y][nextGridPos.x];
+                if (targetSphere) {
+                    isMoving = true;
+                    const targetPosition = targetSphere.position.clone();
+                    targetPosition.y += SPHERE_RADIUS; // Player floats above spheres
+                    
+                    const moveVector = new THREE.Vector3().subVectors(targetPosition, player.position);
+                    const moveDistance = moveVector.length();
+                    const moveDuration = moveDistance / MOVE_SPEED;
+
+                    let elapsedTime = 0;
+                    const startPosition = player.position.clone();
+
+                    // Simple tweening for movement
+                    function moveStep() {
+                        elapsedTime += clock.getDelta();
+                        const progress = Math.min(elapsedTime / moveDuration, 1);
+                        player.position.lerpVectors(startPosition, targetPosition, progress);
+
+                        if (progress < 1) {
+                            requestAnimationFrame(moveStep);
+                        } else {
+                            player.position.copy(targetPosition);
+                            playerPosition.copy(nextGridPos);
+                            isMoving = false;
+                            handleCollision(targetSphere);
+                        }
+                    }
+                    moveStep();
+                }
+            }
+        }
+
+        function updateCamera() {
+            const cameraOffset = playerDirection.clone().multiplyScalar(-15).add(new THREE.Vector3(0, 10, 0));
+            const cameraTargetPosition = player.position.clone().add(cameraOffset);
+            camera.position.lerp(cameraTargetPosition, 0.05);
+            camera.lookAt(player.position);
+        }
+
+        // --- Collision & Logic ---
+        function handleCollision(sphere, isInitial = false) {
+            if (!sphere || gameOver) return;
+
+            const userData = sphere.userData;
+
+            switch (userData.type) {
+                case 1: // Blue Sphere
+                    sphere.material.color.set(0xff4444); // Change to red
+                    userData.type = -1; // Mark as red
+                    blueSpheresCollected++;
+                    updateScore();
+                    if (blueSpheresCollected === blueSpheresTotal) {
+                        endGame(true);
+                    }
+                    break;
+                case -1: // Red Sphere
+                    if(!isInitial) endGame(false);
+                    break;
+                case 2: // Bumper
+                    playerDirection.negate();
+                    moveQueue.unshift('forward'); // Force a move back
+                    break;
+                case 3: // Yellow Sphere (jump)
+                    // Queue two forward moves to jump over the next sphere
+                    moveQueue.unshift('forward');
+                    moveQueue.unshift('forward');
+                    break;
+            }
+        }
+
+        function endGame(win) {
+            gameOver = true;
+            const messageBox = document.getElementById('message-box');
+            if (win) {
+                messageBox.textContent = 'YOU WIN!';
+                messageBox.style.color = '#4ade80'; // green-400
+            } else {
+                messageBox.textContent = 'GAME OVER';
+                messageBox.style.color = '#f87171'; // red-400
+            }
+            messageBox.style.display = 'block';
+        }
+
+        function updateScore() {
+            document.getElementById('score-board').textContent = `Blue Spheres: ${blueSpheresCollected} / ${blueSpheresTotal}`;
+        }
+
+        // --- Utility ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Start the game ---
+        init();
+    </script>
+</body>
+</html>
