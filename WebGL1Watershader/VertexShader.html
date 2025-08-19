@@ -1,0 +1,29 @@
+<script id="vertex-shader" type="x-shader/x-vertex">
+  attribute vec3 a_position;
+  attribute vec3 a_normal;
+
+  uniform mat4 u_modelViewMatrix;
+  uniform mat4 u_projectionMatrix;
+  uniform float u_time;
+
+  varying vec3 v_worldPosition;
+  varying vec3 v_normal;
+
+  void main() {
+    // Displace the vertex y-position to create waves
+    float waveHeight = 0.1;
+    float waveFrequency = 10.0;
+    float newY = a_position.y + sin(a_position.x * waveFrequency + u_time) * waveHeight;
+    newY += cos(a_position.z * waveFrequency * 0.5 + u_time) * waveHeight * 0.5;
+
+    vec3 displacedPosition = vec3(a_position.x, newY, a_position.z);
+
+    // Standard transformations
+    gl_Position = u_projectionMatrix * u_modelViewMatrix * vec4(displacedPosition, 1.0);
+
+    // Pass position and normal to the fragment shader
+    v_worldPosition = displacedPosition;
+    v_normal = a_normal; // Note: For simplicity, we use the original normal.
+                         // A more advanced shader would recalculate the normal based on the wave.
+  }
+</script>
