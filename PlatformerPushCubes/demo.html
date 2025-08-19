@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL 2D Platformer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center h-screen">
+    <div class="w-full max-w-4xl text-center mb-4">
+        <h1 class="text-3xl font-bold">WebGL 2D Platformer</h1>
+        <p class="text-gray-400">Use Arrow Keys to move and jump. Push the cubes!</p>
+    </div>
+    <div class="w-full max-w-4xl aspect-[16/9] rounded-lg overflow-hidden shadow-2xl">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+</body>
+<script>
+    // --- WebGL Setup ---
+    const canvas = document.getElementById('gameCanvas');
+    const gl = canvas.getContext('webgl');
+
+    if (!gl) {
+        throw new Error('WebGL not supported');
+    }
+
+    // --- Shader Source ---
+    const vertexShaderSource = `
+        attribute vec2 a_position;
+        uniform mat3 u_transform;
+
+        void main() {
+            gl_Position = vec4((u_transform * vec3(a_position, 1.0)).xy, 0.0, 1.0);
+        }
+    `;
+
+    const fragmentShaderSource = `
+        precision mediump float;
+        uniform vec4 u_color;
+
+        void main() {
+            gl_FragColor = u_color;
+        }
+    `;
+
+    // --- Shader Compilation & Program Linking ---
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error('Error compiling shader:', gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Error linking program:', gl.getProgramInfoLog(program));
+            gl.deleteProgram(program);
+            return null;
+        }
+        return program;
+    }
+
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+    const shaderProgram = createProgram(gl, vertexShader, fragmentShader);
+
+    // --- Attribute and Uniform Locations ---
+    const positionAttributeLocation = gl.getAttribLocation(shaderProgram, 'a_position');
+    const transformUniformLocation = gl.getUniformLocation(shaderProgram, 'u_transform');
+    const colorUniformLocation = gl.getUniformLocation(shaderProgram, 'u_color');
+
+    // --- Buffer for a unit square ---
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    const positions = [
+        0, 0,
+        1, 0,
+        0, 1,
+        0, 1,
+        1, 0,
+        1, 1,
+    ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    // --- Game State ---
+    const world = {
+        width: 800,
+        height: 450,
+        gravity: 0.5,
+        friction: 0.9,
+    };
+
+    const player = {
+        x: 50, y: 50,
+        width: 20, height: 30,
+        vx: 0, vy: 0,
+        color: [0.2, 0.6, 1.0, 1.0], // Blue
+        isJumping: false,
+        speed: 3,
+        jumpStrength: 12,
+    };
+
+    const cubes = [
+        { x: 200, y: 50, width: 25, height: 25, vx: 0, vy: 0, color: [1.0, 0.5, 0.2, 1.0] }, // Orange
+        { x: 400, y: 50, width: 25, height: 25, vx: 0, vy: 0, color: [0.5, 1.0, 0.2, 1.0] }, // Green
+        { x: 600, y: 100, width: 25, height: 25, vx: 0, vy: 0, color: [1.0, 0.2, 0.5, 1.0] }, // Pink
+    ];
+
+    const platforms = [
+        { x: 0, y: 0, width: world.width, height: 20, color: [0.5, 0.5, 0.5, 1.0] }, // Ground
+        { x: 150, y: 100, width: 100, height: 20, color: [0.5, 0.5, 0.5, 1.0] },
+        { x: 350, y: 150, width: 150, height: 20, color: [0.5, 0.5, 0.5, 1.0] },
+        { x: 550, y: 80, width: 80, height: 20, color: [0.5, 0.5, 0.5, 1.0] },
+    ];
+    
+    const keys = {};
+
+    // --- Input Handling ---
+    window.addEventListener('keydown', (e) => keys[e.key] = true);
+    window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+    // --- Game Logic ---
+    function update() {
+        // Player movement
+        if (keys['ArrowLeft']) {
+            player.vx = -player.speed;
+        } else if (keys['ArrowRight']) {
+            player.vx = player.speed;
+        } else {
+            player.vx = 0;
+        }
+
+        if ((keys['ArrowUp'] || keys[' ']) && !player.isJumping) {
+            player.vy = player.jumpStrength;
+            player.isJumping = true;
+        }
+
+        // Apply physics to player
+        player.vy -= world.gravity;
+        player.x += player.vx;
+        player.y += player.vy;
+
+        // Apply physics to cubes
+        cubes.forEach(cube => {
+            cube.vy -= world.gravity;
+            cube.x += cube.vx;
+            cube.y += cube.vy;
+            cube.vx *= world.friction; // Apply friction
+        });
+        
+        // Collision Detection and Resolution
+        const allObjects = [player, ...cubes];
+
+        allObjects.forEach(obj => {
+            let onGround = false;
+            // Collision with platforms
+            platforms.forEach(p => {
+                if (isColliding(obj, p)) {
+                    const overlapY = (obj.y + obj.height) - p.y;
+                    const prevBottom = (obj.y - obj.vy) + obj.height;
+
+                    if (obj.vy < 0 && prevBottom <= p.y + p.height) {
+                         obj.y = p.y + p.height;
+                         obj.vy = 0;
+                         if (obj === player) {
+                            player.isJumping = false;
+                         }
+                         onGround = true;
+                    }
+                }
+            });
+
+            // Prevent falling through the floor
+            if (obj.y < 0) {
+                obj.y = 0;
+                obj.vy = 0;
+                if (obj === player) {
+                   player.isJumping = false;
+                }
+            }
+        });
+        
+        // Player-Cube and Cube-Cube collisions
+        for (let i = 0; i < allObjects.length; i++) {
+            for (let j = i + 1; j < allObjects.length; j++) {
+                const objA = allObjects[i];
+                const objB = allObjects[j];
+
+                if (isColliding(objA, objB)) {
+                    resolveCollision(objA, objB);
+                }
+            }
+        }
+    }
+    
+    function isColliding(rect1, rect2) {
+        return rect1.x < rect2.x + rect2.width &&
+               rect1.x + rect1.width > rect2.x &&
+               rect1.y < rect2.y + rect2.height &&
+               rect1.y + rect1.height > rect2.y;
+    }
+
+    function resolveCollision(objA, objB) {
+        const dx = (objA.x + objA.width / 2) - (objB.x + objB.width / 2);
+        const dy = (objA.y + objA.height / 2) - (objB.y + objB.height / 2);
+        const combinedHalfWidths = objA.width / 2 + objB.width / 2;
+        const combinedHalfHeights = objA.height / 2 + objB.height / 2;
+        
+        const overlapX = combinedHalfWidths - Math.abs(dx);
+        const overlapY = combinedHalfHeights - Math.abs(dy);
+
+        if (overlapX > overlapY) { // Vertical collision
+            if (dy > 0) { // objA is above objB
+                objA.y += overlapY;
+                objA.vy = Math.max(objA.vy, objB.vy);
+                if (objA === player) player.isJumping = false;
+            } else { // objB is above objA
+                objB.y += overlapY;
+                objB.vy = Math.max(objA.vy, objB.vy);
+                 if (objB === player) player.isJumping = false;
+            }
+        } else { // Horizontal collision
+            if (dx > 0) { // objA is to the right of objB
+                objA.x += overlapX;
+                objB.vx -= overlapX / 4;
+                objA.vx += overlapX / 4;
+            } else { // objA is to the left of objB
+                objA.x -= overlapX;
+                objB.vx += overlapX / 4;
+                objA.vx -= overlapX / 4;
+            }
+        }
+    }
+
+
+    // --- Drawing ---
+    function draw() {
+        // Resize canvas and viewport
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+        // Clear the canvas
+        gl.clearColor(0.1, 0.1, 0.15, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        gl.useProgram(shaderProgram);
+
+        // Enable position attribute
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+        // Draw all objects
+        drawObject(player);
+        cubes.forEach(drawObject);
+        platforms.forEach(drawObject);
+    }
+
+    function drawObject(obj) {
+        // Set color
+        gl.uniform4fv(colorUniformLocation, obj.color);
+
+        // Create transformation matrix
+        let matrix = m3.projection(world.width, world.height);
+        matrix = m3.translate(matrix, obj.x, obj.y);
+        matrix = m3.scale(matrix, obj.width, obj.height);
+        
+        // Set the matrix
+        gl.uniformMatrix3fv(transformUniformLocation, false, matrix);
+
+        // Draw the rectangle
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    // --- Matrix Math Helper ---
+    const m3 = {
+        projection: function(width, height) {
+            return [
+                2 / width, 0, 0,
+                0, 2 / height, 0,
+                -1, -1, 1,
+            ];
+        },
+        translation: function(tx, ty) {
+            return [
+                1, 0, 0,
+                0, 1, 0,
+                tx, ty, 1,
+            ];
+        },
+        scaling: function(sx, sy) {
+            return [
+                sx, 0, 0,
+                0, sy, 0,
+                0, 0, 1,
+            ];
+        },
+        multiply: function(a, b) {
+            const a00 = a[0 * 3 + 0];
+            const a01 = a[0 * 3 + 1];
+            const a02 = a[0 * 3 + 2];
+            const a10 = a[1 * 3 + 0];
+            const a11 = a[1 * 3 + 1];
+            const a12 = a[1 * 3 + 2];
+            const a20 = a[2 * 3 + 0];
+            const a21 = a[2 * 3 + 1];
+            const a22 = a[2 * 3 + 2];
+            const b00 = b[0 * 3 + 0];
+            const b01 = b[0 * 3 + 1];
+            const b02 = b[0 * 3 + 2];
+            const b10 = b[1 * 3 + 0];
+            const b11 = b[1 * 3 + 1];
+            const b12 = b[1 * 3 + 2];
+            const b20 = b[2 * 3 + 0];
+            const b21 = b[2 * 3 + 1];
+            const b22 = b[2 * 3 + 2];
+            return [
+                b00 * a00 + b01 * a10 + b02 * a20,
+                b00 * a01 + b01 * a11 + b02 * a21,
+                b00 * a02 + b01 * a12 + b02 * a22,
+                b10 * a00 + b11 * a10 + b12 * a20,
+                b10 * a01 + b11 * a11 + b12 * a21,
+                b10 * a02 + b11 * a12 + b12 * a22,
+                b20 * a00 + b21 * a10 + b22 * a20,
+                b20 * a01 + b21 * a11 + b22 * a21,
+                b20 * a02 + b21 * a12 + b22 * a22,
+            ];
+        },
+        translate: function(m, tx, ty) {
+            return m3.multiply(m, m3.translation(tx, ty));
+        },
+        scale: function(m, sx, sy) {
+            return m3.multiply(m, m3.scaling(sx, sy));
+        },
+    };
+
+    // --- Game Loop ---
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Start the game
+    requestAnimationFrame(gameLoop);
+</script>
+</html>
