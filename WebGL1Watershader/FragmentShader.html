@@ -1,0 +1,35 @@
+<script id="fragment-shader" type="x-shader/x-fragment">
+  precision mediump float;
+
+  uniform vec3 u_lightDirection;
+  uniform vec3 u_cameraPosition;
+  uniform vec4 u_color;
+
+  varying vec3 v_worldPosition;
+  varying vec3 v_normal;
+
+  void main() {
+    vec3 normal = normalize(v_normal);
+    vec3 lightDir = normalize(u_lightDirection);
+    vec3 viewDir = normalize(u_cameraPosition - v_worldPosition);
+
+    // Diffuse lighting (basic color)
+    float diffuse = max(0.0, dot(normal, lightDir)) * 0.4;
+
+    // Specular highlight (the shiny reflection of the light source)
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0); // 32 is the shininess factor
+    vec3 specular = vec3(1.0, 1.0, 1.0) * spec * 0.8;
+
+    // Fresnel effect (more reflective at grazing angles)
+    float fresnel = 1.0 - max(dot(viewDir, normal), 0.0);
+    fresnel = pow(fresnel, 3.0) * 0.7; // Power of 3 controls the intensity
+
+    // Combine all components
+    vec3 finalColor = u_color.rgb * (diffuse + 0.3); // Base color + ambient
+    finalColor += specular;
+    finalColor = mix(finalColor, vec3(1.0), fresnel); // Mix with white based on fresnel
+
+    gl_FragColor = vec4(finalColor, u_color.a);
+  }
+</script>
