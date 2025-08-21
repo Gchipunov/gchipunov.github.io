@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL 2D Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        uniform mat3 u_transform;
+
+        void main() {
+            // Multiply the position by the transformation matrix
+            // to handle translation, rotation, and scaling.
+            // We use a 3x3 matrix for 2D transformations (x, y, 1).
+            gl_Position = vec4((u_transform * vec3(a_position, 1.0)).xy, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform vec4 u_color;
+
+        void main() {
+            // Set the color for the fragment (pixel)
+            gl_FragColor = u_color;
+        }
+    </script>
+
+    <script>
+        // Main JavaScript Logic
+        window.onload = main;
+
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            const gl = canvas.getContext('webgl');
+
+            if (!gl) {
+                alert('WebGL not supported!');
+                return;
+            }
+
+            // --- Shader Program Setup ---
+            const vsSource = document.getElementById('vertex-shader').text;
+            const fsSource = document.getElementById('fragment-shader').text;
+            const shaderProgram = createShaderProgram(gl, vsSource, fsSource);
+
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'a_position'),
+                },
+                uniformLocations: {
+                    transform: gl.getUniformLocation(shaderProgram, 'u_transform'),
+                    color: gl.getUniformLocation(shaderProgram, 'u_color'),
+                },
+            };
+
+            // --- Geometry Buffers ---
+            const sphereBuffer = createCircleBuffer(gl, 0.05, 32); // Radius 0.05, 32 segments
+            const platformBuffer = createRectangleBuffer(gl);
+
+            // --- Game State ---
+            const gameState = {
+                player: {
+                    position: [0, -0.5],
+                    velocity: [0, 0],
+                    radius: 0.05,
+                    rotation: 0,
+                    onGround: false
+                },
+                platforms: [
+                    { position: [0, -0.8], scale: [2.0, 0.1] }, // Floor
+                    { position: [-0.5, -0.4], scale: [0.6, 0.1] },
+                    { position: [0.5, 0.0], scale: [0.6, 0.1] },
+                    { position: [-0.2, 0.4], scale: [0.6, 0.1] },
+                ],
+                gravity: -0.002,
+                moveSpeed: 0.002,
+                jumpForce: 0.035,
+                keys: {}
+            };
+
+            // --- Input Handling ---
+            window.addEventListener('keydown', (e) => gameState.keys[e.key] = true);
+            window.addEventListener('keyup', (e) => gameState.keys[e.key] = false);
+
+            // --- Render Loop ---
+            let lastTime = 0;
+            function render(now) {
+                now *= 0.001; // convert to seconds
+                const deltaTime = now - lastTime;
+                lastTime = now;
+
+                update(gameState, deltaTime);
+                drawScene(gl, programInfo, gameState, sphereBuffer, platformBuffer);
+
+                requestAnimationFrame(render);
+            }
+            requestAnimationFrame(render);
+        }
+        
+        // --- Core Update and Drawing Functions ---
+
+        function update(state) {
+            const player = state.player;
+
+            // Horizontal Movement
+            if (state.keys['a'] || state.keys['ArrowLeft']) {
+                player.velocity[0] = -state.moveSpeed;
+                player.rotation += 0.1; // Roll left
+            } else if (state.keys['d'] || state.keys['ArrowRight']) {
+                player.velocity[0] = state.moveSpeed;
+                player.rotation -= 0.1; // Roll right
+            } else {
+                player.velocity[0] = 0;
+            }
+
+            // Jumping
+            if ((state.keys['w'] || state.keys['ArrowUp'] || state.keys[' ']) && player.onGround) {
+                player.velocity[1] = state.jumpForce;
+                player.onGround = false;
+            }
+            
+            // Apply Gravity
+            player.velocity[1] += state.gravity;
+
+            // Update Position based on Velocity
+            player.position[0] += player.velocity[0];
+            player.position[1] += player.velocity[1];
+
+            // Collision Detection
+            player.onGround = false;
+            state.platforms.forEach(p => {
+                const p_left = p.position[0] - p.scale[0] / 2;
+                const p_right = p.position[0] + p.scale[0] / 2;
+                const p_top = p.position[1] + p.scale[1] / 2;
+                const p_bottom = p.position[1] - p.scale[1] / 2;
+                
+                // Simple AABB collision detection
+                // Check if player is falling onto the platform
+                if (player.position[0] > p_left && player.position[0] < p_right &&
+                    player.position[1] - player.radius < p_top && 
+                    player.position[1] - player.radius > p_bottom &&
+                    player.velocity[1] <= 0) {
+                    
+                    player.position[1] = p_top + player.radius;
+                    player.velocity[1] = 0;
+                    player.onGround = true;
+                }
+            });
+
+            // Boundary checks (prevent falling off screen)
+            if (player.position[0] > 1.0 - player.radius) player.position[0] = 1.0 - player.radius;
+            if (player.position[0] < -1.0 + player.radius) player.position[0] = -1.0 + player.radius;
+        }
+
+        function drawScene(gl, programInfo, gameState, sphereBuffer, platformBuffer) {
+            resizeCanvasToDisplaySize(gl.canvas);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(0.1, 0.2, 0.3, 1.0); // Dark blue background
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(programInfo.program);
+
+            // Draw Platforms
+            gameState.platforms.forEach(platform => {
+                const transformMatrix = createTransformMatrix(platform.position, 0, platform.scale);
+                gl.uniformMatrix3fv(programInfo.uniformLocations.transform, false, transformMatrix);
+                gl.uniform4f(programInfo.uniformLocations.color, 0.4, 0.5, 0.4, 1.0); // Greenish
+                drawObject(gl, programInfo, platformBuffer, 6);
+            });
+            
+            // Draw Player Sphere
+            const player = gameState.player;
+            const playerMatrix = createTransformMatrix(player.position, player.rotation, [1, 1]);
+            gl.uniformMatrix3fv(programInfo.uniformLocations.transform, false, playerMatrix);
+            gl.uniform4f(programInfo.uniformLocations.color, 0.9, 0.2, 0.2, 1.0); // Red
+            drawObject(gl, programInfo, sphereBuffer, sphereBuffer.numVertices);
+        }
+
+        function drawObject(gl, programInfo, buffer, vertexCount) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.vertexAttribPointer(
+                programInfo.attribLocations.vertexPosition,
+                2, // 2 components per iteration (x, y)
+                gl.FLOAT,
+                false,
+                0,
+                0
+            );
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, vertexCount);
+        }
+
+        // --- WebGL & Geometry Helper Functions ---
+
+        function createShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+        
+        function createCircleBuffer(gl, radius, segments) {
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+            const vertices = [0.0, 0.0]; // Center point for triangle fan
+            for (let i = 0; i <= segments; i++) {
+                const angle = (i / segments) * 2.0 * Math.PI;
+                vertices.push(Math.cos(angle) * radius);
+                vertices.push(Math.sin(angle) * radius);
+            }
+            
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            buffer.numVertices = segments + 2;
+            return buffer;
+        }
+
+        function createRectangleBuffer(gl) {
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            const vertices = [
+                 0.5,  0.5,
+                -0.5,  0.5,
+                -0.5, -0.5,
+                 0.5,  0.5,
+                -0.5, -0.5,
+                 0.5, -0.5,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            return buffer;
+        }
+
+        function createTransformMatrix(translation, rotation, scale) {
+            const [tx, ty] = translation;
+            const [sx, sy] = scale;
+            const c = Math.cos(rotation);
+            const s = Math.sin(rotation);
+            // This is a column-major 3x3 matrix for 2D transformations
+            return [
+                c * sx, s * sx, 0,
+               -s * sy, c * sy, 0,
+                tx,     ty,     1,
+            ];
+        }
+
+        function resizeCanvasToDisplaySize(canvas) {
+            const displayWidth  = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            if (canvas.width  !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width  = displayWidth;
+                canvas.height = displayHeight;
+                return true;
+            }
+            return false;
+        }
+    </script>
+</body>
+</html>
