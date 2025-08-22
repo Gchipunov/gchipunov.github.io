@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Physics Water</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; }
+        canvas { display: block; }
+        #waveButton {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            font-size: 16px;
+            font-family: sans-serif;
+            color: white;
+            background-color: #007bff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gl-canvas"></canvas>
+    <button id="waveButton">Make Waves</button>
+
+    <script id="physics-vs" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        varying vec2 v_texCoord;
+        void main() {
+            gl_Position = vec4(a_position, 0.0, 1.0);
+            v_texCoord = a_position * 0.5 + 0.5;
+        }
+    </script>
+
+    <script id="physics-fs" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_texCoord;
+        uniform sampler2D u_watermap;
+        uniform vec2 u_delta;
+        uniform bool u_isDrop;
+        uniform vec2 u_dropPosition;
+        uniform float u_dropRadius;
+        uniform float u_dropStrength;
+
+        const float DAMPING = 0.985;
+
+        void main() {
+            vec4 info = texture2D(u_watermap, v_texCoord);
+            
+            if (u_isDrop) {
+                float dist = distance(v_texCoord, u_dropPosition);
+                if (dist < u_dropRadius) {
+                    info.x -= u_dropStrength;
+                }
+            }
+
+            float center = info.x;
+            float oldHeight = info.y;
+
+            float up = texture2D(u_watermap, v_texCoord + vec2(0.0, u_delta.y)).x;
+            float down = texture2D(u_watermap, v_texCoord - vec2(0.0, u_delta.y)).x;
+            float left = texture2D(u_watermap, v_texCoord - vec2(u_delta.x, 0.0)).x;
+            float right = texture2D(u_watermap, v_texCoord + vec2(u_delta.x, 0.0)).x;
+
+            float newHeight = (up + down + left + right) / 2.0 - oldHeight;
+            newHeight *= DAMPING;
+
+            gl_FragColor = vec4(newHeight, center, 0.0, 1.0);
+        }
+    </script>
+    
+    <script id="water-vs" type="x-shader/x-vertex">
+        attribute vec3 a_position;
+        attribute vec2 a_texCoord;
+
+        uniform mat4 u_projection;
+        uniform mat4 u_view;
+        uniform mat4 u_world;
+        uniform sampler2D u_watermap;
+
+        varying vec3 v_worldPosition;
+        varying vec2 v_texCoord;
+        varying vec3 v_normal;
+
+        void main() {
+            v_texCoord = a_texCoord;
+            float height = texture2D(u_watermap, a_texCoord).x * 0.1;
+            vec3 displacedPosition = a_position + vec3(0.0, height, 0.0);
+
+            float hL = texture2D(u_watermap, a_texCoord - vec2(0.01, 0.0)).x * 0.1;
+            float hR = texture2D(u_watermap, a_texCoord + vec2(0.01, 0.0)).x * 0.1;
+            float hD = texture2D(u_watermap, a_texCoord - vec2(0.0, 0.01)).x * 0.1;
+            float hU = texture2D(u_watermap, a_texCoord + vec2(0.0, 0.01)).x * 0.1;
+
+            v_normal = normalize(vec3(hL - hR, 0.2, hD - hU));
+            
+            vec4 worldPos = u_world * vec4(displacedPosition, 1.0);
+            v_worldPosition = worldPos.xyz;
+            gl_Position = u_projection * u_view * worldPos;
+        }
+    </script>
+    
+    <script id="water-fs" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform vec3 u_cameraPosition;
+        uniform vec3 u_lightDirection;
+        varying vec3 v_worldPosition;
+        varying vec3 v_normal;
+
+        void main() {
+            vec3 viewDirection = normalize(u_cameraPosition - v_worldPosition);
+            vec3 normal = normalize(v_normal);
+
+            float diffuse = max(0.0, dot(normal, u_lightDirection)) * 0.6 + 0.4;
+            vec3 waterColor = vec3(0.1, 0.4, 0.7);
+
+            vec3 reflectDir = reflect(-u_lightDirection, normal);
+            float spec = pow(max(dot(viewDirection, reflectDir), 0.0), 64.0);
+            vec3 specular = vec3(1.0) * spec * 0.8;
+            
+            float fresnel = pow(1.0 - max(0.0, dot(viewDirection, normal)), 3.0);
+            fresnel = mix(0.1, 1.0, fresnel);
+
+            vec3 skyColor = vec3(0.5, 0.7, 0.9);
+            vec3 finalColor = mix(waterColor * diffuse, skyColor, fresnel) + specular;
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    </script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    
+    <script>
+        'use strict';
+        const canvas = document.getElementById('gl-canvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert('WebGL not supported!');
+        }
+        const floatTextureExt = gl.getExtension('OES_texture_float');
+        if (!floatTextureExt) {
+            alert('Floating point textures not supported!');
+        }
+
+        const physicsProgram = createProgram(gl, 'physics-vs', 'physics-fs');
+        const waterProgram = createProgram(gl, 'water-vs', 'water-fs');
+        
+        const physicsInfo = {
+            program: physicsProgram,
+            attribs: { position: gl.getAttribLocation(physicsProgram, 'a_position') },
+            uniforms: {
+                watermap: gl.getUniformLocation(physicsProgram, 'u_watermap'),
+                delta: gl.getUniformLocation(physicsProgram, 'u_delta'),
+                isDrop: gl.getUniformLocation(physicsProgram, 'u_isDrop'),
+                dropPosition: gl.getUniformLocation(physicsProgram, 'u_dropPosition'),
+                dropRadius: gl.getUniformLocation(physicsProgram, 'u_dropRadius'),
+                dropStrength: gl.getUniformLocation(physicsProgram, 'u_dropStrength'),
+            },
+        };
+        const waterInfo = {
+            program: waterProgram,
+            attribs: {
+                position: gl.getAttribLocation(waterProgram, 'a_position'),
+                texCoord: gl.getAttribLocation(waterProgram, 'a_texCoord'),
+            },
+            uniforms: {
+                projection: gl.getUniformLocation(waterProgram, 'u_projection'),
+                view: gl.getUniformLocation(waterProgram, 'u_view'),
+                world: gl.getUniformLocation(waterProgram, 'u_world'),
+                watermap: gl.getUniformLocation(waterProgram, 'u_watermap'),
+                cameraPosition: gl.getUniformLocation(waterProgram, 'u_cameraPosition'),
+                lightDirection: gl.getUniformLocation(waterProgram, 'u_lightDirection'),
+            },
+        };
+
+        const quadBuffer = createQuadBuffer(gl);
+        const plane = createPlaneGeometry(gl, 128);
+
+        const TEXTURE_SIZE = 256;
+        let fbo1 = createFBO(gl, TEXTURE_SIZE);
+        let fbo2 = createFBO(gl, TEXTURE_S
