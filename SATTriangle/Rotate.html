@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Triangle Collision (SAT)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent scrolling on mobile */
+            background-color: #1a202c; /* Dark background */
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            cursor: grab;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+        #info-panel {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background-color: rgba(45, 55, 72, 0.8);
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+            max-width: 300px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(5px);
+            pointer-events: none; /* Make sure it doesn't block canvas events */
+        }
+        #collision-status {
+            font-weight: bold;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white">
+
+    <div id="info-panel">
+        <h1 class="text-lg font-bold mb-2">Triangle Collision</h1>
+        <p class="mb-1"><b>Move:</b> Drag with one finger/mouse.</p>
+        <p class="mb-1"><b>Rotate:</b> Twist with two fingers or use the mouse wheel.</p>
+        <p>Collision Status: <span id="collision-status" class="text-green-400">No Collision</span></p>
+    </div>
+
+    <canvas id="glCanvas"></canvas>
+
+    <script>
+        // --- Global Variables ---
+        let gl;
+        let shaderProgram;
+        let triangle1Buffer, triangle2Buffer;
+        
+        // Triangle 1 (static, green) vertices
+        const triangle1Vertices = [
+            -0.5, -0.25,
+             0.0, -0.75,
+            -0.2,  0.2
+        ];
+
+        // Triangle 2 (movable, blue) vertices (initial position)
+        const triangle2BaseVertices = [
+             0.5,  0.25,
+             0.0,  0.75,
+             0.2, -0.2
+        ];
+        
+        // State for movable triangle
+        let triangle2Position = { x: 0.0, y: 0.0 };
+        let triangle2Rotation = 0.0; // In radians
+        let isDragging = false;
+        let isPinching = false;
+        let lastTouch = { x: 0, y: 0 };
+        let initialPinchAngle = 0;
+
+
+        // Colors
+        const collisionColor = [1.0, 1.0, 0.0, 1.0];   // Yellow
+        const triangle1BaseColor = [0.1, 0.8, 0.3, 1.0]; // Green
+        const triangle2BaseColor = [0.2, 0.5, 1.0, 1.0]; // Blue
+
+        // --- Main execution ---
+        window.onload = main;
+
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            gl = canvas.getContext('webgl');
+
+            if (!gl) {
+                alert('Unable to initialize WebGL. Your browser may not support it.');
+                return;
+            }
+            
+            resizeCanvasToDisplaySize(gl.canvas);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+            // Updated Vertex Shader to include rotation
+            const vsSource = `
+                attribute vec2 aVertexPosition;
+                uniform vec2 u_translation;
+                uniform float u_rotation;
+
+                void main(void) {
+                    float s = sin(u_rotation);
+                    float c = cos(u_rotation);
+                    mat2 rotationMatrix = mat2(c, -s, s, c);
+                    vec2 rotatedPosition = rotationMatrix * aVertexPosition;
+                    gl_Position = vec4(rotatedPosition + u_translation, 0.0, 1.0);
+                }
+            `;
+            const fsSource = `
+                precision mediump float;
+                uniform vec4 u_color;
+                void main(void) {
+                    gl_FragColor = u_color;
+                }
+            `;
+
+            shaderProgram = initShaderProgram(vsSource, fsSource);
+            gl.useProgram(shaderProgram);
+
+            initBuffers();
+            setupEventListeners(canvas);
+
+            requestAnimationFrame(render);
+        }
+
+        // --- WebGL Initialization ---
+
+        function initShaderProgram(vsSource, fsSource) {
+            const vertexShader = loadShader(gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl.FRAGMENT_SHADER, fsSource);
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+                return null;
+            }
+            return program;
+        }
+
+        function loadShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function initBuffers() {
+            triangle1Buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, triangle1Buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(triangle1Vertices), gl.STATIC_DRAW);
+
+            triangle2Buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, triangle2Buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(triangle2BaseVertices), gl.STATIC_DRAW);
+        }
+
+        // --- Rendering Loop ---
+
+        function render() {
+            resizeCanvasToDisplaySize(gl.canvas);
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+            gl.clearColor(0.1, 0.1, 0.2, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // Get current vertices for the movable triangle, now with rotation
+            const triangle2CurrentVertices = getTransformedVertices(triangle2BaseVertices, triangle2Position, triangle2Rotation);
+
+            // Perform collision detection
+            const collision = checkCollision(triangle1Vertices, triangle2CurrentVertices);
+            
+            // Update UI
+            const statusElement = document.getElementById('collision-status');
+            if (collision) {
+                statusElement.textContent = 'Collision!';
+                statusElement.classList.remove('text-green-400');
+                statusElement.classList.add('text-red-400');
+            } else {
+                statusElement.textContent = 'No Collision';
+                statusElement.classList.remove('text-red-400');
+                statusElement.classList.add('text-green-400');
+            }
+
+            // Draw triangles, passing rotation angle
+            drawTriangle(triangle1Buffer, {x: 0, y: 0}, 0.0, collision ? collisionColor : triangle1BaseColor);
+            drawTriangle(triangle2Buffer, triangle2Position, triangle2Rotation, collision ? collisionColor : triangle2BaseColor);
+
+            requestAnimationFrame(render);
+        }
+
+        function drawTriangle(buffer, translation, rotation, color) {
+            const vertexPosition = gl.getAttribLocation(shaderProgram, 'aVertexPosition');
+            const translationLocation = gl.getUniformLocation(shaderProgram, 'u_translation');
+            const rotationLocation = gl.getUniformLocation(shaderProgram, 'u_rotation');
+            const colorLocation = gl.getUniformLocation(shaderProgram, 'u_color');
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.vertexAttribPointer(vertexPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(vertexPosition);
+
+            gl.uniform2f(translationLocation, translation.x, translation.y);
+            gl.uniform1f(rotationLocation, rotation);
+            gl.uniform4fv(colorLocation, color);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+
+        // --- Collision Detection (Separating Axis Theorem) ---
+
+        function checkCollision(verts1, verts2) {
+            const axes = getAxes(verts1).concat(getAxes(verts2));
+            for (let i = 0; i < axes.length; i++) {
+                const axis = axes[i];
+                const p1 = project(verts1, axis);
+                const p2 = project(verts2, axis);
+                if (p1.max < p2.min || p2.max < p1.min) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function getAxes(vertices) {
+            const axes = [];
+            for (let i = 0; i < vertices.length; i += 2) {
+                const p1 = { x: vertices[i], y: vertices[i + 1] };
+                const p2 = { x: vertices[(i + 2) % vertices.length], y: vertices[(i + 3) % vertices.length] };
+                const edge = { x: p1.x - p2.x, y: p1.y - p2.y };
+                const normal = { x: -edge.y, y: edge.x };
+                axes.push(normalize(normal));
+            }
+            return axes;
+        }
+
+        function project(vertices, axis) {
+            let min = dotProduct({x: vertices[0], y: vertices[1]}, axis);
+            let max = min;
+            for (let i = 2; i < vertices.length; i += 2) {
+                const p = dotProduct({x: vertices[i], y: vertices[i+1]}, axis);
+                if (p < min) min = p;
+                else if (p > max) max = p;
+            }
+            return { min, max };
+        }
+        
+        // --- Touch & Mouse Controls ---
+        
+        function setupEventListeners(canvas) {
+            // Mouse
+            canvas.addEventListener('mousedown', (e) => handleDragStart(e.clientX, e.clientY));
+            canvas.addEventListener('mousemove', (e) => handleDragMove(e.clientX, e.clientY, e.buttons === 1));
+            canvas.addEventListener('mouseup', handleDragEnd);
+            canvas.addEventListener('mouseleave', handleDragEnd);
+            canvas.addEventListener('wheel', handleWheel, { passive: false });
+
+            // Touch
+            canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+            canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+            canvas.addEventListener('touchend', handleTouchEnd);
+            canvas.addEventListener('touchcancel', handleTouchEnd);
+        }
+
+        function handleDragStart(x, y) {
+            isDragging = true;
+            lastTouch = { x, y };
+        }
+
+        function handleDragMove(x, y, isDown) {
+            if (!isDragging || !isDown) return;
+            const dx = x - lastTouch.x;
+            const dy = y - lastTouch.y;
+            triangle2Position.x += (dx / gl.canvas.width) * 2;
+            triangle2Position.y -= (dy / gl.canvas.height) * 2;
+            lastTouch = { x, y };
+        }
+
+        function handleDragEnd() {
+            isDragging = false;
+        }
+        
+        function handleWheel(e) {
+            e.preventDefault();
+            triangle2Rotation += e.deltaY * -0.005;
+        }
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                isPinching = false;
+                const touch = e.touches[0];
+                handleDragStart(touch.clientX, touch.clientY);
+            } else if (e.touches.length === 2) {
+                isDragging = false;
+                isPinching = true;
+                initialPinchAngle = getPinchAngle(e.touches);
+            }
+        }
+
+        function handleTouchMove(e) {
+            e.preventDefault();
+            if (isPinching && e.touches.length === 2) {
+                const currentAngle = getPinchAngle(e.touches);
+                const angleDiff = currentAngle - initialPinchAngle;
+                triangle2Rotation += angleDiff;
+                initialPinchAngle = currentAngle; // Update for continuous rotation
+            } else if (isDragging && e.touches.length === 1) {
+                const touch = e.touches[0];
+                handleDragMove(touch.clientX, touch.clientY, true);
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (e.touches.length < 2) isPinching = false;
+            if (e.touches.length < 1) isDragging = false;
+        }
+
+        function getPinchAngle(touches) {
+            const t1 = touches[0];
+            const t2 = touches[1];
+            return Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
+        }
+
+        // --- Utility & Math Functions ---
+
+        function getTransformedVertices(baseVertices, translation, rotation) {
+            const transformed = [];
+            const s = Math.sin(rotation);
+            const c = Math.cos(rotation);
+            for (let i = 0; i < baseVertices.length; i += 2) {
+                const x = baseVertices[i];
+                const y = baseVertices[i + 1];
+                // Apply rotation first
+                const rotatedX = x * c - y * s;
+                const rotatedY = x * s + y * c;
+                // Then apply translation
+                transformed.push(rotatedX + translation.x);
+                transformed.push(rotatedY + translation.y);
+            }
+            return transformed;
+        }
+        
+        function dotProduct(v1, v2) {
+            return v1.x * v2.x + v1.y * v2.y;
+        }
+        
+        function normalize(v) {
+            const len = Math.sqrt(v.x * v.x + v.y * v.y);
+            if (len > 0) return { x: v.x / len, y: v.y / len };
+            return { x: 0, y: 0 };
+        }
+
+        function resizeCanvasToDisplaySize(canvas) {
+            const displayWidth  = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width  = displayWidth;
+                canvas.height = displayHeight;
+                return true;
+            }
+            return false;
+        }
+
+    </script>
+</body>
+</html>
