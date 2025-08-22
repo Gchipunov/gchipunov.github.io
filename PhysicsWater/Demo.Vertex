@@ -1,0 +1,35 @@
+// water.vs
+attribute vec3 a_position;
+attribute vec2 a_texCoord;
+
+uniform mat4 u_projection;
+uniform mat4 u_view;
+uniform mat4 u_world;
+
+uniform sampler2D u_watermap; // The final height map from the physics simulation
+
+varying vec3 v_worldPosition;
+varying vec2 v_texCoord;
+varying vec3 v_normal;
+
+void main() {
+    v_texCoord = a_texCoord;
+    
+    // Get height from the physics texture
+    float height = texture2D(u_watermap, a_texCoord).x;
+
+    // Displace the vertex position
+    vec3 displacedPosition = a_position + vec3(0.0, height, 0.0);
+    
+    // Calculate normals for lighting by sampling neighboring heights
+    float hL = texture2D(u_watermap, a_texCoord - vec2(0.01, 0.0)).x;
+    float hR = texture2D(u_watermap, a_texCoord + vec2(0.01, 0.0)).x;
+    float hD = texture2D(u_watermap, a_texCoord - vec2(0.0, 0.01)).x;
+    float hU = texture2D(u_watermap, a_texCoord + vec2(0.0, 0.01)).x;
+
+    v_normal = normalize(vec3(hL - hR, 2.0, hD - hU));
+    
+    // Standard MVP transformation
+    gl_Position = u_projection * u_view * u_world * vec4(displacedPosition, 1.0);
+    v_worldPosition = (u_world * vec4(displacedPosition, 1.0)).xyz;
+}
