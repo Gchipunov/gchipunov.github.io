@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL MSDF Font Outliner</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 90%;
+            max-width: 800px;
+        }
+
+        canvas {
+            display: block;
+            background-color: #1a1a1a;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+            margin-bottom: 24px;
+        }
+
+        .controls {
+            background-color: #2c2c2c;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        input[type="text"] {
+            background-color: #444444;
+            color: #ffffff;
+            border: 1px solid #555555;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        input[type="text"]:focus {
+            border-color: #6c8aed;
+        }
+        
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        label {
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #555555;
+            border-radius: 4px;
+            outline: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #6c8aed;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid #ffffff;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <canvas id="glcanvas"></canvas>
+        <div class="controls">
+            <div class="input-group">
+                <label for="text-input">Type your text:</label>
+                <input type="text" id="text-input" value="Hello, World!">
+            </div>
+            <div class="slider-group">
+                <label for="outline-slider">Outline Width:</label>
+                <input type="range" id="outline-slider" min="0" max="2" step="0.1" value="0.5">
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        // Wait for the window to fully load before starting the WebGL app
+        window.onload = function() {
+            const canvas = document.getElementById('glcanvas');
+            const gl = canvas.getContext('webgl');
+            
+            if (!gl) {
+                console.error('Unable to initialize WebGL. Your browser may not support it.');
+                return;
+            }
+
+            // --- SHADER CODE (GLSL) ---
+            
+            // Vertex Shader: Transforms the vertex position and passes texture coordinates
+            const vsSource = `
+                attribute vec2 a_position;
+                attribute vec2 a_texCoord;
+
+                uniform mat4 u_matrix;
+
+                varying vec2 v_texCoord;
+
+                void main() {
+                    gl_Position = u_matrix * vec4(a_position, 0.0, 1.0);
+                    v_texCoord = a_texCoord;
+                }
+            `;
+
+            // Fragment Shader: Renders the font using the MSDF data
+            const fsSource = `
+                precision mediump float;
+
+                uniform sampler2D u_msdfTexture;
+                uniform vec4 u_fillColor;
+                uniform vec4 u_outlineColor;
+                uniform float u_outlineWidth;
+                uniform float u_pxRange;
+
+                varying vec2 v_texCoord;
+
+                // Function to find the median of the RGB channels
+                float median(float r, float g, float b) {
+                    return max(min(r, g), min(max(r, g), b));
+                }
+
+                void main() {
+                    // Sample the MSDF texture
+                    vec3 msdf = texture2D(u_msdfTexture, v_texCoord).rgb;
+
+                    // Calculate the signed distance value
+                    float signedDist = median(msdf.r, msdf.g, msdf.b) - 0.5;
+
+                    // Scale the distance to screen space pixels
+                    float signedDistPx = signedDist * u_pxRange;
+
+                    // Calculate the threshold for the solid fill and the outline
+                    float fillThreshold = fwidth(signedDistPx);
+                    float outlineThreshold = fillThreshold + u_outlineWidth;
+
+                    // Smoothstep for anti-aliased fill and outline
+                    float fillAlpha = smoothstep(-fillThreshold, fillThreshold, signedDistPx);
+                    float outlineAlpha = smoothstep(-outlineThreshold, -fillThreshold, signedDistPx);
+
+                    // Blend the fill and outline colors
+                    vec4 finalColor = mix(u_fillColor, u_outlineColor, outlineAlpha);
+
+                    // Set the final color, using the fill alpha for transparency
+                    gl_FragColor = vec4(finalColor.rgb, finalColor.a * fillAlpha);
+                }
+            `;
+
+            // --- WEBGL UTILITY FUNCTIONS ---
+            
+            function createShader(gl, type, source) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            function createProgram(gl, vsSource, fsSource) {
+                const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+                const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+                const shaderProgram = gl.createProgram();
+                gl.attachShader(shaderProgram, vertexShader);
+                gl.attachShader(shaderProgram, fragmentShader);
+                gl.linkProgram(shaderProgram);
+                if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                    console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                    return null;
+                }
+                return shaderProgram;
+            }
+
+            // --- MAIN APPLICATION LOGIC ---
+
+            const program = createProgram(gl, vsSource, fsSource);
+            gl.useProgram(program);
+
+            // Get attribute and uniform locations
+            const attribs = {
+                position: gl.getAttribLocation(program, 'a_position'),
+                texCoord: gl.getAttribLocation(program, 'a_texCoord')
+            };
+            const uniforms = {
+                matrix: gl.getUniformLocation(program, 'u_matrix'),
+                msdfTexture: gl.getUniformLocation(program, 'u_msdfTexture'),
+                fillColor: gl.getUniformLocation(program, 'u_fillColor'),
+                outlineColor: gl.getUniformLocation(program, 'u_outlineColor'),
+                outlineWidth: gl.getUniformLocation(program, 'u_outlineWidth'),
+                pxRange: gl.getUniformLocation(program, 'u_pxRange')
+            };
+
+            // Create buffers
+            const positionBuffer = gl.createBuffer();
+            const texCoordBuffer = gl.createBuffer();
+            const indexBuffer = gl.createBuffer();
+            
+            // MSDF font data and texture URLs
+            const FONT_DATA_URL = 'https://raw.githubusercontent.com/Jam3/three-msdf-text/master/assets/fnt/Roboto-Regular.json';
+            const FONT_TEXTURE_URL = 'https://raw.githubusercontent.com/Jam3/three-msdf-text/master/assets/fnt/Roboto-Regular.png';
+            
+            let fontData = null;
+            let fontTexture = null;
+
+            // Load the font assets
+            async function loadFontAssets() {
+                try {
+                    const response = await fetch(FONT_DATA_URL);
+                    fontData = await response.json();
+                    
+                    const image = new Image();
+                    image.crossOrigin = 'anonymous';
+                    image.onload = () => {
+                        fontTexture = gl.createTexture();
+                        gl.bindTexture(gl.TEXTURE_2D, fontTexture);
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                        
+                        // Initial render once assets are loaded
+                        updateAndRender();
+                    };
+                    image.onerror = (e) => {
+                        console.error('Failed to load font texture.', e);
+                    };
+                    image.src = FONT_TEXTURE_URL;
+                } catch (e) {
+                    console.error('Failed to fetch font data.', e);
+                }
+            }
+
+            // Function to generate the text geometry
+            function generateTextGeometry(text) {
+                if (!fontData || text.length === 0) {
+                    return { positions: [], texCoords: [], indices: [] };
+                }
+
+                const positions = [];
+                const texCoords = [];
+                const indices = [];
+                let penX = 0;
+                let penY = 0;
+                let indexCount = 0;
+                
+                const lineHeight = fontData.common.lineHeight;
+
+                for (let i = 0; i < text.length; i++) {
+                    const char = fontData.chars.find(c => c.id === text.charCodeAt(i));
+                    if (!char) continue;
+
+                    const scale = 1.0;
+                    const x = penX + char.xoffset * scale;
+                    const y = penY + (lineHeight - char.yoffset - char.height) * scale;
+                    const w = char.width * scale;
+                    const h = char.height * scale;
+
+                    // Vertices for the quad
+                    positions.push(
+                        x, y,
+                        x + w, y,
+                        x + w, y + h,
+                        x, y + h
+                    );
+
+                    // UVs from the font atlas
+                    const uvx = char.x / fontData.common.scaleW;
+                    const uvy = char.y / fontData.common.scaleH;
+                    const uvw = char.width / fontData.common.scaleW;
+                    const uvh = char.height / fontData.common.scaleH;
+                    
+                    texCoords.push(
+                        uvx, uvy + uvh,
+                        uvx + uvw, uvy + uvh,
+                        uvx + uvw, uvy,
+                        uvx, uvy
+                    );
+
+                    // Indices for the two triangles
+                    indices.push(
+                        indexCount, indexCount + 1, indexCount + 2,
+                        indexCount, indexCount + 2, indexCount + 3
+                    );
+                    
+                    indexCount += 4;
+                    penX += char.xadvance * scale;
+                }
+                
+                // Center the text
+                const textWidth = penX;
+                const offsetX = -textWidth / 2;
+                
+                for (let i = 0; i < positions.length; i += 2) {
+                    positions[i] += offsetX;
+                }
+
+                return { positions, texCoords, indices };
+            }
+
+            function render(textGeometry) {
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+                gl.clearColor(0.1, 0.1, 0.1, 1.0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                gl.enable(gl.BLEND);
+                gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+                // Update matrix
+                const aspect = gl.canvas.width / gl.canvas.height;
+                const orthographicMatrix = new Float32Array([
+                    2.0 / aspect / 100, 0, 0, 0,
+                    0, -2.0 / 100, 0, 0,
+                    0, 0, 1, 0,
+                    -1, 1, 0, 1
+                ]);
+                gl.uniformMatrix4fv(uniforms.matrix, false, orthographicMatrix);
+
+                // Update uniform values
+                const outlineWidth = parseFloat(document.getElementById('outline-slider').value);
+                const pxRange = fontData.info.distanceRange;
+                gl.uniform4fv(uniforms.fillColor, [1.0, 1.0, 1.0, 1.0]);
+                gl.uniform4fv(uniforms.outlineColor, [0.42, 0.54, 0.93, 1.0]);
+                gl.uniform1f(uniforms.outlineWidth, outlineWidth);
+                gl.uniform1f(uniforms.pxRange, pxRange);
+
+                // Bind buffers and set attributes
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textGeometry.positions), gl.DYNAMIC_DRAW);
+                gl.enableVertexAttribArray(attribs.position);
+                gl.vertexAttribPointer(attribs.position, 2, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textGeometry.texCoords), gl.DYNAMIC_DRAW);
+                gl.enableVertexAttribArray(attribs.texCoord);
+                gl.vertexAttribPointer(attribs.texCoord, 2, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(textGeometry.indices), gl.DYNAMIC_DRAW);
+
+                // Set texture
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, fontTexture);
+                gl.uniform1i(uniforms.msdfTexture, 0);
+
+                // Draw the text
+                gl.drawElements(gl.TRIANGLES, textGeometry.indices.length, gl.UNSIGNED_SHORT, 0);
+            }
+
+            // Function to handle updates and trigger rendering
+            function updateAndRender() {
+                const text = document.getElementById('text-input').value;
+                const textGeometry = generateTextGeometry(text);
+                render(textGeometry);
+            }
+
+            // Handle window resizing
+            function resizeCanvas() {
+                canvas.width = window.innerWidth * 0.9;
+                canvas.height = Math.min(window.innerHeight * 0.5, 400);
+                updateAndRender();
+            }
+            window.addEventListener('resize', resizeCanvas, false);
+            resizeCanvas();
+
+            // Event listeners for user input
+            document.getElementById('text-input').addEventListener('input', updateAndRender);
+            document.getElementById('outline-slider').addEventListener('input', updateAndRender);
+
+            // Start the application
+            loadFontAssets();
+        };
+    </script>
+</body>
+</html>
