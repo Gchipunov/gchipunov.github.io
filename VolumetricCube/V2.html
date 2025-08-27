@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Volumetric Cube with Gemini API</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 12px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(5px);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 320px;
+        }
+        #ui-container h2 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+        #ui-container p {
+            font-size: 12px;
+            margin-top: 0;
+            margin-bottom: 12px;
+            color: #ccc;
+        }
+        #gemini-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #theme-prompt {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background-color: #222;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+        }
+        #generate-button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            background: linear-gradient(45deg, #4f46e5, #c026d3);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+        }
+        #generate-button:active {
+            transform: scale(0.98);
+        }
+        #generate-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        #loading-indicator {
+            display: none;
+            font-size: 12px;
+            color: #a5b4fc;
+        }
+        #error-message {
+            display: none;
+            font-size: 12px;
+            color: #fca5a5;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="ui-container">
+        <h2>Volumetric Cube</h2>
+        <p>Describe a theme and let AI generate the visuals!</p>
+        <div id="gemini-controls">
+            <input type="text" id="theme-prompt" placeholder="e.g., 'cosmic dust', 'green fire'">
+            <button id="generate-button">✨ Generate Theme</button>
+            <div id="loading-indicator">Generating theme...</div>
+            <div id="error-message"></div>
+        </div>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+    <!-- Import three.js for matrix/vector math, similar to GLM in C++ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // =================================================================================================
+        // Volumetric Transparent Cube with WebGL and Gemini API
+        //
+        // This version integrates the Gemini API to dynamically generate shader uniforms
+        // based on user text prompts, allowing for creative control over the visuals.
+        // =================================================================================================
+
+        // --- Shader Source Code ---
+        // The fragment shader is updated to use uniforms for ray marching parameters.
+
+        const vertexShaderSource = `
+            #version 300 es
+            layout (location = 0) in vec3 aPos;
+            uniform mat4 model;
+            uniform mat4 view;
+            uniform mat4 projection;
+            out vec3 FragPos;
+            void main() {
+                FragPos = vec3(model * vec4(aPos, 1.0));
+                gl_Position = projection * view * model * vec4(aPos, 1.0);
+            }
+        `;
+
+        const fragmentShaderSource = `
+            #version 300 es
+            precision highp float;
+            out vec4 FragColor;
+            in vec3 FragPos;
+
+            // Uniforms controlled by Gemini API
+            uniform vec3 viewPos;
+            uniform float time;
+            uniform int maxSteps;
+            uniform float stepSize;
+            uniform float densityThreshold;
+            uniform vec4 sampleColor;
+
+            // --- 3D Simplex Noise Function ---
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+            vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+            float snoise(vec3 v) {
+                const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+                const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+                vec3 i = floor(v + dot(v, C.yyy));
+                vec3 x0 = v - i + dot(i, C.xxx);
+                vec3 g = step(x0.yzx, x0.xyz);
+                vec3 l = 1.0 - g;
+                vec3 i1 = min(g.xyz, l.zxy);
+                vec3 i2 = max(g.xyz, l.zxy);
+                vec3 x1 = x0 - i1 + C.xxx;
+                vec3 x2 = x0 - i2 + C.yyy;
+                vec3 x3 = x0 - D.yyy;
+                i = mod289(i);
+                vec4 p = permute(permute(permute(
+                    i.z + vec4(0.0, i1.z, i2.z, 1.0))
+                    + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+                    + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+                float n_ = 0.142857142857;
+                vec3 ns = n_ * D.wyz - D.xzx;
+                vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+                vec4 x_ = floor(j * ns.z);
+                vec4 y_ = floor(j - 7.0 * x_);
+                vec4 x = x_ * ns.x + ns.yyyy;
+                vec4 y = y_ * ns.x + ns.yyyy;
+                vec4 h = 1.0 - abs(x) - abs(y);
+                vec4 b0 = vec4(x.xy, y.xy);
+                vec4 b1 = vec4(x.zw, y.zw);
+                vec4 s0 = floor(b0)*2.0 + 1.0;
+                vec4 s1 = floor(b1)*2.0 + 1.0;
+                vec4 sh = -step(h, vec4(0.0));
+                vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+                vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+                vec3 p0 = vec3(a0.xy,h.x);
+                vec3 p1 = vec3(a0.zw,h.y);
+                vec3 p2 = vec3(a1.xy,h.z);
+                vec3 p3 = vec3(a1.zw,h.w);
+                vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+                p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+                vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+                m = m * m;
+                return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+            }
+
+            void main() {
+                vec3 rayDir = normalize(FragPos - viewPos);
+                vec3 rayPos = FragPos;
+                vec4 accumulatedColor = vec4(0.0);
+
+                for(int i = 0; i < maxSteps; i++) {
+                    float density = snoise(rayPos * 5.0 + time * 0.5);
+                    if(density > densityThreshold) {
+                        vec4 currentSampleColor = sampleColor;
+                        currentSampleColor.rgb *= density;
+                        accumulatedColor.rgb += (1.0 - accumulatedColor.a) * currentSampleColor.rgb * currentSampleColor.a;
+                        accumulatedColor.a += (1.0 - accumulatedColor.a) * currentSampleColor.a;
+                    }
+                    rayPos += rayDir * stepSize;
+                    if(accumulatedColor.a > 0.99) break;
+                }
+                FragColor = accumulatedColor;
+            }
+        `;
+        
+        // --- Global State for Theme ---
+        let currentTheme = {
+            maxSteps: 64,
+            stepSize: 0.05,
+            densityThreshold: 0.2,
+            sampleColor: [0.1, 0.4, 0.8, 0.05]
+        };
+
+        // Main function to run the WebGL application
+        function main() {
+            const canvas = document.getElementById("glCanvas");
+            const gl = canvas.getContext("webgl2");
+            if (!gl) {
+                alert("Unable to initialize WebGL2. Your browser or machine may not support it.");
+                return;
+            }
+
+            const shaderProgram = initShaderProgram(gl, vertexShaderSource, fragmentShaderSource);
+            if (!shaderProgram) return;
+
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aPos'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'projection'),
+                    modelMatrix: gl.getUniformLocation(shaderProgram, 'model'),
+                    viewMatrix: gl.getUniformLocation(shaderProgram, 'view'),
+                    time: gl.getUniformLocation(shaderProgram, 'time'),
+                    viewPos: gl.getUniformLocation(shaderProgram, 'viewPos'),
+                    // New uniforms for Gemini control
+                    maxSteps: gl.getUniformLocation(shaderProgram, 'maxSteps'),
+                    stepSize: gl.getUniformLocation(shaderProgram, 'stepSize'),
+                    densityThreshold: gl.getUniformLocation(shaderProgram, 'densityThreshold'),
+                    sampleColor: gl.getUniformLocation(shaderProgram, 'sampleColor'),
+                },
+            };
+
+            const buffers = initBuffers(gl);
+
+            gl.enable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            // --- Gemini API Integration ---
+            const generateButton = document.getElementById('generate-button');
+            const themePromptInput = document.getElementById('theme-prompt');
+            generateButton.addEventListener('click', () => handleGenerateTheme(themePromptInput.value));
+            
+            let then = 0;
+            function render(now) {
+                now *= 0.001;
+                then = now;
+                drawScene(gl, programInfo, buffers, now);
+                requestAnimationFrame(render);
+            }
+            requestAnimationFrame(render);
+        }
+
+        function initBuffers(gl) {
+            const vertices = new Float32Array([-0.5,-0.5,-0.5, 0.5,-0.5,-0.5, 0.5,0.5,-0.5, -0.5,0.5,-0.5, -0.5,-0.5,0.5, 0.5,-0.5,0.5, 0.5,0.5,0.5, -0.5,0.5,0.5]);
+            const indices = new Uint16Array([0,1,2, 2,3,0, 4,5,6, 6,7,4, 3,2,6, 6,7,3, 0,1,5, 5,4,0, 0,3,7, 7,4,0, 1,2,6, 6,5,1]);
+            const vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+            const vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(0);
+            const ebo = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+            gl.bindVertexArray(null);
+            return { vao: vao, indicesCount: indices.length };
+        }
+
+        function drawScene(gl, programInfo, buffers, time) {
+            gl.canvas.width = gl.canvas.clientWidth;
+            gl.canvas.height = gl.canvas.clientHeight;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(0.1, 0.1, 0.1, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const projectionMatrix = new THREE.Matrix4().makePerspective(45 * Math.PI / 180, gl.canvas.clientWidth / gl.canvas.clientHeight, 0.1, 100.0);
+            const cameraPosition = new THREE.Vector3(0, 0, 3);
+            const viewMatrix = new THREE.Matrix4().lookAt(cameraPosition, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+            const modelMatrix = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(0, time * 0.5, time * 0.3));
+
+            gl.useProgram(programInfo.program);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix.elements);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.viewMatrix, false, viewMatrix.elements);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelMatrix, false, modelMatrix.elements);
+            gl.uniform1f(programInfo.uniformLocations.time, time);
+            gl.uniform3fv(programInfo.uniformLocations.viewPos, [cameraPosition.x, cameraPosition.y, cameraPosition.z]);
+            
+            // --- Set Theme Uniforms ---
+            gl.uniform1i(programInfo.uniformLocations.maxSteps, currentTheme.maxSteps);
+            gl.uniform1f(programInfo.uniformLocations.stepSize, currentTheme.stepSize);
+            gl.uniform1f(programInfo.uniformLocations.densityThreshold, currentTheme.densityThreshold);
+            gl.uniform4fv(programInfo.uniformLocations.sampleColor, currentTheme.sampleColor);
+
+            gl.bindVertexArray(buffers.vao);
+            gl.drawElements(gl.TRIANGLES, buffers.indicesCount, gl.UNSIGNED_SHORT, 0);
+            gl.bindVertexArray(null);
+        }
+
+        // --- Gemini API Call Logic ---
+        async function handleGenerateTheme(promptText) {
+            if (!promptText) {
+                document.getElementById('error-message').textContent = 'Please enter a theme description.';
+                document.getElementById('error-message').style.display = 'block';
+                return;
+            }
+
+            const generateButton = document.getElementById('generate-button');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const errorMessage = document.getElementById('error-message');
+
+            generateButton.disabled = true;
+            loadingIndicator.style.display = 'block';
+            errorMessage.style.display = 'none';
+
+            const systemPrompt = `You are a creative assistant for a WebGL application that renders a volumetric cube using ray marching and noise. Your task is to generate a JSON object with specific parameters to style the cube based on a user's theme description.
+
+The JSON object must follow this exact schema:
+{
+  "type": "object",
+  "properties": {
+    "maxSteps": { "type": "integer", "description": "Number of steps for the ray march. Range: 32-128. Higher is more detailed but slower." },
+    "stepSize": { "type": "number", "description": "Size of each step. Range: 0.01-0.1. Smaller is more detailed." },
+    "densityThreshold": { "type": "number", "description": "Noise value threshold to start accumulating color. Range: 0.1-0.5. Higher means sparser volume." },
+    "sampleColor": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "The base RGBA color of the volume. Alpha (A) should be low (0.01-0.1) for transparency." }
+  },
+  "required": ["maxSteps", "stepSize", "densityThreshold", "sampleColor"]
+}
+
+Interpret the user's theme creatively. For example, for "fire", you might use orange/red colors, a lower density threshold, and more steps. For "ghost", you might use a pale blue/white, a very low alpha, and a higher density threshold.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: `Generate a theme for: "${promptText}"` }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            maxSteps: { type: "INTEGER" },
+                            stepSize: { type: "NUMBER" },
+                            densityThreshold: { type: "NUMBER" },
+                            sampleColor: { type: "ARRAY", items: { type: "NUMBER" } }
+                        }
+                    }
+                }
+            };
+            
+            const apiKey = ""; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+            try {
+                // Fetch with exponential backoff
+                let response;
+                let retries = 3;
+                let delay = 1000;
+                for (let i = 0; i < retries; i++) {
+                    response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (response.ok) break;
+                    if (response.status === 429 || response.status >= 500) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                    } else {
+                        break;
+                    }
+                }
+
+                if (!response.ok) {
+                    throw new Error(`API request failed with status ${response.status}: ${await response.text()}`);
+                }
+
+                const result = await response.json();
+                const jsonText = result.candidates[0].content.parts[0].text;
+                const newTheme = JSON.parse(jsonText);
+
+                // Basic validation
+                if (newTheme && typeof newTheme.maxSteps === 'number' && Array.isArray(newTheme.sampleColor) && newTheme.sampleColor.length === 4) {
+                    currentTheme = newTheme;
+                } else {
+                    throw new Error("Received invalid theme data from API.");
+                }
+
+            } catch (error) {
+                console.error("Error generating theme:", error);
+                errorMessage.textContent = 'Failed to generate theme. Please try again.';
+                errorMessage.style.display = 'block';
+            } finally {
+                generateButton.disabled = false;
+                loadingIndicator.style.display = 'none';
+            }
+        }
+
+        // --- Shader Compilation Helpers ---
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        window.onload = main;
+    </script>
+</body>
+</html>
