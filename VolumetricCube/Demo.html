@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Volumetric Cube</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            color: #fff;
+            font-family: monospace;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Volumetric Transparent Cube (WebGL)</div>
+    <canvas id="glCanvas"></canvas>
+
+    <!-- Import three.js for matrix/vector math, similar to GLM in C++ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // =================================================================================================
+        // Volumetric Transparent Cube with WebGL
+        //
+        // This is a JavaScript/WebGL translation of the provided C++ OpenGL program.
+        // It renders a cube with a simulated volumetric interior using a ray marching
+        // technique within the fragment shader.
+        //
+        // Dependencies:
+        // - three.js (used here for matrix and vector math, analogous to GLM)
+        // =================================================================================================
+
+        // --- Shader Source Code ---
+        // These are identical to the shaders in the C++ example.
+
+        // Vertex Shader: Transforms vertex positions and passes world position to fragment shader.
+        const vertexShaderSource = `
+            #version 300 es
+            layout (location = 0) in vec3 aPos;
+
+            // Transformation matrices
+            uniform mat4 model;
+            uniform mat4 view;
+            uniform mat4 projection;
+
+            // Output vertex position in world space to the fragment shader
+            out vec3 FragPos;
+
+            void main()
+            {
+                // Calculate the world position of the vertex
+                FragPos = vec3(model * vec4(aPos, 1.0));
+                // Calculate the final clip space position
+                gl_Position = projection * view * model * vec4(aPos, 1.0);
+            }
+        `;
+
+        // Fragment Shader: Creates the volumetric effect using ray marching and 3D noise.
+        const fragmentShaderSource = `
+            #version 300 es
+            precision highp float; // Required in WebGL for floats in shaders
+            out vec4 FragColor;
+
+            // Input from the vertex shader (world position)
+            in vec3 FragPos;
+
+            // Uniforms
+            uniform vec3 viewPos; // Camera position
+            uniform float time;   // Time for animation
+
+            // --- 3D Simplex Noise Function (Classic Perlin Noise derivative) ---
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+            vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+            float snoise(vec3 v) {
+                const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+                const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+                vec3 i = floor(v + dot(v, C.yyy));
+                vec3 x0 = v - i + dot(i, C.xxx);
+                vec3 g = step(x0.yzx, x0.xyz);
+                vec3 l = 1.0 - g;
+                vec3 i1 = min(g.xyz, l.zxy);
+                vec3 i2 = max(g.xyz, l.zxy);
+                vec3 x1 = x0 - i1 + C.xxx;
+                vec3 x2 = x0 - i2 + C.yyy;
+                vec3 x3 = x0 - D.yyy;
+                i = mod289(i);
+                vec4 p = permute(permute(permute(
+                    i.z + vec4(0.0, i1.z, i2.z, 1.0))
+                    + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+                    + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+                float n_ = 0.142857142857; // 1.0/7.0
+                vec3 ns = n_ * D.wyz - D.xzx;
+                vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+                vec4 x_ = floor(j * ns.z);
+                vec4 y_ = floor(j - 7.0 * x_);
+                vec4 x = x_ * ns.x + ns.yyyy;
+                vec4 y = y_ * ns.x + ns.yyyy;
+                vec4 h = 1.0 - abs(x) - abs(y);
+                vec4 b0 = vec4(x.xy, y.xy);
+                vec4 b1 = vec4(x.zw, y.zw);
+                vec4 s0 = floor(b0)*2.0 + 1.0;
+                vec4 s1 = floor(b1)*2.0 + 1.0;
+                vec4 sh = -step(h, vec4(0.0));
+                vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+                vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+                vec3 p0 = vec3(a0.xy,h.x);
+                vec3 p1 = vec3(a0.zw,h.y);
+                vec3 p2 = vec3(a1.xy,h.z);
+                vec3 p3 = vec3(a1.zw,h.w);
+                vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+                p0 *= norm.x;
+                p1 *= norm.y;
+                p2 *= norm.z;
+                p3 *= norm.w;
+                vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+                m = m * m;
+                return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+            }
+            // --- End of Noise Function ---
+
+            void main()
+            {
+                // --- Ray Marching Setup ---
+                vec3 rayDir = normalize(FragPos - viewPos);
+                vec3 rayPos = FragPos;
+
+                // --- Ray Marching Parameters ---
+                int maxSteps = 64;
+                float stepSize = 0.05;
+                float densityThreshold = 0.2;
+                vec4 accumulatedColor = vec4(0.0);
+
+                // --- The Ray Marching Loop ---
+                for(int i = 0; i < maxSteps; i++)
+                {
+                    // Sample the 3D noise at the current position along the ray.
+                    float density = snoise(rayPos * 5.0 + time * 0.5);
+
+                    if(density > densityThreshold)
+                    {
+                        // The color is based on the density and position.
+                        vec4 sampleColor = vec4(0.1, 0.4, 0.8, 0.05); // A blueish haze
+                        sampleColor.rgb *= density; // Brighter for denser areas
+                        sampleColor.rgb += vec3(rayPos.x, rayPos.y, 0.0) * 0.1;
+
+                        // Alpha compositing to blend the color.
+                        accumulatedColor.rgb += (1.0 - accumulatedColor.a) * sampleColor.rgb * sampleColor.a;
+                        accumulatedColor.a += (1.0 - accumulatedColor.a) * sampleColor.a;
+                    }
+
+                    // Move the ray position forward
+                    rayPos += rayDir * stepSize;
+
+                    // Optimization: Stop early if the color is fully opaque.
+                    if(accumulatedColor.a > 0.99)
+                        break;
+                }
+
+                FragColor = accumulatedColor;
+            }
+        `;
+
+        // Main function to run the WebGL application
+        function main() {
+            // --- 1. Get Canvas and WebGL Context ---
+            const canvas = document.getElementById("glCanvas");
+            const gl = canvas.getContext("webgl2");
+            if (!gl) {
+                alert("Unable to initialize WebGL2. Your browser or machine may not support it.");
+                return;
+            }
+
+            // --- 2. Compile and Link Shaders ---
+            const shaderProgram = initShaderProgram(gl, vertexShaderSource, fragmentShaderSource);
+            if (!shaderProgram) return;
+
+            // --- 3. Store Uniform and Attribute Locations ---
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aPos'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'projection'),
+                    modelMatrix: gl.getUniformLocation(shaderProgram, 'model'),
+                    viewMatrix: gl.getUniformLocation(shaderProgram, 'view'),
+                    time: gl.getUniformLocation(shaderProgram, 'time'),
+                    viewPos: gl.getUniformLocation(shaderProgram, 'viewPos'),
+                },
+            };
+
+            // --- 4. Define Cube Geometry and Create Buffers ---
+            const buffers = initBuffers(gl);
+
+            // --- 5. Configure OpenGL State ---
+            gl.enable(gl.DEPTH_TEST);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            // --- 6. Render Loop ---
+            let then = 0;
+            function render(now) {
+                now *= 0.001;  // convert to seconds
+                const deltaTime = now - then;
+                then = now;
+
+                drawScene(gl, programInfo, buffers, now);
+
+                requestAnimationFrame(render);
+            }
+            requestAnimationFrame(render);
+        }
+
+        // Helper function to initialize buffers for the cube
+        function initBuffers(gl) {
+            // --- Define Cube Geometry ---
+            const vertices = new Float32Array([
+                // positions
+                -0.5, -0.5, -0.5,
+                 0.5, -0.5, -0.5,
+                 0.5,  0.5, -0.5,
+                -0.5,  0.5, -0.5,
+                -0.5, -0.5,  0.5,
+                 0.5, -0.5,  0.5,
+                 0.5,  0.5,  0.5,
+                -0.5,  0.5,  0.5
+            ]);
+
+            const indices = new Uint16Array([
+                0, 1, 2, 2, 3, 0, // back face
+                4, 5, 6, 6, 7, 4, // front face
+                3, 2, 6, 6, 7, 3, // top face
+                0, 1, 5, 5, 4, 0, // bottom face
+                0, 3, 7, 7, 4, 0, // left face
+                1, 2, 6, 6, 5, 1  // right face
+            ]);
+
+            // Create Vertex Array Object (VAO)
+            const vao = gl.createVertexArray();
+            gl.bindVertexArray(vao);
+
+            // Create Vertex Buffer Object (VBO)
+            const vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+            // Set up vertex attribute pointer
+            gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(0);
+
+            // Create Element Buffer Object (EBO)
+            const ebo = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+            // Unbind VAO
+            gl.bindVertexArray(null);
+
+            return {
+                vao: vao,
+                indicesCount: indices.length,
+            };
+        }
+
+        // Main drawing function
+        function drawScene(gl, programInfo, buffers, time) {
+            // Resize canvas to match display size
+            gl.canvas.width = gl.canvas.clientWidth;
+            gl.canvas.height = gl.canvas.clientHeight;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+            // Clear the canvas
+            gl.clearColor(0.1, 0.1, 0.1, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // --- Set up Transformations using three.js math ---
+            // Projection matrix (perspective)
+            const fieldOfView = 45 * Math.PI / 180; // in radians
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const zNear = 0.1;
+            const zFar = 100.0;
+            const projectionMatrix = new THREE.Matrix4();
+            projectionMatrix.makePerspective(fieldOfView, aspect, zNear, zFar);
+
+            // View matrix (camera)
+            const cameraPosition = new THREE.Vector3(0, 0, 3);
+            const viewMatrix = new THREE.Matrix4();
+            viewMatrix.lookAt(cameraPosition, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+
+            // Model matrix (rotation)
+            const modelMatrix = new THREE.Matrix4();
+            modelMatrix.makeRotationFromEuler(new THREE.Euler(0, time * 0.5, time * 0.3));
+
+            // --- Use our shader program and set uniforms ---
+            gl.useProgram(programInfo.program);
+
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix.elements);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.viewMatrix, false, viewMatrix.elements);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelMatrix, false, modelMatrix.elements);
+            gl.uniform1f(programInfo.uniformLocations.time, time);
+            gl.uniform3fv(programInfo.uniformLocations.viewPos, [cameraPosition.x, cameraPosition.y, cameraPosition.z]);
+
+            // --- Draw the Cube ---
+            gl.bindVertexArray(buffers.vao);
+            gl.drawElements(gl.TRIANGLES, buffers.indicesCount, gl.UNSIGNED_SHORT, 0);
+            gl.bindVertexArray(null);
+        }
+
+        // --- Shader Compilation Helpers ---
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        // Start the application
+        window.onload = main;
+    </script>
+</body>
+</html>
