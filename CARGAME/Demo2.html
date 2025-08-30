@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Maze Game</title>
+    <link rel="stylesheet" href="style2.css">
+</head>
+<body>
+    <h1>WebGL Maze Game</h1>
+    <p>Use Arrow Keys or on-screen controls to reach the glowing cube!</p>
+    <canvas id="gl-canvas" width="800" height="600"></canvas>
+    
+    <div id="mobile-controls">
+        <button id="ctrl-up">▲</button>
+        <div class="lr-controls">
+            <button id="ctrl-left">◄</button>
+            <button id="ctrl-right">►</button>
+        </div>
+        <button id="ctrl-down">▼</button>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    
+    <script src="game2.js"></script>
+</body>
+</html>
