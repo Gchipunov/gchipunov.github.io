@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Sand & Shapes Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a202c;
+            color: #e2e8f0;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 1rem;
+            background-color: rgba(45, 55, 72, 0.8);
+            border-radius: 0.5rem;
+            font-family: 'Inter', sans-serif;
+            border: 1px solid #4a5568;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #error-message {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 2rem; background-color: #c53030; color: white;
+            border-radius: 0.5rem; text-align: center;
+        }
+        #add-object-btn {
+            position: absolute; bottom: 30px; right: 30px;
+            width: 60px; height: 60px;
+            background-color: #4299e1; color: white;
+            border: none; border-radius: 50%; font-size: 2rem;
+            line-height: 60px; text-align: center; cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3); z-index: 20;
+            user-select: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans">
+    <div id="info">
+        <h1 class="text-xl font-bold">WebGL Sand & Shapes Engine</h1>
+        <p>Destroy shapes and watch some turn to sand!</p>
+        <p>Player Health: <span id="health-display">3</span></p>
+    </div>
+    <div id="error-message" class="hidden">
+        <h2 class="text-lg font-bold">Error</h2>
+        <p>WebGL is not supported by your browser.</p>
+    </div>
+    <canvas id="glcanvas"></canvas>
+    <button id="add-object-btn">+</button>
+
+    <!-- Shader for Shapes -->
+    <script id="shape-vertex-shader" type="notjs">
+      attribute vec2 a_position;
+      uniform mat3 u_matrix;
+      uniform vec2 u_resolution;
+      void main() {
+        vec2 position = (u_matrix * vec3(a_position, 1)).xy;
+        vec2 clipSpace = ((position / u_resolution) * 2.0) - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+      }
+    </script>
+    <script id="shape-fragment-shader" type="notjs">
+      precision mediump float;
+      uniform vec4 u_color;
+      void main() { gl_FragColor = u_color; }
+    </script>
+
+    <!-- Shader for Particles -->
+    <script id="particle-vertex-shader" type="notjs">
+        attribute vec2 a_position;
+        uniform vec2 u_resolution;
+        void main() {
+            vec2 clipSpace = ((a_position / u_resolution) * 2.0) - 1.0;
+            gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+            gl_PointSize = 2.0;
+        }
+    </script>
+     <script id="particle-fragment-shader" type="notjs">
+      precision mediump float;
+      uniform vec4 u_color;
+      void main() { gl_FragColor = u_color; }
+    </script>
+
+
+    <script type="module">
+        function main() {
+            const canvas = document.querySelector("#glcanvas");
+            const gl = canvas.getContext("webgl");
+            if (!gl) {
+                document.getElementById('error-message').classList.remove('hidden');
+                return;
+            }
+
+            const shapeProgram = createProgramFromSources(gl, [document.getElementById("shape-vertex-shader").text, document.getElementById("shape-fragment-shader").text]);
+            const particleProgram = createProgramFromSources(gl, [document.getElementById("particle-vertex-shader").text, document.getElementById("particle-fragment-shader").text]);
+
+            const shapeLocations = {
+                position: gl.getAttribLocation(shapeProgram, "a_position"),
+                resolution: gl.getUniformLocation(shapeProgram, "u_resolution"),
+                color: gl.getUniformLocation(shapeProgram, "u_color"),
+                matrix: gl.getUniformLocation(shapeProgram, "u_matrix"),
+            };
+            const particleLocations = {
+                position: gl.getAttribLocation(particleProgram, "a_position"),
+                resolution: gl.getUniformLocation(particleProgram, "u_resolution"),
+                color: gl.getUniformLocation(particleProgram, "u_color"),
+            };
+
+            const positionBuffer = gl.createBuffer();
+            const particleBuffer = gl.createBuffer();
+            const healthDisplay = document.getElementById('health-display');
+            const addObjectBtn = document.getElementById('add-object-btn');
+            
+            const GRAVITY = new Vec2(0, 250.0);
+
+            class Vec2 {
+                constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+                add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+                sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
+                mul(s) { return new Vec2(this.x * s, this.y * s); }
+                div(s) { return s !== 0 ? new Vec2(this.x / s, this.y / s) : new Vec2(); }
+                dot(v) { return this.x * v.x + this.y * v.y; }
+                perp() { return new Vec2(-this.y, this.x); }
+                normalize() {
+                    const len = Math.sqrt(this.x * this.x + this.y * this.y);
+                    return len > 0 ? this.div(len) : new Vec2();
+                }
+            }
+            
+            class Particle {
+                constructor(x, y, color) {
+                    this.position = new Vec2(x, y);
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 120 + 50;
+                    this.velocity = new Vec2(Math.cos(angle) * speed, Math.sin(angle) * speed - 50);
+                    this.life = Math.random() * 2 + 1; // 1 to 3 seconds
+                    this.color = color;
+                }
+                update(deltaTime, width, height) {
+                    this.life -= deltaTime;
+                    this.velocity = this.velocity.add(GRAVITY.mul(deltaTime));
+                    this.position = this.position.add(this.velocity.mul(deltaTime));
+
+                    if (this.position.y > height) {
+                        this.position.y = height;
+                        this.velocity.y *= -0.5; // Bounce with energy loss
+                        this.velocity.x *= 0.9; // Friction
+                    }
+                }
+            }
+
+            class Shape {
+                constructor(vertices, x, y, color) {
+                    this.baseVertices = vertices.map(v => new Vec2(v.x, v.y));
+                    this.originalColor = [...color]; this.color = color;
+                    this.position = new Vec2(x, y);
+                    this.velocity = new Vec2(Math.random() * 2 - 1, Math.random() * 2 - 1).normalize().mul(Math.random() * 50 + 25);
+                    this.rotation = 0; this.health = 3; this.isPlayer = false; this.isDebris = false;
+                    this.life = 2.0; this.collisionCooldown = 0; this.turnsToSand = false;
+                }
+
+                getTransformedVertices() {
+                    const matrix = m3.rotate(m3.translate(m3.identity(), this.position.x, this.position.y), this.rotation);
+                    return this.baseVertices.map(v => { const t = m3.transformPoint(matrix, v); return new Vec2(t[0], t[1]); });
+                }
+                
+                update(deltaTime, width, height) {
+                    if (this.collisionCooldown > 0) this.collisionCooldown -= deltaTime;
+                    if (this.isDebris) this.life -= deltaTime;
+                    this.position = this.position.add(this.velocity.mul(deltaTime));
+                    this.rotation += 0.05 * deltaTime;
+                    const verts = this.getTransformedVertices();
+                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                    verts.forEach(v => {
+                        minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
+                        minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+                    });
+                    if (minX < 0) this.velocity.x = Math.abs(this.velocity.x);
+                    if (maxX > width) this.velocity.x = -Math.abs(this.velocity.x);
+                    if (minY < 0) this.velocity.y = Math.abs(this.velocity.y);
+                    if (maxY > height) this.velocity.y = -Math.abs(this.velocity.y);
+                }
+
+                draw() {
+                    const positions = this.baseVertices.flatMap(v => [v.x, v.y]);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+                    let matrix = m3.rotate(m3.translate(m3.identity(), this.position.x, this.position.y), this.rotation);
+                    gl.uniformMatrix3fv(shapeLocations.matrix, false, matrix);
+                    gl.uniform4fv(shapeLocations.color, this.color);
+                    gl.drawArrays(gl.TRIANGLE_FAN, 0, this.baseVertices.length);
+                }
+
+                takeDamage() {
+                    if (this.collisionCooldown > 0) return;
+                    this.health--; this.collisionCooldown = 0.5;
+                    this.color = [1, 0, 0, 1];
+                    setTimeout(() => { if (this) this.color = this.originalColor; }, 200);
+                    if (this.isPlayer) healthDisplay.textContent = Math.max(0, this.health);
+                }
+            }
+
+            function checkCollision(shapeA, shapeB) {
+                const getAxes = (vertices) => {
+                    const axes = [];
+                    for (let i = 0; i < vertices.length; i++) {
+                        const p1 = vertices[i], p2 = vertices[(i + 1) % vertices.length];
+                        axes.push(p1.sub(p2).perp().normalize());
+                    } return axes;
+                };
+                const project = (vertices, axis) => {
+                    let min = Infinity, max = -Infinity;
+                    vertices.forEach(v => { const p = v.dot(axis); min = Math.min(min, p); max = Math.max(max, p); });
+                    return { min, max };
+                };
+                const axes = [...getAxes(shapeA.getTransformedVertices()), ...getAxes(shapeB.getTransformedVertices())];
+                for (const axis of axes) {
+                    const projA = project(shapeA.getTransformedVertices(), axis);
+                    const projB = project(shapeB.getTransformedVertices(), axis);
+                    if (projA.max < projB.min || projB.max < projA.min) return false;
+                } return true;
+            }
+
+            let shapes = []; let particles = []; let playerTriangle = null;
+            const addNewObject = () => {
+                const sides = Math.floor(Math.random() * 4) + 3; const vertices = [];
+                const radius = Math.random() * 20 + 30;
+                for (let j = 0; j < sides; j++) { const angle = (j / sides) * Math.PI * 2; vertices.push({ x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }); }
+                const color = [Math.random()*.8+.2, Math.random()*.8+.2, Math.random()*.8+.2, 1];
+                shapes.push(new Shape(vertices, Math.random() * canvas.width, Math.random() * canvas.height, color));
+            };
+            
+            function initializeScene() {
+                shapes = []; particles = [];
+                playerTriangle = new Shape([{x: -25, y: 20}, {x: 25, y: 20}, {x: 0, y: -30}], canvas.width / 2, canvas.height / 2, [0.1, 0.8, 0.3, 1]);
+                playerTriangle.isPlayer = true; playerTriangle.velocity = new Vec2(0,0);
+                shapes.push(playerTriangle); healthDisplay.textContent = playerTriangle.health;
+                for (let i = 0; i < 9; i++) addNewObject();
+            }
+            
+            let draggedShape = null, dragStartPos = null;
+            const getCanvasPos = (event) => {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = event.clientX ?? event.touches[0].clientX;
+                const clientY = event.clientY ?? event.touches[0].clientY;
+                return new Vec2(clientX - rect.left, clientY - rect.top);
+            };
+
+            const pointInPolygon = (point, vertices) => {
+                let isInside = false;
+                for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+                    if (((vertices[i].y > point.y) !== (vertices[j].y > point.y)) && (point.x < (vertices[j].x - vertices[i].x) * (point.y - vertices[i].y) / (vertices[j].y - vertices[i].y) + vertices[i].x)) isInside = !isInside;
+                } return isInside;
+            };
+
+            const handleDragStart = (e) => { e.preventDefault(); const pos = getCanvasPos(e); for (let i = shapes.length - 1; i >= 0; i--) if (pointInPolygon(pos, shapes[i].getTransformedVertices())) { draggedShape = shapes[i]; dragStartPos = pos; break; } };
+            const handleDragEnd = (e) => { if (draggedShape && dragStartPos) { const endPos = getCanvasPos(e.changedTouches ? e.changedTouches[0] : e); draggedShape.velocity = draggedShape.velocity.add(endPos.sub(dragStartPos).mul(0.3)); } draggedShape = null; dragStartPos = null; };
+            canvas.addEventListener('mousemove', (e) => { if (playerTriangle && playerTriangle.health > 0 && !draggedShape) { const pos = getCanvasPos(e); playerTriangle.position.x = pos.x; playerTriangle.position.y = pos.y; } });
+            canvas.addEventListener('mousedown', handleDragStart); canvas.addEventListener('mouseup', handleDragEnd);
+            canvas.addEventListener('touchstart', handleDragStart, { passive: false }); canvas.addEventListener('touchend', handleDragEnd);
+            addObjectBtn.addEventListener('click', addNewObject);
+
+            let lastTime = 0;
+            function render(time) {
+                time *= 0.001;
+                const deltaTime = Math.min(0.05, time - lastTime); lastTime = time;
+                resizeCanvasToDisplaySize(gl.canvas);
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+                gl.clearColor(0.1, 0.12, 0.17, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+
+                // --- Update and Draw Shapes ---
+                gl.useProgram(shapeProgram);
+                gl.enableVertexAttribArray(shapeLocations.position);
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.vertexAttribPointer(shapeLocations.position, 2, gl.FLOAT, false, 0, 0);
+                gl.uniform2f(shapeLocations.resolution, gl.canvas.width, gl.canvas.height);
+
+                let shapesToProcess = [];
+                for (let i = shapes.length - 1; i >= 0; i--) {
+                    const shape = shapes[i];
+                    if (!shape.isPlayer || draggedShape) shape.update(deltaTime, gl.canvas.width, gl.canvas.height);
+                    shape.draw();
+                    if (shape.health <= 0 || (shape.isDebris && shape.life <= 0)) {
+                        shapesToProcess.push(shape);
+                        shapes.splice(i, 1);
+                    }
+                }
+                shapesToProcess.forEach(processDestroyedShape);
+
+                // --- Collision Logic ---
+                for (let i = 0; i < shapes.length; i++) for (let j = i + 1; j < shapes.length; j++) {
+                    const shapeA = shapes[i], shapeB = shapes[j];
+                    if (shapeA.collisionCooldown > 0 || shapeB.collisionCooldown > 0) continue;
+                    if (checkCollision(shapeA, shapeB)) {
+                        shapeA.takeDamage(); shapeB.takeDamage();
+                        const normal = shapeA.position.sub(shapeB.position).normalize();
+                        const relVel = shapeA.velocity.sub(shapeB.velocity);
+                        const impulse = relVel.dot(normal) * -1.5;
+                        shapeA.velocity = shapeA.velocity.add(normal.mul(impulse));
+                        shapeB.velocity = shapeB.velocity.sub(normal.mul(impulse));
+                    }
+                }
+
+                // --- Update and Draw Particles ---
+                gl.useProgram(particleProgram);
+                gl.enableVertexAttribArray(particleLocations.position);
+                gl.bindBuffer(gl.ARRAY_BUFFER, particleBuffer);
+                gl.vertexAttribPointer(particleLocations.position, 2, gl.FLOAT, false, 0, 0);
+                gl.uniform2f(particleLocations.resolution, gl.canvas.width, gl.canvas.height);
+                
+                let particlePositions = [];
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.update(deltaTime, gl.canvas.width, gl.canvas.height);
+                    if (p.life <= 0) particles.splice(i, 1);
+                    else particlePositions.push(p.position.x, p.position.y);
+                }
+                if (particlePositions.length > 0) {
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(particlePositions), gl.DYNAMIC_DRAW);
+                    gl.uniform4fv(particleLocations.color, [1.0, 0.8, 0.6, 1.0]); // Sand color
+                    gl.drawArrays(gl.POINTS, 0, particlePositions.length / 2);
+                }
+
+                requestAnimationFrame(render);
+            }
+            
+            function processDestroyedShape(shape) {
+                if (shape.isPlayer) playerTriangle = null;
+                // If the shape still had health, it must be debris that timed out.
+                // If it's debris that will turn to sand, its health must be <= 0.
+                if (shape.health > 0 || (shape.isDebris && !shape.turnsToSand)) return; // Just remove it.
+                
+                if (shape.isDebris && shape.turnsToSand) { // Create sand from debris
+                     for(let i=0; i<80; i++) particles.push(new Particle(shape.position.x, shape.position.y, shape.originalColor));
+                } else if (!shape.isDebris) { // Split polygon into triangles
+                    const originalVerts = shape.getTransformedVertices();
+                    const centroid = originalVerts.reduce((a, v) => a.add(v), new Vec2()).div(originalVerts.length);
+                    for (let i = 0; i < originalVerts.length; i++) {
+                        const p1 = originalVerts[i], p2 = originalVerts[(i + 1) % originalVerts.length];
+                        const newCentroid = (p1.add(p2).add(centroid)).div(3);
+                        const newBaseVerts = [p1, p2, centroid].map(v => ({ x: v.x - newCentroid.x, y: v.y - newCentroid.y }));
+                        const debris = new Shape(newBaseVerts, newCentroid.x, newCentroid.y, shape.originalColor);
+                        debris.velocity = newCentroid.sub(centroid).normalize().mul(Math.random() * 100 + 50);
+                        debris.isDebris = true;
+                        debris.turnsToSand = Math.random() < 0.4; // 40% chance to become sand on next death
+                        shapes.push(debris);
+                    }
+                }
+            }
+
+            const m3 = {
+                identity: () => [1,0,0,0,1,0,0,0,1],
+                translation: (tx, ty) => [1,0,0,0,1,0,tx,ty,1],
+                rotation: (r) => { const c=Math.cos(r), s=Math.sin(r); return [c,-s,0,s,c,0,0,0,1]; },
+                multiply: (a,b) => {const a0=a[0],a1=a[1],a2=a[2],a3=a[3],a4=a[4],a5=a[5],a6=a[6],a7=a[7],a8=a[8],b0=b[0],b1=b[1],b2=b[2],b3=b[3],b4=b[4],b5=b[5],b6=b[6],b7=b[7],b8=b[8];return [b0*a0+b1*a3+b2*a6,b0*a1+b1*a4+b2*a7,b0*a2+b1*a5+b2*a8,b3*a0+b4*a3+b5*a6,b3*a1+b4*a4+b5*a7,b3*a2+b4*a5+b5*a8,b6*a0+b7*a3+b8*a6,b6*a1+b7*a4+b8*a7,b6*a2+b7*a5+b8*a8];},
+                translate: (m, tx, ty) => m3.multiply(m, m3.translation(tx, ty)),
+                rotate: (m, r) => m3.multiply(m, m3.rotation(r)),
+                transformPoint: (m, v) => {const v0=v.x, v1=v.y, d=v0*m[2]+v1*m[5]+m[8]||1; return [(v0*m[0]+v1*m[3]+m[6])/d, (v0*m[1]+v1*m[4]+m[7])/d];},
+            };
+            const createProgramFromSources = (gl, sources) => {
+                const createShader = (gl, type, source) => { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if(gl.getShaderParameter(s, gl.COMPILE_STATUS)) return s; console.error(gl.getShaderInfoLog(s)); gl.deleteShader(s); };
+                const vs = createShader(gl, gl.VERTEX_SHADER, sources[0]); const fs = createShader(gl, gl.FRAGMENT_SHADER, sources[1]);
+                const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p); if(gl.getProgramParameter(p, gl.LINK_STATUS)) return p; console.error(gl.getProgramInfoLog(p)); gl.deleteProgram(p);
+            };
+            const resizeCanvasToDisplaySize = (canvas) => {
+                const dw = canvas.clientWidth, dh = canvas.clientHeight;
+                if (canvas.width !== dw || canvas.height !== dh) { canvas.width = dw; canvas.height = dh; }
+            };
+
+            initializeScene();
+            requestAnimationFrame(render);
+        }
+        main();
+    </script>
+</body>
+</html>
+
