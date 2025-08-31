@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Fart Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+
+// ===== SHADER SOURCE CODE ===== //
+
+const vertexShaderSource = `#version 300 es
+    // An attribute is an input to a vertex shader.
+    // It will receive data from a buffer.
+    in vec2 a_position;
+
+    // A uniform is a global variable that's the same for all vertices.
+    // We'll use it to pass the player's position and canvas resolution.
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+
+    // all shaders have a main function
+    void main() {
+        // Add in the translation and scale
+        vec2 position = a_position * u_scale + u_translation;
+
+        // convert the position from pixels to 0.0 to 1.0
+        vec2 zeroToOne = position / u_resolution;
+
+        // convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+
+        // convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+
+        // Flip the y-axis because WebGL's clip space has +Y up.
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+`;
+
+const fragmentShaderSource = `#version 300 es
+    // fragment shaders don't have a default precision so we need
+    // to pick one. highp is a good default. It means "high precision"
+    precision highp float;
+
+    // We need to declare an output for the fragment shader
+    out vec4 outColor;
+    
+    // A uniform for the color
+    uniform vec4 u_color;
+
+    void main() {
+        outColor = u_color;
+    }
+`;
+
+
+// ===== MAIN SCRIPT ===== //
+
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl2');
+
+if (!gl) {
+    alert("WebGL 2 not supported! Please use a modern browser.");
+}
+
+// --- Shader Program Setup --- //
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+    if (success) {
+        return shader;
+    }
+    console.error(gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+function createProgram(gl, vertexShader, fragmentShader) {
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+    if (success) {
+        return program;
+    }
+    console.error(gl.getProgramInfoLog(program));
+    gl.deleteProgram(program);
+}
+
+const shaderProgram = createProgram(gl, vertexShader, fragmentShader);
+
+// --- Get Shader Attribute & Uniform Locations --- //
+
+const positionAttributeLocation = gl.getAttribLocation(shaderProgram, "a_position");
+const resolutionUniformLocation = gl.getUniformLocation(shaderProgram, "u_resolution");
+const translationUniformLocation = gl.getUniformLocation(shaderProgram, "u_translation");
+const scaleUniformLocation = gl.getUniformLocation(shaderProgram, "u_scale");
+const colorUniformLocation = gl.getUniformLocation(shaderProgram, "u_color");
+
+// --- Buffer for a simple square --- //
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+const positions = [
+    0, 0,
+    1, 0,
+    0, 1,
+    0, 1,
+    1, 0,
+    1, 1,
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+gl.enableVertexAttribArray(positionAttributeLocation);
+const size = 2;          // 2 components per iteration (x, y)
+const type = gl.FLOAT;   // the data is 32bit floats
+const normalize = false; // don't normalize the data
+const stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+const offset = 0;        // start at the beginning of the buffer
+gl.vertexAttribPointer(positionAttributeLocation, size, type, normalize, stride, offset);
+
+
+// --- Game State --- //
+
+const player = {
+    x: 100,
+    y: 100,
+    width: 30,
+    height: 50,
+    velocityX: 0,
+    velocityY: 0,
+    speed: 2,
+    jumpStrength: 13,
+    isGrounded: false,
+    color: [0.8, 0.2, 0.2, 1], // Red
+};
+
+// ** The Fart Ability State **
+const fartAbility = {
+    boost: 11,           // How strong the fart push is
+    cooldown: 500,       // Cooldown in milliseconds
+    canUse: true,        // Flag to check if we can fart
+    particles: [],       // Array to hold particle effects
+};
+
+const world = {
+    gravity: 0.5,
+    friction: 0.9,
+    groundLevel: 400,
+};
+
+const input = {
+    left: false,
+    right: false,
+    up: false
+};
+
+// --- Input Handling --- //
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') input.up = true;
+    // FART KEY
+    if (e.key === 'Shift') {
+        if (fartAbility.canUse) {
+            useFartAbility();
+        }
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') input.up = false;
+});
+
+// --- Game Logic --- //
+
+function useFartAbility() {
+    fartAbility.canUse = false;
+    player.velocityY = -fartAbility.boost; // Apply upward force
+    
+    // Create some particles
+    for (let i = 0; i < 15; i++) {
+        fartAbility.particles.push({
+            x: player.x + player.width / 2,
+            y: player.y + player.height,
+            size: Math.random() * 8 + 4,
+            velocityX: (Math.random() - 0.5) * 3,
+            velocityY: Math.random() * 3 + 1,
+            life: 60, // frames to live
+            color: [0.3, 0.8, 0.3, 1], // Greenish
+        });
+    }
+
+    // Cooldown timer
+    setTimeout(() => {
+        fartAbility.canUse = true;
+    }, fartAbility.cooldown);
+}
+
+function update() {
+    // Horizontal movement
+    if (input.left) {
+        player.velocityX = -player.speed;
+    }
+    if (input.right) {
+        player.velocityX = player.speed;
+    }
+
+    // Jumping
+    if (input.up && player.isGrounded) {
+        player.velocityY = -player.jumpStrength;
+        player.isGrounded = false;
+    }
+
+    // Apply physics
+    player.velocityY += world.gravity;
+    player.x += player.velocityX;
+    player.y += player.velocityY;
+    player.velocityX *= world.friction;
+
+    // Collision with ground
+    if (player.y + player.height > world.groundLevel) {
+        player.y = world.groundLevel - player.height;
+        player.velocityY = 0;
+        player.isGrounded = true;
+    }
+
+    // Update fart particles
+    fartAbility.particles.forEach((p, index) => {
+        p.x += p.velocityX;
+        p.y += p.velocityY;
+        p.life--;
+        if (p.life <= 0) {
+            fartAbility.particles.splice(index, 1);
+        }
+    });
+}
+
+// --- Drawing Logic --- //
+
+function drawRect(x, y, width, height, color) {
+    gl.uniform2f(translationUniformLocation, x, y);
+    gl.uniform2f(scaleUniformLocation, width, height);
+    gl.uniform4fv(colorUniformLocation, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function draw() {
+    // --- Canvas setup ---
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+    // Clear the canvas
+    gl.clearColor(0.1, 0.1, 0.2, 1.0); // Dark blue background
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(shaderProgram);
+    gl.bindVertexArray(vao);
+    gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+    // Draw the ground
+    drawRect(0, world.groundLevel, gl.canvas.width, gl.canvas.height - world.groundLevel, [0.4, 0.3, 0.2, 1]);
+    
+    // Draw fart particles
+    fartAbility.particles.forEach(p => {
+        drawRect(p.x, p.y, p.size, p.size, p.color);
+    });
+
+    // Draw the player
+    drawRect(player.x, player.y, player.width, player.height, player.color);
+}
+
+
+// --- Game Loop --- //
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// Start the game!
+gameLoop();
+
+</script>
+</body>
+</html>
