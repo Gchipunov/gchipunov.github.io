@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Fart Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+
+        /* ===== MOBILE TOUCH CONTROLS STYLES ===== */
+        .touch-controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 25%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+            user-select: none; /* Prevents text selection on tap */
+            -webkit-user-select: none; /* For Safari */
+        }
+
+        .d-pad, .action-buttons {
+            display: flex;
+            gap: 20px;
+        }
+        
+        .touch-btn {
+            width: 70px;
+            height: 70px;
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.7);
+            border: 3px solid rgba(255, 255, 255, 0.5);
+        }
+        /* Style for the 'fart' button */
+        #fart-btn {
+            background-color: rgba(144, 238, 144, 0.4); /* Light green */
+            border-color: rgba(144, 238, 144, 0.6);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="touch-controls">
+        <div class="d-pad">
+            <div id="left-btn" class="touch-btn">◀</div>
+            <div id="right-btn" class="touch-btn">▶</div>
+        </div>
+        <div class="action-buttons">
+            <div id="fart-btn" class="touch-btn">💨</div>
+            <div id="jump-btn" class="touch-btn">▲</div>
+        </div>
+    </div>
+
+<script>
+
+// ===== SHADER SOURCE CODE ===== //
+
+const vertexShaderSource = `#version 300 es
+    in vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    void main() {
+        vec2 position = a_position * u_scale + u_translation;
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+`;
+
+const fragmentShaderSource = `#version 300 es
+    precision highp float;
+    out vec4 outColor;
+    uniform vec4 u_color;
+    void main() {
+        outColor = u_color;
+    }
+`;
+
+
+// ===== MAIN SCRIPT ===== //
+
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl2');
+
+if (!gl) {
+    alert("WebGL 2 not supported! Please use a modern browser.");
+}
+
+// --- Shader Program Setup --- //
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+    if (success) return shader;
+    console.error(gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+function createProgram(gl, vertexShader, fragmentShader) {
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+    if (success) return program;
+    console.error(gl.getProgramInfoLog(program));
+    gl.deleteProgram(program);
+}
+
+const shaderProgram = createProgram(gl, vertexShader, fragmentShader);
+const positionAttributeLocation = gl.getAttribLocation(shaderProgram, "a_position");
+const resolutionUniformLocation = gl.getUniformLocation(shaderProgram, "u_resolution");
+const translationUniformLocation = gl.getUniformLocation(shaderProgram, "u_translation");
+const scaleUniformLocation = gl.getUniformLocation(shaderProgram, "u_scale");
+const colorUniformLocation = gl.getUniformLocation(shaderProgram, "u_color");
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+const positions = [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+gl.enableVertexAttribArray(positionAttributeLocation);
+gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+// --- Game State --- //
+const player = { x: 100, y: 100, width: 30, height: 50, velocityX: 0, velocityY: 0, speed: 2.5, jumpStrength: 13, isGrounded: false, color: [0.8, 0.2, 0.2, 1] };
+const fartAbility = { boost: 11, cooldown: 500, canUse: true, particles: [] };
+const world = { gravity: 0.5, friction: 0.9, groundLevel: 400 };
+const input = { left: false, right: false, up: false };
+
+// --- Input Handling --- //
+
+// Keyboard
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
+    if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') input.up = true;
+    if (e.key === 'Shift') {
+        if (fartAbility.canUse) useFartAbility();
+    }
+});
+window.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
+    if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+    if (e.key === 'ArrowUp' || e.key === 'w' || e.key === ' ') input.up = false;
+});
+
+// ** Touch Controls Setup **
+function setupTouchControls() {
+    const leftBtn = document.getElementById('left-btn');
+    const rightBtn = document.getElementById('right-btn');
+    const jumpBtn = document.getElementById('jump-btn');
+    const fartBtn = document.getElementById('fart-btn');
+
+    // Prevent default touch behaviors like scrolling
+    document.body.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    
+    // Left Button
+    leftBtn.addEventListener('touchstart', () => input.left = true);
+    leftBtn.addEventListener('touchend', () => input.left = false);
+
+    // Right Button
+    rightBtn.addEventListener('touchstart', () => input.right = true);
+    rightBtn.addEventListener('touchend', () => input.right = false);
+
+    // Jump Button
+    jumpBtn.addEventListener('touchstart', () => input.up = true);
+    jumpBtn.addEventListener('touchend', () => input.up = false);
+    
+    // Fart Button
+    fartBtn.addEventListener('touchstart', () => {
+        if (fartAbility.canUse) useFartAbility();
+    });
+}
+
+
+// --- Game Logic --- //
+
+function useFartAbility() {
+    fartAbility.canUse = false;
+    player.velocityY = -fartAbility.boost;
+    for (let i = 0; i < 15; i++) {
+        fartAbility.particles.push({
+            x: player.x + player.width / 2, y: player.y + player.height,
+            size: Math.random() * 8 + 4, velocityX: (Math.random() - 0.5) * 3,
+            velocityY: Math.random() * 3 + 1, life: 60,
+            color: [0.3, 0.8, 0.3, 1]
+        });
+    }
+    setTimeout(() => { fartAbility.canUse = true; }, fartAbility.cooldown);
+}
+
+function update() {
+    // Movement and jumping logic remains the same
+    if (input.left) player.velocityX = -player.speed;
+    if (input.right) player.velocityX = player.speed;
+    if (input.up && player.isGrounded) {
+        player.velocityY = -player.jumpStrength;
+        player.isGrounded = false;
+    }
+    player.velocityY += world.gravity;
+    player.x += player.velocityX;
+    player.y += player.velocityY;
+    player.velocityX *= world.friction;
+    if (player.y + player.height > world.groundLevel) {
+        player.y = world.groundLevel - player.height;
+        player.velocityY = 0;
+        player.isGrounded = true;
+    }
+    fartAbility.particles.forEach((p, index) => {
+        p.x += p.velocityX;
+        p.y += p.velocityY;
+        p.life--;
+        if (p.life <= 0) fartAbility.particles.splice(index, 1);
+    });
+}
+
+// --- Drawing Logic --- //
+function drawRect(x, y, width, height, color) {
+    gl.uniform2f(translationUniformLocation, x, y);
+    gl.uniform2f(scaleUniformLocation, width, height);
+    gl.uniform4fv(colorUniformLocation, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function draw() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    gl.clearColor(0.1, 0.1, 0.2, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(shaderProgram);
+    gl.bindVertexArray(vao);
+    gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+    drawRect(0, world.groundLevel, gl.canvas.width, gl.canvas.height - world.groundLevel, [0.4, 0.3, 0.2, 1]);
+    fartAbility.particles.forEach(p => drawRect(p.x, p.y, p.size, p.size, p.color));
+    drawRect(player.x, player.y, player.width, player.height, player.color);
+}
+
+// --- Game Loop --- //
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// Start the game!
+setupTouchControls(); // Initialize the touch listeners
+gameLoop();
+
+</script>
+</body>
+</html>
