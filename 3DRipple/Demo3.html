@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Three.js Wavy Triangles</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.144.0/build/three.min.js"></script>
+  <script>
+    let scene, camera, renderer;
+    let mesh; // The Mesh object
+    const mouse = { x: 0, y: 0 };
+    const width = 100;
+    const height = 60;
+
+    function init() {
+      // 1. Create the scene
+      scene = new THREE.Scene();
+
+      // 2. Create the camera
+      camera = new THREE.PerspectiveCamera(
+        75, 
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      camera.position.z = 40;
+
+      // 3. Create the renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      // 4. Create a geometry of triangles
+      const geometry = new THREE.BufferGeometry();
+      const positions = [];
+      const indices = [];
+
+      // Create a grid of vertices
+      for (let i = 0; i < width; i++) {
+        for (let j = 0; j < height; j++) {
+          // Shift so center is at (0,0)
+          positions.push(i - width / 2); // x
+          positions.push(j - height / 2); // y
+          positions.push(0);              // z (initially flat)
+        }
+      }
+
+      // Create faces (triangles) from the grid
+      for (let i = 0; i < width - 1; i++) {
+        for (let j = 0; j < height - 1; j++) {
+          const a = i * height + j;
+          const b = (i + 1) * height + j;
+          const c = (i + 1) * height + (j + 1);
+          const d = i * height + (j + 1);
+
+          // First triangle (bottom-left)
+          indices.push(a, b, d);
+          // Second triangle (top-right)
+          indices.push(b, c, d);
+        }
+      }
+
+      geometry.setAttribute(
+        'position',
+        new THREE.Float32BufferAttribute(positions, 3)
+      );
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals(); // Crucial for lighting
+
+      // 5. Create a MeshStandardMaterial (for better lighting)
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x00ccff,
+        side: THREE.DoubleSide, // Render both sides of the triangle
+        roughness: 0.8,
+        metalness: 0.2
+      });
+        // 5. Create a PointsMaterial
+      const materialPoints = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 0.2
+      });
+      // 6. Create the Mesh object and add to scene
+      mesh = new THREE.Mesh(geometry, material);
+
+       // 6. Create the Points object and add to scene
+      points = new THREE.Points(geometry,  materialPoints );
+      scene.add(points);
+      
+      scene.add(mesh);
+
+      // 7. Add some lighting
+      const ambientLight = new THREE.AmbientLight(0x404040, 2); // soft white light
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      directionalLight.position.set(100, 100, 100);
+      scene.add(directionalLight);
+
+      // 8. Listen for resize & mouse events
+      window.addEventListener('resize', onWindowResize);
+      document.addEventListener('mousemove', onMouseMove);
+
+      // Start animation
+      animate();
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onMouseMove(event) {
+      // Convert mouse position to a range of [-1, 1]
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -((event.clientY / window.innerHeight) * 2 - 1);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Update the z positions of each vertex
+      const time = performance.now() * 0.002;
+      const positions = mesh.geometry.attributes.position.array;
+      const originalPositions = mesh.geometry.userData.originalPositions || positions.slice();
+      mesh.geometry.userData.originalPositions = originalPositions;
+
+      for (let i = 0; i < positions.length; i += 3) {
+        const x = originalPositions[i];
+        const y = originalPositions[i + 1];
+
+        // Distance from the mouse in "scene" space
+        const dx = x - mouse.x * 20;
+        const dy = y - mouse.y * 20;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Create a wave offset
+        const wave = Math.sin(dist / 2 - time) * 2;
+        positions[i + 2] = wave;
+      }
+      mesh.geometry.attributes.position.needsUpdate = true;
+      mesh.geometry.computeVertexNormals(); // Recompute normals for lighting
+
+      renderer.render(scene, camera);
+    }
+
+    init();
+  </script>
+</body>
+</html>
