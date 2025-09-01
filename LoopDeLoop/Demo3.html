@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL 2D Platformer with Loop-de-Loop</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; background-color: #333; overflow: hidden; -webkit-user-select: none; -ms-user-select: none; user-select: none; }
+        canvas { display: block; width: 100vw; height: 100vh; object-fit: contain; margin: 0; }
+        .touch-controls { position: fixed; bottom: 20px; left: 0; width: 100%; display: flex; justify-content: space-between; z-index: 10; pointer-events: none; }
+        .touch-btn { width: 80px; height: 80px; background-color: rgba(255, 255, 255, 0.4); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; font-family: sans-serif; color: rgba(0, 0, 0, 0.6); border: 2px solid rgba(255, 255, 255, 0.6); pointer-events: auto; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        #btn-left { margin-left: 30px; }
+        #btn-right { margin-left: 120px; }
+        #btn-up { margin-right: 30px; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas" width="1280" height="720"></canvas>
+    <div class="touch-controls">
+        <div style="display: flex;">
+            <div id="btn-left" class="touch-btn">◀</div>
+            <div id="btn-right" class="touch-btn">▶</div>
+        </div>
+        <div>
+            <div id="btn-up" class="touch-btn">▲</div>
+        </div>
+    </div>
+
+    <script>
+    // --- Main WebGL Setup ---
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+    if (!gl) { alert('Unable to initialize WebGL. Your browser may not support it.'); }
+
+    // --- GLSL Shader Programs ---
+    const vsSource = `
+        attribute vec4 aVertexPosition;
+        uniform mat4 uProjectionMatrix;
+        uniform mat4 uModelViewMatrix;
+        void main() { gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition; }
+    `;
+    const fsSource = `
+        precision mediump float;
+        uniform vec4 uColor;
+        void main() { gl_FragColor = uColor; }
+    `;
+
+    // --- Shader Helper Functions ---
+    function loadShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader); return null;
+        }
+        return shader;
+    }
+    function initShaderProgram(gl, vsSource, fsSource) {
+        const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        const shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+            return null;
+        }
+        return shaderProgram;
+    }
+    const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+    const programInfo = {
+        program: shaderProgram,
+        attribLocations: { vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'), },
+        uniformLocations: {
+            projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+            modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+            color: gl.getUniformLocation(shaderProgram, 'uColor'),
+        },
+    };
+
+    // --- Geometry and Buffers ---
+    function initSquareBuffer(gl) {
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = [ 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5 ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+        return positionBuffer;
+    }
+
+    // *** NEW: Function to create vertices for a circle outline ***
+    function initCircleBuffer(gl, radius, segmentCount) {
+        const positionBuffer = gl.createBuffer();
+        const positions = [];
+        for (let i = 0; i < segmentCount; i++) {
+            const angle = (i / segmentCount) * 2 * Math.PI;
+            positions.push(radius * Math.cos(angle));
+            positions.push(radius * Math.sin(angle));
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+        return {
+            buffer: positionBuffer,
+            vertexCount: segmentCount,
+        };
+    }
+
+    const playerBuffer = initSquareBuffer(gl);
+
+    // --- Level Geometry ---
+    let levelGeometry = [];
+    const loopRadius = 150, loopCenterX = 600, loopCenterY = 150, segmentCount = 60;
+    levelGeometry.push({x1: -200, y1: 0, x2: loopCenterX - loopRadius, y2: 0});
+    for (let i = 0; i < segmentCount; ++i) {
+        const angle1 = (i / segmentCount) * 2 * Math.PI;
+        const angle2 = ((i + 1) / segmentCount) * 2 * Math.PI;
+        if (angle1 > Math.PI * 1.75 && angle2 < Math.PI * 0.25) continue;
+        if (angle1 < Math.PI / 2 && angle2 > Math.PI / 2) continue;
+        levelGeometry.push({
+            x1: loopCenterX + loopRadius * Math.cos(angle1),
+            y1: loopCenterY + loopRadius * Math.sin(angle1),
+            x2: loopCenterX + loopRadius * Math.cos(angle2),
+            y2: loopCenterY + loopRadius * Math.sin(angle2),
+        });
+    }
+    levelGeometry.push({x1: loopCenterX + loopRadius, y1: 0, x2: 1500, y2: 0});
+    const levelBuffer = gl.createBuffer();
+    const levelVerts = [];
+    levelGeometry.forEach(seg => { levelVerts.push(seg.x1, seg.y1, seg.x2, seg.y2); });
+    gl.bindBuffer(gl.ARRAY_BUFFER, levelBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(levelVerts), gl.STATIC_DRAW);
+
+    // *** NEW: Create the circle buffer for the loop visual ***
+    const loopCircleData = initCircleBuffer(gl, loopRadius, segmentCount);
+
+
+    // --- Game State & Physics ---
+    const player = { x: 100, y: 50, vx: 0, vy: 0, width: 20, height: 20, onGround: false, speed: 6, jumpForce: 12, };
+    const gravity = -0.5, friction = 0.9, keys = {};
+
+    // --- Event Listeners ---
+    window.addEventListener('keydown', (e) => keys[e.key] = true);
+    window.addEventListener('keyup', (e) => keys[e.key] = false);
+    const btnLeft = document.getElementById('btn-left');
+    const btnRight = document.getElementById('btn-right');
+    const btnUp = document.getElementById('btn-up');
+    function handleTouch(key, isPressed, event) {
+        event.preventDefault();
+        keys[key] = isPressed;
+    }
+    btnLeft.addEventListener('touchstart', (e) => handleTouch('ArrowLeft', true, e), { passive: false });
+    btnLeft.addEventListener('touchend', (e) => handleTouch('ArrowLeft', false, e), { passive: false });
+    btnRight.addEventListener('touchstart', (e) => handleTouch('ArrowRight', true, e), { passive: false });
+    btnRight.addEventListener('touchend', (e) => handleTouch('ArrowRight', false, e), { passive: false });
+    btnUp.addEventListener('touchstart', (e) => handleTouch('ArrowUp', true, e), { passive: false });
+    btnUp.addEventListener('touchend', (e) => handleTouch('ArrowUp', false, e), { passive: false });
+
+    // --- Game Loop ---
+    let lastTime = 0;
+    function gameLoop(currentTime) {
+        update(currentTime - lastTime);
+        drawScene();
+        requestAnimationFrame(gameLoop);
+        lastTime = currentTime;
+    }
+
+    // --- Update Function (unchanged) ---
+    function update(deltaTime) {
+        if (keys['ArrowLeft']) { player.vx = -player.speed; }
+        else if (keys['ArrowRight']) { player.vx = player.speed; }
+        else { player.vx *= friction; }
+        if (keys['ArrowUp'] && player.onGround) { player.vy = player.jumpForce; player.onGround = false; }
+        if (!player.onGround) { player.vy += gravity; }
+        player.x += player.vx;
+        player.y += player.vy;
+        player.onGround = false;
+        let closestDistSq = Infinity, collisionNormal = null;
+        for (const segment of levelGeometry) {
+            const p={x:player.x,y:player.y}, a={x:segment.x1,y:segment.y1}, b={x:segment.x2,y:segment.y2};
+            const ap={x:p.x-a.x,y:p.y-a.y}, ab={x:b.x-a.x,y:b.y-a.y};
+            const ab2=ab.x*ab.x+ab.y*ab.y, ap_dot_ab=ap.x*ab.x+ap.y*ab.y;
+            let t = Math.max(0, Math.min(1, ap_dot_ab / ab2));
+            const closestPoint={x:a.x+ab.x*t,y:a.y+ab.y*t};
+            const distSq=(p.x-closestPoint.x)**2+(p.y-closestPoint.y)**2;
+            if (distSq < closestDistSq) {
+                const segDx=segment.x2-segment.x1, segDy=segment.y2-segment.y1;
+                const normal={x:-segDy,y:segDx};
+                const len=Math.sqrt(normal.x*normal.x+normal.y*normal.y);
+                normal.x/=len; normal.y/=len;
+                const playerRadius=player.height/2;
+                if(distSq<playerRadius*playerRadius){
+                    closestDistSq=distSq; collisionNormal=normal;
+                    const penetration=playerRadius-Math.sqrt(distSq);
+                    player.x+=collisionNormal.x*penetration; player.y+=collisionNormal.y*penetration;
+                    const dot=player.vx*collisionNormal.x+player.vy*collisionNormal.y;
+                    player.vx-=collisionNormal.x*dot; player.vy-=collisionNormal.y*dot;
+                    player.onGround=true;
+                }
+            }
+        }
+        if(player.onGround&&collisionNormal&&collisionNormal.y<0.99){
+            const gForce={x:-collisionNormal.x*-gravity,y:-collisionNormal.y*-gravity};
+            player.vx+=gForce.x; player.vy+=gForce.y;
+        }
+    }
+
+    // --- Drawing Function ---
+    function drawScene() {
+        gl.clearColor(0.2, 0.5, 0.9, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        const projectionMatrix = createOrthographic(0, gl.canvas.width, 0, gl.canvas.height, -1, 1);
+        let modelViewMatrix;
+        gl.useProgram(programInfo.program);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+
+        // --- Draw the Level ---
+        gl.bindBuffer(gl.ARRAY_BUFFER, levelBuffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+        modelViewMatrix = createIdentity();
+        gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+        gl.uniform4f(programInfo.uniformLocations.color, 0.0, 0.6, 0.2, 1.0);
+        gl.drawArrays(gl.LINES, 0, levelVerts.length / 2);
+
+        // *** NEW: Draw the Loop Circle visual guide ***
+        gl.bindBuffer(gl.ARRAY_BUFFER, loopCircleData.buffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+        modelViewMatrix = createIdentity();
+        translate(modelViewMatrix, loopCenterX, loopCenterY, 0); // Move circle to loop's center
+        gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+        gl.uniform4f(programInfo.uniformLocations.color, 0.9, 0.9, 0.2, 1.0); // Yellow color
+        gl.drawArrays(gl.LINE_LOOP, 0, loopCircleData.vertexCount); // Use LINE_LOOP to draw outline
+
+        // --- Draw the Player ---
+        gl.bindBuffer(gl.ARRAY_BUFFER, playerBuffer);
+        gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+        modelViewMatrix = createIdentity();
+        translate(modelViewMatrix, player.x, player.y, 0);
+        scale(modelViewMatrix, player.width, player.height, 1);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+        gl.uniform4f(programInfo.uniformLocations.color, 1.0, 1.0, 1.0, 1.0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    // --- Matrix Math Helpers ---
+    function createOrthographic(l,r,b,t,n,f){const lr=1/(l-r),bt=1/(b-t),nf=1/(n-f),o=new Float32Array(16);o[0]=-2*lr;o[5]=-2*bt;o[10]=2*nf;o[12]=(l+r)*lr;o[13]=(t+b)*bt;o[14]=(f+n)*nf;o[15]=1;return o;}
+    function createIdentity(){return new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);}
+    function translate(m,x,y,z){m[12]=m[0]*x+m[4]*y+m[8]*z+m[12];m[13]=m[1]*x+m[5]*y+m[9]*z+m[13];m[14]=m[2]*x+m[6]*y+m[10]*z+m[14];m[15]=m[3]*x+m[7]*y+m[11]*z+m[15];return m;}
+    function scale(m,x,y,z){m[0]*=x;m[1]*=x;m[2]*=x;m[3]*=x;m[4]*=y;m[5]*=y;m[6]*=y;m[7]*=y;m[8]*=z;m[9]*=z;m[10]*=z;m[11]*=z;return m;}
+
+    // Start the game
+    requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
