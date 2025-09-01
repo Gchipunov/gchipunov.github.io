@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL 2D Platformer with Loop-de-Loop</title>
+    <style>
+        body { margin: 0; background-color: #333; }
+        canvas { display: block; margin: 50px auto; background-color: #5c94fc; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas" width="1280" height="720"></canvas>
+    <script>
+
+// --- Main WebGL Setup ---
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+if (!gl) {
+    alert('Unable to initialize WebGL. Your browser may not support it.');
+}
+
+// --- GLSL Shader Programs ---
+// Vertex shader: Calculates the position of each vertex
+const vsSource = `
+    attribute vec4 aVertexPosition;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uModelViewMatrix;
+    void main() {
+        gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+    }
+`;
+
+// Fragment shader: Assigns a color to each pixel
+const fsSource = `
+    precision mediump float;
+    uniform vec4 uColor;
+    void main() {
+        gl_FragColor = uColor;
+    }
+`;
+
+// --- Shader Helper Functions ---
+function loadShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+function initShaderProgram(gl, vsSource, fsSource) {
+    const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    gl.linkProgram(shaderProgram);
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+        return null;
+    }
+    return shaderProgram;
+}
+
+const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+// Store shader attribute and uniform locations
+const programInfo = {
+    program: shaderProgram,
+    attribLocations: {
+        vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+    },
+    uniformLocations: {
+        projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+        modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+        color: gl.getUniformLocation(shaderProgram, 'uColor'),
+    },
+};
+
+// --- Geometry and Buffers ---
+// Create a buffer for a simple square
+function initSquareBuffer(gl) {
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    const positions = [
+         0.5,  0.5,
+        -0.5,  0.5,
+         0.5, -0.5,
+        -0.5, -0.5,
+    ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    return positionBuffer;
+}
+const playerBuffer = initSquareBuffer(gl);
+
+// --- Level Geometry ---
+let levelGeometry = [];
+const loopRadius = 150;
+const loopCenterX = 600;
+const loopCenterY = 150;
+const segmentCount = 60; // How many line segments make up the loop
+
+// Ground before loop
+levelGeometry.push({x1: -200, y1: 0, x2: loopCenterX - loopRadius, y2: 0});
+// The loop-de-loop
+for (let i = 0; i < segmentCount; ++i) {
+    // Angle for the current and next point on the circle
+    const angle1 = (i / segmentCount) * 2 * Math.PI;
+    const angle2 = ((i + 1) / segmentCount) * 2 * Math.PI;
+
+    // We only want the top 3/4 of the loop to be solid
+    if (angle1 > Math.PI * 1.75 && angle2 < Math.PI * 0.25) continue;
+    if (angle1 < Math.PI / 2 && angle2 > Math.PI / 2) continue; // Small gap at top for effect
+
+    levelGeometry.push({
+        x1: loopCenterX + loopRadius * Math.cos(angle1),
+        y1: loopCenterY + loopRadius * Math.sin(angle1),
+        x2: loopCenterX + loopRadius * Math.cos(angle2),
+        y2: loopCenterY + loopRadius * Math.sin(angle2),
+    });
+}
+// Ground after loop
+levelGeometry.push({x1: loopCenterX + loopRadius, y1: 0, x2: 1500, y2: 0});
+
+// Create a buffer for the level
+const levelBuffer = gl.createBuffer();
+const levelVerts = [];
+levelGeometry.forEach(seg => {
+    levelVerts.push(seg.x1, seg.y1, seg.x2, seg.y2);
+});
+gl.bindBuffer(gl.ARRAY_BUFFER, levelBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(levelVerts), gl.STATIC_DRAW);
+
+
+// --- Game State & Physics ---
+const player = {
+    x: 100, y: 50,
+    vx: 0, vy: 0,
+    width: 20, height: 20,
+    onGround: false,
+    speed: 6,
+    jumpForce: 12,
+};
+
+const gravity = -0.5;
+const friction = 0.9;
+const keys = {};
+
+window.addEventListener('keydown', (e) => keys[e.key] = true);
+window.addEventListener('keyup', (e) => keys[e.key] = false);
+
+// --- Game Loop ---
+let lastTime = 0;
+function gameLoop(currentTime) {
+    const deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+
+    update(deltaTime);
+    drawScene();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// --- Update Function ---
+function update(deltaTime) {
+    // --- Player Input ---
+    if (keys['ArrowLeft']) {
+        player.vx = -player.speed;
+    } else if (keys['ArrowRight']) {
+        player.vx = player.speed;
+    } else {
+        player.vx *= friction; // Apply friction if no input
+    }
+    
+    if (keys['ArrowUp'] && player.onGround) {
+        player.vy = player.jumpForce;
+        player.onGround = false;
+    }
+
+    // --- Physics ---
+    if (!player.onGround) {
+        player.vy += gravity; // Apply gravity
+    }
+    
+    player.x += player.vx;
+    player.y += player.vy;
+    
+    // --- Collision Detection ---
+    player.onGround = false;
+    let closestDistSq = Infinity;
+    let collisionNormal = null;
+
+    for (const segment of levelGeometry) {
+        // Find the closest point on the line segment to the player's center
+        const p = {x: player.x, y: player.y};
+        const a = {x: segment.x1, y: segment.y1};
+        const b = {x: segment.x2, y: segment.y2};
+
+        const ap = {x: p.x - a.x, y: p.y - a.y};
+        const ab = {x: b.x - a.x, y: b.y - a.y};
+        const ab2 = ab.x * ab.x + ab.y * ab.y;
+        const ap_dot_ab = ap.x * ab.x + ap.y * ab.y;
+        let t = ap_dot_ab / ab2;
+        t = Math.max(0, Math.min(1, t)); // Clamp t to the segment
+
+        const closestPoint = {x: a.x + ab.x * t, y: a.y + ab.y * t};
+        const distSq = (p.x - closestPoint.x)**2 + (p.y - closestPoint.y)**2;
+        
+        // If this is the closest segment we've found so far, check for collision
+        if (distSq < closestDistSq) {
+             // Calculate the normal of the segment (points "up")
+            const segDx = segment.x2 - segment.x1;
+            const segDy = segment.y2 - segment.y1;
+            const normal = { x: -segDy, y: segDx };
+            const len = Math.sqrt(normal.x*normal.x + normal.y*normal.y);
+            normal.x /= len;
+            normal.y /= len;
+            
+            const playerRadius = player.height / 2;
+            if (distSq < playerRadius * playerRadius) {
+                closestDistSq = distSq;
+                collisionNormal = normal;
+                
+                // --- Collision Response ---
+                // Move player out of the geometry
+                const penetration = playerRadius - Math.sqrt(distSq);
+                player.x += collisionNormal.x * penetration;
+                player.y += collisionNormal.y * penetration;
+                
+                // Update player velocity based on collision
+                const dot = player.vx * collisionNormal.x + player.vy * collisionNormal.y;
+                player.vx -= collisionNormal.x * dot;
+                player.vy -= collisionNormal.y * dot;
+
+                player.onGround = true;
+            }
+        }
+    }
+    
+    // If on a loop segment, orient gravity
+    if (player.onGround && collisionNormal && collisionNormal.y < 0.99) { // on a slope/loop
+        const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+        const groundAngle = Math.atan2(collisionNormal.y, collisionNormal.x);
+
+        // This is a simplification: aligns gravity with the surface normal
+        const gForce = { x: -collisionNormal.x * -gravity, y: -collisionNormal.y * -gravity };
+        player.vx += gForce.x;
+        player.vy += gForce.y;
+    }
+}
+
+
+// --- Drawing Function ---
+function drawScene() {
+    gl.clearColor(0.2, 0.5, 0.9, 1.0); // Clear to sky blue
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Create a projection matrix
+    const projectionMatrix = createOrthographic(0, gl.canvas.clientWidth, 0, gl.canvas.clientHeight, -1, 1);
+    let modelViewMatrix;
+
+    // --- Draw the Level ---
+    gl.useProgram(programInfo.program);
+    gl.bindBuffer(gl.ARRAY_BUFFER, levelBuffer);
+    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+    gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+    modelViewMatrix = createIdentity();
+    gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+
+    gl.uniform4f(programInfo.uniformLocations.color, 0.0, 0.6, 0.2, 1.0); // Dark green
+    gl.drawArrays(gl.LINES, 0, levelVerts.length / 2);
+
+    // --- Draw the Player ---
+    gl.bindBuffer(gl.ARRAY_BUFFER, playerBuffer);
+    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    
+    modelViewMatrix = createIdentity();
+    translate(modelViewMatrix, player.x, player.y, 0);
+    scale(modelViewMatrix, player.width, player.height, 1);
+    gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+    
+    gl.uniform4f(programInfo.uniformLocations.color, 1.0, 1.0, 1.0, 1.0); // White
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// --- Matrix Math Helpers (simplified gl-matrix) ---
+function createOrthographic(left, right, bottom, top, near, far) {
+    const lr = 1 / (left - right);
+    const bt = 1 / (bottom - top);
+    const nf = 1 / (near - far);
+    const out = new Float32Array(16);
+    out[0] = -2 * lr;
+    out[5] = -2 * bt;
+    out[10] = 2 * nf;
+    out[12] = (left + right) * lr;
+    out[13] = (top + bottom) * bt;
+    out[14] = (far + near) * nf;
+    out[15] = 1;
+    return out;
+}
+
+function createIdentity() {
+    return new Float32Array([
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ]);
+}
+
+function translate(matrix, x, y, z) {
+    matrix[12] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+    matrix[13] = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
+    matrix[14] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+    matrix[15] = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
+    return matrix;
+}
+
+function scale(matrix, x, y, z) {
+    matrix[0] *= x; matrix[1] *= x; matrix[2] *= x; matrix[3] *= x;
+    matrix[4] *= y; matrix[5] *= y; matrix[6] *= y; matrix[7] *= y;
+    matrix[8] *= z; matrix[9] *= z; matrix[10] *= z; matrix[11] *= z;
+    return matrix;
+}
+
+// Start the game
+requestAnimationFrame(gameLoop);
+
+    </script>
+</body>
+</html>
