@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Flower (Mobile)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    <script>
+        // Main function to run WebGL
+        main();
+
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            // Try to get the standard context, with a fallback to the experimental one.
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+            if (!gl) {
+                alert('Unable to initialize WebGL. Your browser may not support it.');
+                return;
+            }
+
+            // --- 1. Vertex Shader (Unchanged) ---
+            const vsSource = `
+                attribute vec4 aVertexPosition;
+                attribute vec4 aVertexColor;
+                uniform mat4 uModelViewMatrix;
+                uniform mat4 uProjectionMatrix;
+                varying lowp vec4 vColor;
+
+                void main(void) {
+                    gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+                    vColor = aVertexColor;
+                }
+            `;
+
+            // --- 2. Fragment Shader (MODIFIED) ---
+            // Added "precision mediump float;" for mobile compatibility.
+            const fsSource = `
+                precision mediump float;
+                varying lowp vec4 vColor;
+
+                void main(void) {
+                    gl_FragColor = vColor;
+                }
+            `;
+            
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+                    vertexColor: gl.getAttribLocation(shaderProgram, 'aVertexColor'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                },
+            };
+
+            const buffers = initBuffers(gl);
+            
+            // --- Handle window resizing ---
+            function resize() {
+                // Adjust for high-DPI displays
+                const displayWidth  = Math.floor(canvas.clientWidth * window.devicePixelRatio);
+                const displayHeight = Math.floor(canvas.clientHeight * window.devicePixelRatio);
+                
+                // Check if the canvas is not the same size.
+                if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+                    // Make the canvas the same size
+                    canvas.width  = displayWidth;
+                    canvas.height = displayHeight;
+                    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+                }
+            }
+            // Initial resize and listen for future changes
+            resize();
+            window.addEventListener('resize', resize);
+
+
+            let rotation = 0.0;
+            let then = 0;
+
+            // --- Render Loop ---
+            function render(now) {
+                now *= 0.001; // convert to seconds
+                const deltaTime = now - then;
+                then = now;
+                
+                drawScene(gl, programInfo, buffers, rotation);
+                rotation += deltaTime; // Update rotation
+
+                requestAnimationFrame(render);
+            }
+            requestAnimationFrame(render);
+        }
+
+        function initBuffers(gl) {
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            const positions = [
+                // Stem
+                -0.05, -0.2, 0.0,  0.05, -0.2, 0.0, -0.05, -0.9, 0.0,  0.05, -0.9, 0.0,
+                // Center
+                -0.1,  0.1, 0.0,   0.1,  0.1, 0.0, -0.1, -0.1, 0.0,   0.1, -0.1, 0.0,
+                // Petal 1 (Top)
+                 0.0,  0.1, 0.0,  -0.2,  0.4, 0.0,   0.2,  0.4, 0.0,
+                // Petal 2 (Bottom)
+                 0.0, -0.1, 0.0,  -0.2, -0.4, 0.0,   0.2, -0.4, 0.0,
+                // Petal 3 (Left)
+                -0.1,  0.0, 0.0,  -0.4,  0.2, 0.0,  -0.4, -0.2, 0.0,
+                // Petal 4 (Right)
+                 0.1,  0.0, 0.0,   0.4,  0.2, 0.0,   0.4, -0.2, 0.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            const colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            const colors = [
+                // Stem (Green) - 4 vertices
+                0.0, 0.5, 0.0, 1.0,  0.0, 0.5, 0.0, 1.0,  0.0, 0.5, 0.0, 1.0,  0.0, 0.5, 0.0, 1.0,
+                // Center (Yellow) - 4 vertices
+                1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 0.0, 1.0,
+                // Petals (Red) - 12 vertices
+                1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+
+            return { position: positionBuffer, color: colorBuffer };
+        }
+
+        function drawScene(gl, programInfo, buffers, rotation) {
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const fieldOfView = 45 * Math.PI / 180;
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const zNear = 0.1;
+            const zFar = 100.0;
+            const projectionMatrix = mat4.create();
+            mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+            
+            const modelViewMatrix = mat4.create();
+            mat4.translate(modelViewMatrix, modelViewMatrix, [-0.0, 0.0, -2.5]);
+            mat4.rotate(modelViewMatrix, modelViewMatrix, rotation, [0, 1, 0]);
+
+            // Bind position buffer
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+            // Bind color buffer
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.color);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexColor, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
+            
+            gl.useProgram(programInfo.program);
+            
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+            
+            // Draw the shapes
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); // Stem
+            gl.drawArrays(gl.TRIANGLE_STRIP, 4, 4); // Center
+            gl.drawArrays(gl.TRIANGLES, 8, 12); // Petals
+        }
+
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+    </script>
+</body>
+</html>
