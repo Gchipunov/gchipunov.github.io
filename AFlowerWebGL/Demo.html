@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Flower</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script>
+        // Main function to run WebGL
+        main();
+
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            const gl = canvas.getContext('webgl');
+
+            // Set canvas size to full screen
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            if (!gl) {
+                alert('Unable to initialize WebGL. Your browser may not support it.');
+                return;
+            }
+
+            // --- 1. Vertex Shader ---
+            // Describes the position of the vertices.
+            const vsSource = `
+                attribute vec4 aVertexPosition;
+                attribute vec4 aVertexColor;
+
+                uniform mat4 uModelViewMatrix;
+                uniform mat4 uProjectionMatrix;
+
+                varying lowp vec4 vColor;
+
+                void main(void) {
+                    gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+                    vColor = aVertexColor;
+                }
+            `;
+
+            // --- 2. Fragment Shader ---
+            // Assigns a color to each pixel (fragment).
+            const fsSource = `
+                varying lowp vec4 vColor;
+
+                void main(void) {
+                    gl_FragColor = vColor;
+                }
+            `;
+            
+            // Initialize a shader program
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+            // Get the memory location of our shader program's inputs
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+                    vertexColor: gl.getAttribLocation(shaderProgram, 'aVertexColor'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                },
+            };
+
+            // --- 3. Define the Flower's Geometry and Colors ---
+            const buffers = initBuffers(gl);
+            
+            let rotation = 0.0;
+            let then = 0;
+
+            // --- 4. Render Loop ---
+            function render(now) {
+                now *= 0.001; // convert to seconds
+                const deltaTime = now - then;
+                then = now;
+                
+                drawScene(gl, programInfo, buffers, rotation);
+                rotation += deltaTime; // Update rotation for the next frame
+
+                requestAnimationFrame(render);
+            }
+            requestAnimationFrame(render);
+        }
+
+        // --- Helper function to initialize buffers ---
+        function initBuffers(gl) {
+            // Position Buffer
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+            // Define vertices for the flower
+            const positions = [
+                // Stem (Green)
+                -0.05, -0.2, 0.0,
+                 0.05, -0.2, 0.0,
+                -0.05, -0.9, 0.0,
+                 0.05, -0.9, 0.0,
+
+                // Center (Yellow)
+                -0.1,  0.1, 0.0,
+                 0.1,  0.1, 0.0,
+                -0.1, -0.1, 0.0,
+                 0.1, -0.1, 0.0,
+
+                // Petal 1 (Top, Red)
+                 0.0,  0.1, 0.0,
+                -0.2,  0.4, 0.0,
+                 0.2,  0.4, 0.0,
+
+                // Petal 2 (Bottom, Red)
+                 0.0, -0.1, 0.0,
+                -0.2, -0.4, 0.0,
+                 0.2, -0.4, 0.0,
+
+                // Petal 3 (Left, Red)
+                -0.1,  0.0, 0.0,
+                -0.4,  0.2, 0.0,
+                -0.4, -0.2, 0.0,
+                
+                // Petal 4 (Right, Red)
+                 0.1,  0.0, 0.0,
+                 0.4,  0.2, 0.0,
+                 0.4, -0.2, 0.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            // Color Buffer
+            const colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            
+            // Define colors for each vertex
+            const colors = [
+                // Stem (Green)
+                0.0, 0.5, 0.0, 1.0,  // green
+                0.0, 0.5, 0.0, 1.0,
+                0.0, 0.5, 0.0, 1.0,
+                0.0, 0.5, 0.0, 1.0,
+
+                // Center (Yellow)
+                1.0, 1.0, 0.0, 1.0,  // yellow
+                1.0, 1.0, 0.0, 1.0,
+                1.0, 1.0, 0.0, 1.0,
+                1.0, 1.0, 0.0, 1.0,
+
+                // Petals (Red) - 4 petals * 3 vertices each
+                1.0, 0.0, 0.0, 1.0,  // red
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+                1.0, 0.0, 0.0, 1.0,
+            ];
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+
+            return {
+                position: positionBuffer,
+                color: colorBuffer,
+            };
+        }
+
+        // --- Helper function to draw the scene ---
+        function drawScene(gl, programInfo, buffers, rotation) {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height); // Set viewport
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); // Black background
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // --- 5. Set up Matrices for 3D perspective and rotation ---
+            const fieldOfView = 45 * Math.PI / 180; // in radians
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const zNear = 0.1;
+            const zFar = 100.0;
+            const projectionMatrix = mat4.create();
+            mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+            
+            const modelViewMatrix = mat4.create();
+            mat4.translate(modelViewMatrix, modelViewMatrix, [-0.0, 0.0, -2.5]); // Move camera back
+            mat4.rotate(modelViewMatrix, modelViewMatrix, rotation, [0, 1, 0]); // Rotate on Y axis
+
+            // Tell WebGL how to pull out the positions from the position buffer
+            {
+                const numComponents = 3; // pull out 3 values per iteration (x,y,z)
+                const type = gl.FLOAT;
+                const normalize = false;
+                const stride = 0;
+                const offset = 0;
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+                gl.vertexAttribPointer(
+                    programInfo.attribLocations.vertexPosition,
+                    numComponents,
+                    type,
+                    normalize,
+                    stride,
+                    offset);
+                gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+            }
+
+            // Tell WebGL how to pull out the colors from the color buffer
+            {
+                const numComponents = 4; // pull out 4 values per iteration (r,g,b,a)
+                const type = gl.FLOAT;
+                const normalize = false;
+                const stride = 0;
+                const offset = 0;
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffers.color);
+                gl.vertexAttribPointer(
+                    programInfo.attribLocations.vertexColor,
+                    numComponents,
+                    type,
+                    normalize,
+                    stride,
+                    offset);
+                gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
+            }
+            
+            gl.useProgram(programInfo.program);
+            
+            // Set the shader uniforms
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+            
+            // --- 6. Draw the shapes ---
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); // Stem
+            gl.drawArrays(gl.TRIANGLE_STRIP, 4, 4); // Center
+            gl.drawArrays(gl.TRIANGLES, 8, 12); // Petals (4 petals * 3 vertices)
+        }
+
+
+        // --- Shader compilation and linking helper functions ---
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+</body>
+</html>
