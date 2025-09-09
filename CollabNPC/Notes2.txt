@@ -1,0 +1,18 @@
+How to make npc in fps game control mouse and key board movement?
+Excellent question! It gets to the core of how game AI works. The simple answer is that NPCs don't actually control a physical mouse and keyboard. Instead, programmers simulate those inputs by directly manipulating the NPC's character model through code.
+
+The goal is to create an AI "brain" that decides where to move and aim, and then translates those decisions into smooth, human-like actions. Here’s how it's done.
+
+1. The Core Concept: Simulation, Not Control
+
+Think of the NPC as a puppet. The AI code is the puppeteer, not a player using a controller. Instead of sending a "W key pressed" signal, the code directly tells the game engine:
+
+"Move this NPC character forward by X units this frame."
+
+"Rotate this NPC's view to face direction (x,y,z)."
+
+The challenge is making these coded actions look natural and intelligent. This is broken down into a few key systems.
+
+2. The "Brain": Decision-Making 🧠
+
+Before an NPC can move or aim, it needs to decide what to do. This is typically handled by a Finite State Machine (FSM). An FSM defines all the possible states an NPC can be in and the rules
