@@ -141,7 +141,7 @@ function main() {
 
 // --- Shader and Matrix Utility Functions (would be in a separate file) ---
 
-function initShaderProgram(gl, vsSource, fsSource) {
+function initShaderProgram2(gl, vsSource, fsSource) {
     const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
     const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
     const shaderProgram = gl.createProgram();
@@ -150,11 +150,34 @@ function initShaderProgram(gl, vsSource, fsSource) {
     gl.linkProgram(shaderProgram);
     return shaderProgram;
 }
+function initShaderProgram(gl, vsSource, fsSource) {
+    // ... (previous code)
+const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    
+    gl.linkProgram(shaderProgram);
 
+    // Add error checking
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+        return null;
+    }
+    return shaderProgram;
+}
 function loadShader(gl, type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
+
+    // Add error checking
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
     return shader;
 }
 
