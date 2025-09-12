@@ -1,0 +1,4 @@
+https://stackoverflow.com/questions/54393847/how-to-stretch-a-webgl-canvas-without-blurring-the-style-image-rendering-does/54394180
+
+https://developer.mozilla.org/ru/docs/Web/API/WebGL_API/Tutorial/Using_textures_in_WebGL
+
