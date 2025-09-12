@@ -1,0 +1,188 @@
+Code in webgl a portal game system where you can see with a render buffer on other side of the portal
+Of course. Coding a portal system in WebGL is an advanced task that combines several rendering techniques. The core idea is to render the scene multiple times from different perspectives and use those renderings as textures for the portals themselves. This is achieved using Framebuffer Objects (FBOs), which allow you to render to an off-screen texture instead of the main canvas.
+
+Here's a breakdown of the concept and the essential code.
+
+The Core Concept
+The magic behind the portal effect is a multi-pass rendering process that happens in every single frame:
+
+Calculate the Virtual Camera: For each portal, you must calculate the position and orientation of a "virtual camera." This camera is positioned on the other side of the destination portal, looking back through it. Its position is relative to the player's main camera and the transformation between the two portals.
+
+Render to Texture (Pass 1): Bind the framebuffer for Portal A. From the perspective of its virtual camera (which is looking out of Portal B), draw the entire scene. The result is a texture that shows the view from the other side.
+
+Render to Texture (Pass 2): Repeat the process for Portal B. Bind its framebuffer and draw the scene from its corresponding virtual camera's perspective.
+
+Render the Main Scene (Final Pass): Switch back to the default framebuffer (the screen). Draw the entire scene from the player's main camera. When you draw the quad representing Portal A, use the texture you generated in Pass 2. When you draw Portal B, use the texture from Pass 1.
+
+This creates a convincing illusion that you are looking through an opening into another part of the world.
+
+The Code
+This example assumes you have a library like gl-matrix for vector and matrix operations, as doing this math by hand is very complex.
+
+1. HTML Setup
+
+You just need a simple canvas element.
+
+HTML
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Portal Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/3.4.3/gl-matrix-min.js"></script>
+    <script src="shaders.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
+2. Framebuffer Helper Function
+
+You'll need a function to create the framebuffer objects (FBOs) that you'll render your portal views into.
+
+JavaScript
+// framebuffer.js
+
+function createFramebufferAndTexture(gl, width, height) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+    // Also create a depth buffer
+    const depthBuffer = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthBuffer);
+
+    // Unbind everything
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    return { fb, texture };
+}
+3. Shaders
+
+The shaders are quite simple. The vertex shader transforms geometry, and the fragment shader just draws a texture.
+
+JavaScript
+// shaders.js
+
+const vsSource = `
+    attribute vec4 aVertexPosition;
+    attribute vec2 aTextureCoord;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+
+    varying highp vec2 vTextureCoord;
+
+    void main(void) {
+        gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+        vTextureCoord = aTextureCoord;
+    }
+`;
+
+const fsSource = `
+    varying highp vec2 vTextureCoord;
+    uniform sampler2D uSampler;
+
+    void main(void) {
+        gl_FragColor = texture2D(uSampler, vTextureCoord);
+    }
+`;
+4. Main Rendering Logic
+
+This is the most complex part, where the multi-pass rendering happens. This is a conceptual main.js file. A full implementation would require functions for drawing your scene geometry (drawSceneGeometry) and the portal quads (drawPortalQuad).
+
+JavaScript
+// main.js
+
+function main() {
+    const canvas = document.querySelector("#glcanvas");
+    const gl = canvas.getContext("webgl");
+    // ... WebGL initialization ...
+
+    // Create framebuffers for each portal
+    const portalA_FBO = createFramebufferAndTexture(gl, gl.canvas.width, gl.canvas.height);
+    const portalB_FBO = createFramebufferAndTexture(gl, gl.canvas.width, gl.canvas.height);
+
+    // Assume portalA_modelMatrix and portalB_modelMatrix are defined
+    // These matrices store the position, rotation, and scale of your portal quads
+
+    function render(now) {
+        // ---- 1. Calculate Virtual Camera for Portal A's view (looking out of B) ----
+        const portalB_to_A_transform = mat4.create();
+        const portalA_inverse = mat4.invert(mat4.create(), portalA_modelMatrix);
+        
+        // This matrix teleports any point from Portal A's space to Portal B's space
+        mat4.multiply(portalB_to_A_transform, portalB_modelMatrix, portalA_inverse);
+
+        const virtualViewMatrixA = mat4.create();
+        mat4.multiply(virtualViewMatrixA, portalB_to_A_transform, mainCamera.viewMatrix);
+
+        // ---- 2. Render Portal A's view to its framebuffer ----
+        gl.bindFramebuffer(gl.FRAMEBUFFER, portalA_FBO.fb);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        
+        // Draw the world from the virtual camera's perspective
+        drawSceneGeometry(gl, programInfo, projectionMatrix, virtualViewMatrixA);
+
+
+        // ---- 3. Calculate Virtual Camera for Portal B's view (looking out of A) ----
+        const portalA_to_B_transform = mat4.create();
+        const portalB_inverse = mat4.invert(mat4.create(), portalB_modelMatrix);
+        mat4.multiply(portalA_to_B_transform, portalA_modelMatrix, portalB_inverse);
+
+        const virtualViewMatrixB = mat4.create();
+        mat4.multiply(virtualViewMatrixB, portalA_to_B_transform, mainCamera.viewMatrix);
+
+        // ---- 4. Render Portal B's view to its framebuffer ----
+        gl.bindFramebuffer(gl.FRAMEBUFFER, portalB_FBO.fb);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        
+        // Draw the world from the other virtual camera's perspective
+        drawSceneGeometry(gl, programInfo, projectionMatrix, virtualViewMatrixB);
+
+        
+        // ---- 5. Render the main scene to the canvas ----
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null); // Draw to screen
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        
+        // Draw the main scene from the player's perspective
+        drawSceneGeometry(gl, programInfo, projectionMatrix, mainCamera.viewMatrix);
+
+        // Now, draw the portal quads, binding the textures we just rendered
+        drawPortalQuad(gl, programInfo, portalA_modelMatrix, portalB_FBO.texture);
+        drawPortalQuad(gl, programInfo, portalB_modelMatrix, portalA_FBO.texture);
+
+        requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+}
+
+main();
+Important Considerations
+Matrix Math: The most difficult part is correctly calculating the virtual view matrix. The transformation is: V_virtual=M_portal_B×(M_portal_A) 
+−1
+ ×V_camera. This matrix effectively takes the camera's view, transforms it into Portal A's local space, and then applies the transform to move it to Portal B's world space.
+
+Clipping: To prevent objects between the camera and the portal from being rendered inside the portal view, you need to use an oblique projection matrix. This is an advanced technique that shifts the near clipping plane to align perfectly with the portal's surface, effectively slicing the scene along the portal's quad.
+
+Stencil Buffer: A simpler (but less perfect) alternative to oblique projection is using the stencil buffer. You can first draw the portal's quad to the stencil buffer, then draw the portal's view only where the stencil buffer has been marked. This prevents the portal texture from "leaking" outside its frame.
+
+Recursion: For an infinite mirror effect, you can repeat the rendering process multiple times (recursively), with each pass rendering the view from the previous pass's virtual camera. You would need to cap the recursion depth to avoid an infinite loop.
+
+Generate code to prototype this with Canvas
