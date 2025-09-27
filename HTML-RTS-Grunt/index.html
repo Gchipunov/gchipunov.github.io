@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conscript Grunt: Interactive Specification</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Warm Neutrals -->
+    <!-- Application Structure Plan: The SPA is designed with a top-level tabbed navigation to separate the spec's logical sections: Overview, Attributes, Behavior (FSM), and Methods. This thematic structure is more intuitive for exploration than a linear document. Key interactions include a comparative bar chart for unit attributes and a clickable, interactive diagram for the Finite State Machine (FSM). This approach allows users to quickly access specific information and visualize complex concepts like state transitions, enhancing comprehension and usability over a static text file. -->
+    <!-- Visualization & Content Choices: 
+        - Report Info: Core Attributes (HP, Damage, etc.) -> Goal: Compare -> Viz/Presentation: Horizontal Bar Chart -> Interaction: Tooltips on hover -> Justification: Allows for quick visual comparison of relative stat values, making balance characteristics immediately apparent. -> Library: Chart.js.
+        - Report Info: Finite State Machine (FSM) -> Goal: Organize/Show Relationships -> Viz/Presentation: HTML/CSS/JS flowchart diagram -> Interaction: User clicks on a state node to highlight it and display its description and transition triggers in a dedicated panel. -> Justification: This interactive diagram is far more intuitive for understanding the flow of states and logic than a static table. -> Library/Method: Vanilla JS + Tailwind CSS.
+        - Report Info: Core Methods -> Goal: Organize -> Viz/Presentation: Accordion UI -> Interaction: Click to expand/collapse categories. -> Justification: Organizes a long list of methods into manageable, themed sections (Lifecycle, Combat) to reduce cognitive load and simplify navigation. -> Library/Method: Vanilla JS + Tailwind CSS.
+        - Report Info: Unit Identity -> Goal: Inform -> Viz/Presentation: Styled info cards -> Interaction: None -> Justification: Provides a clean, at-a-glance summary of the unit's high-level properties. -> Library/Method: Tailwind CSS.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #fdfbf8;
+            color: #4a4a4a;
+        }
+        .nav-btn {
+            @apply px-4 py-2 text-sm font-medium text-gray-600 rounded-lg transition-colors duration-200;
+        }
+        .nav-btn.active {
+            @apply bg-amber-100 text-amber-800;
+        }
+        .nav-btn:hover:not(.active) {
+            @apply bg-gray-100;
+        }
+        .fsm-node {
+            @apply border-2 border-gray-300 rounded-lg px-6 py-3 text-center cursor-pointer transition-all duration-200;
+        }
+        .fsm-node.active {
+            @apply border-amber-500 bg-amber-50 text-amber-900 shadow-lg scale-105;
+        }
+        .fsm-arrow {
+            @apply text-gray-400 font-mono;
+        }
+        .accordion-header {
+            @apply w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100 cursor-pointer rounded-lg border border-gray-200;
+        }
+        .accordion-content {
+             @apply bg-white p-4 border border-t-0 border-gray-200 rounded-b-lg;
+        }
+        .chart-container {
+            position: relative; 
+            width: 100%; 
+            max-width: 900px; 
+            margin-left: auto; 
+            margin-right: auto; 
+            height: 350px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) { 
+            .chart-container { 
+                height: 400px; 
+            }
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8">
+
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-800">Conscript Grunt</h1>
+            <p class="text-lg text-gray-500 mt-1">Interactive Technical Specification</p>
+        </header>
+
+        <nav class="flex justify-center space-x-2 mb-10 bg-white p-2 rounded-xl shadow-sm border border-gray-200 max-w-md mx-auto">
+            <button class="nav-btn active" data-target="overview">Overview</button>
+            <button class="nav-btn" data-target="attributes">Attributes</button>
+            <button class="nav-btn" data-target="behavior">Behavior</button>
+            <button class="nav-btn" data-target="methods">Methods</button>
+        </nav>
+
+        <main id="content-container">
+
+            <section id="overview" class="content-section">
+                <div class="max-w-4xl mx-auto">
+                    <p class="text-center text-gray-600 mb-8">This section provides a high-level summary of the Conscript Grunt's role and identity within the game. These properties define its fundamental classification, cost, and in-game representation.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-center">
+                            <span class="text-3xl">🛡️</span>
+                            <h3 class="font-bold text-lg mt-2 text-gray-800">Unit Type</h3>
+                            <p class="text-amber-700 font-semibold text-xl">Infantry</p>
+                            <p class="text-xs text-gray-500 mt-2">Primary classification for targeting and counters.</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-center">
+                            <span class="text-3xl">💰</span>
+                            <h3 class="font-bold text-lg mt-2 text-gray-800">Resource Cost</h3>
+                            <p class="text-amber-700 font-semibold text-xl">50</p>
+                            <p class="text-xs text-gray-500 mt-2">Lowest production cost, emphasizing expendability.</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-center">
+                            <span class="text-3xl">🎯</span>
+                            <h3 class="font-bold text-lg mt-2 text-gray-800">Selection Radius</h3>
+                            <p class="text-amber-700 font-semibold text-xl">0.5</p>
+                            <p class="text-xs text-gray-500 mt-2">Defines the size of the clickable area for the unit.</p>
+                        </div>
+                         <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200 text-center">
+                            <span class="text-3xl">🖼️</span>
+                            <h3 class="font-bold text-lg mt-2 text-gray-800">Model Reference</h3>
+                            <p class="text-amber-700 font-semibold text-xl">grunt.asset</p>
+                            <p class="text-xs text-gray-500 mt-2">Path to the 3D model or 2D sprite asset.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="attributes" class="content-section hidden">
+                <div class="max-w-5xl mx-auto">
+                    <p class="text-center text-gray-600 mb-8">Explore the core attributes of the Conscript Grunt. The chart below provides a visual comparison of its key combat and utility statistics. Understanding these values is crucial for balancing and predicting unit performance.</p>
+                    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        <div class="chart-container">
+                             <canvas id="attributesChart"></canvas>
+                        </div>
+                    </div>
+                     <div class="mt-8">
+                         <h3 class="text-xl font-bold text-center text-gray-800 mb-6">Detailed Attribute List</h3>
+                        <div id="attribute-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="behavior" class="content-section hidden">
+                 <div class="max-w-6xl mx-auto">
+                    <p class="text-center text-gray-600 mb-8">This section illustrates the unit's behavior through a Finite State Machine (FSM). The diagram shows the different states a unit can be in and the triggers that cause it to transition between them. Click on a state to learn more about its logic and conditions.</p>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+                        <div class="lg:col-span-2">
+                            <div class="flex flex-col items-center space-y-4">
+                                <div id="fsm-node-IDLE" class="fsm-node active">IDLE</div>
+                                <div class="fsm-arrow text-2xl">↓<span class="text-sm"> Move Order</span> / <span class="text-sm">Enemy in Range</span> ↓</div>
+                                <div class="flex space-x-8 items-center">
+                                     <div id="fsm-node-MOVING" class="fsm-node">MOVING</div>
+                                     <div class="flex flex-col items-center">
+                                         <div class="fsm-arrow">→</div>
+                                         <div class="fsm-arrow">←</div>
+                                     </div>
+                                     <div id="fsm-node-ATTACKING" class="fsm-node">ATTACKING</div>
+                                </div>
+                                <div class="fsm-arrow text-2xl">↓ <span class="text-sm">HP ≤ 0</span> ↓</div>
+                                <div id="fsm-node-DEAD" class="fsm-node bg-gray-200">DEAD</div>
+                                <div class="fsm-arrow text-2xl">↓ <span class="text-sm">Cleanup Anim.</span> ↓</div>
+                                <div class="fsm-node bg-red-100 border-red-300">DESTROYED</div>
+                                <div class="absolute top-1/2 left-10 transform -translate-y-1/2 hidden lg:block">
+                                    <div id="fsm-node-HOLDING" class="fsm-node">HOLDING</div>
+                                    <div class="fsm-arrow text-xl mt-2 ml-10">↓ <span class="text-sm">Explicit Command</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="fsm-details" class="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="methods" class="content-section hidden">
+                 <div class="max-w-4xl mx-auto">
+                    <p class="text-center text-gray-600 mb-8">This section details the core methods (functions) that govern the Conscript Grunt's functionality. These are the programmatic building blocks for its lifecycle, combat, and movement behaviors. Expand each category to see the relevant methods and their descriptions.</p>
+                    <div class="space-y-4" id="methods-accordion">
+                    </div>
+                 </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            
+            const content = {
+                attributes: [
+                    { name: "CurrentHP", value: 100.0, desc: "Unit's current health. Must be checked after every TakeDamage call." },
+                    { name: "MaxHP", value: 100.0, desc: "The maximum health capacity." },
+                    { name: "MoveSpeed", value: 3.0, desc: "Units per second movement speed. Low to average." },
+                    { name: "AttackDamage", value: 10.0, desc: "Damage applied per successful attack." },
+                    { name: "AttackRange", value: 1.5, desc: "Max distance (in units) to engage a target." },
+                    { name: "AttackCooldown", value: 1.0, desc: "Time (in seconds) between attacks." },
+                    { name: "CurrentTarget", value: "null", desc: "Reference to the unit currently being attacked or followed." },
+                    { name: "Destination", value: "Vector3", desc: "The target coordinate for pathfinding." },
+                    { name: "PathData", value: "[]", desc: "Sequence of waypoints from the Pathfinding component." }
+                ],
+                fsm: {
+                    IDLE: { 
+                        title: "IDLE", 
+                        desc: "Unit is alive, has no commands, and is not engaged in combat.", 
+                        triggers: [
+                           { to: "MOVING", reason: "Receiving a move order." },
+                           { to: "ATTACKING", reason: "An enemy enters Aggro Range (if auto-acquire is enabled)." }
+                        ]
+                    },
+                    MOVING: { 
+                        title: "MOVING", 
+                        desc: "Unit is following a path to a Destination.", 
+                        triggers: [
+                           { to: "IDLE", reason: "Reached Destination and no target." },
+                           { to: "ATTACKING", reason: "A target is acquired and is within AttackRange." }
+                        ]
+                    },
+                    ATTACKING: { 
+                        title: "ATTACKING", 
+                        desc: "Unit is actively engaging a CurrentTarget.", 
+                        triggers: [
+                           { to: "IDLE", reason: "CurrentTarget is destroyed or moves out of AttackRange." },
+                           { to: "MOVING", reason: "Receiving a new move order." }
+                        ]
+                    },
+                    DEAD: { 
+                        title: "DEAD", 
+                        desc: "Unit health (CurrentHP) reached ≤ 0.", 
+                        triggers: [
+                           { to: "DESTROYED", reason: "Cleanup/dissipation animation finishes. No outgoing transitions." }
+                        ]
+                    },
+                    HOLDING: { 
+                        title: "HOLDING", 
+                        desc: "Unit ignores all combat/movement orders except explicit user command.", 
+                        triggers: [
+                           { to: "IDLE/MOVING/ATTACKING", reason: "Receiving an explicit command from the player." }
+                        ]
+                    }
+                },
+                methods: [
+                    {
+                        category: "Lifecycle Management",
+                        items: [
+                            { name: "Initialize()", params: "int x, int y, int z", returns: "void", desc: "Sets initial attributes, registers the unit in the game world." },
+                            { name: "Update(deltaTime)", params: "float deltaTime", returns: "void", desc: "Main game loop tick. Handles state logic, movement calculation, and cooldowns." },
+                            { name: "Destroy()", params: "void", returns: "void", desc: "Triggers the DEAD state, removes unit from game world, and frees resources." },
+                        ]
+                    },
+                    {
+                        category: "Combat & Health",
+                        items: [
+                            { name: "TakeDamage(amount, type)", params: "float amount, DamageType type", returns: "void", desc: "Reduces CurrentHP by amount. If CurrentHP ≤ 0, calls Destroy()." },
+                            { name: "PerformAttack()", params: "void", returns: "void", desc: "Executes an attack: checks cooldown, calls Target.TakeDamage(), resets timer." },
+                            { name: "FindTarget()", params: "void", returns: "UnitReference/null", desc: "AI Logic: Scans for and returns the nearest hostile unit in Aggro Range." },
+                        ]
+                    },
+                    {
+                        category: "Movement & Orders",
+                        items: [
+                            { name: "IssueMoveOrder(targetPos)", params: "Vector3 targetPos", returns: "void", desc: "Sets Destination, triggers pathfinding, sets state to MOVING." },
+                            { name: "IssueAttackOrder(targetUnit)", params: "UnitReference targetUnit", returns: "void", desc: "Sets CurrentTarget. Sets state to ATTACKING or MOVING." },
+                            { name: "ProcessMovement(deltaTime)", params: "float deltaTime", returns: "void", desc: "Moves unit along PathData based on MoveSpeed. Handles collision." },
+                        ]
+                    }
+                ]
+            };
+
+            const navButtons = document.querySelectorAll('.nav-btn');
+            const contentSections = document.querySelectorAll('.content-section');
+            let attributesChart = null;
+
+            function switchTab(targetId) {
+                navButtons.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.target === targetId);
+                });
+                contentSections.forEach(section => {
+                    section.classList.toggle('hidden', section.id !== targetId);
+                });
+
+                if (targetId === 'attributes' && !attributesChart) {
+                    renderAttributesChart();
+                }
+            }
+
+            navButtons.forEach(button => {
+                button.addEventListener('click', () => switchTab(button.dataset.target));
+            });
+            
+            function renderAttributesChart() {
+                const ctx = document.getElementById('attributesChart').getContext('2d');
+                const chartData = {
+                    labels: ['MaxHP', 'MoveSpeed', 'AttackDamage', 'AttackRange', 'AttackCooldown'],
+                    datasets: [{
+                        label: 'Attribute Value',
+                        data: [100, 3.0, 10.0, 1.5, 1.0],
+                        backgroundColor: [
+                            'rgba(75, 192, 192, 0.2)',
+                            'rgba(54, 162, 235, 0.2)',
+                            'rgba(255, 99, 132, 0.2)',
+                            'rgba(255, 206, 86, 0.2)',
+                            'rgba(153, 102, 255, 0.2)'
+                        ],
+                        borderColor: [
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(255, 206, 86, 1)',
+                            'rgba(153, 102, 255, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                };
+
+                attributesChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: chartData,
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Core Attribute Comparison'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.x !== null) {
+                                            label += context.parsed.x;
+                                            if(context.label === "AttackCooldown") label += 's';
+                                            if(context.label === "MoveSpeed") label += ' u/s';
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                             x: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Value (Note: HP is on a different scale)'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            const attributeListContainer = document.getElementById('attribute-list');
+            content.attributes.forEach(attr => {
+                 const card = document.createElement('div');
+                 card.className = 'bg-white p-4 rounded-lg shadow-sm border border-gray-100';
+                 card.innerHTML = `
+                    <p class="text-sm font-bold text-gray-800">${attr.name}</p>
+                    <p class="text-lg font-mono text-amber-700">${attr.value}</p>
+                    <p class="text-xs text-gray-500 mt-1">${attr.desc}</p>
+                 `;
+                 attributeListContainer.appendChild(card);
+            });
+            
+            const fsmNodes = document.querySelectorAll('.fsm-node');
+            const fsmDetailsContainer = document.getElementById('fsm-details');
+            
+            function updateFsmDetails(stateId) {
+                const stateData = content.fsm[stateId];
+                if (!stateData) return;
+                
+                let triggersHtml = stateData.triggers.map(trigger => `
+                    <li class="flex items-start">
+                        <span class="text-amber-600 mr-2">→</span>
+                        <div>
+                            <span class="font-semibold text-gray-700">${trigger.to}:</span>
+                            <span class="text-gray-600">${trigger.reason}</span>
+                        </div>
+                    </li>
+                `).join('');
+
+                fsmDetailsContainer.innerHTML = `
+                    <h3 class="text-2xl font-bold text-gray-800 mb-2">${stateData.title}</h3>
+                    <p class="text-gray-600 mb-4">${stateData.desc}</p>
+                    <h4 class="font-semibold text-gray-700 mb-2">Transition Triggers:</h4>
+                    <ul class="space-y-2 text-sm">${triggersHtml}</ul>
+                `;
+            }
+
+            fsmNodes.forEach(node => {
+                node.addEventListener('click', () => {
+                    const nodeId = node.id.replace('fsm-node-', '');
+                    fsmNodes.forEach(n => n.classList.remove('active', 'shadow-lg', 'scale-105'));
+                    node.classList.add('active', 'shadow-lg', 'scale-105');
+                    updateFsmDetails(nodeId);
+                });
+            });
+
+            updateFsmDetails('IDLE');
+
+            const accordionContainer = document.getElementById('methods-accordion');
+            content.methods.forEach((category, index) => {
+                const accordionItem = document.createElement('div');
+                const isFirst = index === 0;
+
+                let methodsHtml = category.items.map(item => `
+                    <tr class="border-b border-gray-100 last:border-b-0">
+                        <td class="py-2 pr-2 font-mono text-sm text-amber-800">${item.name}</td>
+                        <td class="py-2 px-2 text-xs text-gray-500 font-mono">${item.params}</td>
+                        <td class="py-2 pl-2 text-xs text-gray-500 font-mono">${item.returns}</td>
+                    </tr>
+                     <tr>
+                        <td colspan="3" class="pb-3 pt-1 text-sm text-gray-600">${item.desc}</td>
+                    </tr>
+                `).join('');
+
+                accordionItem.innerHTML = `
+                    <h2 id="accordion-header-${index}">
+                        <button type="button" class="accordion-header" data-accordion-target="#accordion-body-${index}" aria-expanded="${isFirst}">
+                            <span class="font-semibold text-lg text-gray-700">${category.category}</span>
+                             <svg class="w-6 h-6 shrink-0 transform ${isFirst ? '' : 'rotate-180'}" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                        </button>
+                    </h2>
+                    <div id="accordion-body-${index}" class="accordion-content ${isFirst ? '' : 'hidden'}">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left">
+                                <thead>
+                                    <tr class="text-xs text-gray-400">
+                                        <th class="pb-1 font-medium">Method</th>
+                                        <th class="p-1 font-medium">Parameters</th>
+                                        <th class="pl-1 font-medium">Return</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${methodsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                accordionContainer.appendChild(accordionItem);
+            });
+
+            document.querySelectorAll('[data-accordion-target]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const targetId = button.getAttribute('data-accordion-target');
+                    const targetEl = document.querySelector(targetId);
+                    const isExpanded = button.getAttribute('aria-expanded') === 'true';
+
+                    targetEl.classList.toggle('hidden');
+                    button.setAttribute('aria-expanded', !isExpanded);
+                    button.querySelector('svg').classList.toggle('rotate-180');
+                });
+            });
+        });
+    </script>
+</body>
+</html>
