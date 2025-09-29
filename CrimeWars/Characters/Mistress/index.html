@@ -6,6 +6,85 @@
         body { margin: 0; overflow: hidden; }
         #webgl-canvas { display: block; }
     </style>
+<script type="x-shader/x-vertex" id="vertex-shader">
+    // Vertex Shader
+
+attribute vec4 a_position;
+varying vec2 v_texCoord;
+uniform vec2 u_resolution;
+
+void main() {
+    // Map the position to clip space (-1 to +1)
+    gl_Position = a_position;
+    // Map the position to UV space (0 to 1) for the fragment shader
+    v_texCoord = (a_position.xy * 0.5) + 0.5;
+}
+    </script>
+<script type="x-shader/x-fragment" id="fragment-shader">
+
+    // Fragment Shader
+
+precision mediump float;
+varying vec2 v_texCoord;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+// A simple 2D rotation function
+vec2 rotate(vec2 uv, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat2(c, -s, s, c) * uv;
+}
+
+// A simple pseudo-noise function based on trigonometric waves
+float flowNoise(vec2 uv, float time) {
+    // Offset the UV coordinates based on time for a 'flow'
+    vec2 p = uv * 6.0; // Scale up for more detail
+    p = rotate(p, sin(time * 0.1)); // Slow rotation of the field
+
+    float n = sin(p.x + time * 0.5) * 0.5;
+    n += cos(p.y + time * 0.3) * 0.5;
+    n *= sin(p.x * 0.5 + p.y + time * 0.1);
+
+    // Return a value between 0.0 and 1.0
+    return fract(n * 2.0); 
+}
+
+void main() {
+    // Center the UV coordinates (-0.5 to 0.5)
+    vec2 uv = (gl_FragCoord.xy / u_resolution.xy) - 0.5;
+    // Correct for aspect ratio
+    uv.x *= u_resolution.x / u_resolution.y;
+
+    float noiseValue = flowNoise(uv, u_time);
+    
+    // --- Thematic Styling: Dark, Silky, and Intense ---
+    
+    // 1. Invert and enhance the contrast for a sharp look
+    float contrastNoise = pow(noiseValue, 4.0) * 1.5;
+
+    // 2. Add a vignette/glow effect (brighter in the center)
+    float distanceToCenter = length(uv);
+    float vignette = 1.0 - pow(distanceToCenter, 2.0) * 0.8;
+    
+    // 3. Combine the noise and vignette
+    float finalIntensity = contrastNoise * vignette;
+    
+    // 4. Set the color (Dark Crimson and Black)
+    // Dark base color
+    vec3 baseColor = vec3(0.1, 0.0, 0.1); // Deep violet/black
+    // Highlight color (crimson/ruby)
+    vec3 highlightColor = vec3(0.5, 0.0, 0.1); 
+
+    // Lerp (mix) between the base color and the highlight based on intensity
+    vec3 finalColor = mix(baseColor, highlightColor, finalIntensity);
+    
+    // Apply a final overall brightness modifier to keep it dark and moody
+    finalColor *= 0.5; 
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+     </script>
 </head>
 <body>
     <canvas id="webgl-canvas"></canvas>
