@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Soft Body Spheres</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            opacity: 0.7;
+        }
+        .btn {
+            width: 60px;
+            height: 60px;
+            background-color: #555;
+            border: 2px solid #888;
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <div id="controls">
+        <div class="btn" id="btn-left">◀</div>
+        <div class="btn" id="btn-right">▶</div>
+        <div class="btn" id="btn-up">▲</div>
+    </div>
+
+<script>
+// --- Main Setup ---
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+gl.viewport(0, 0, canvas.width, canvas.height);
+gl.clearColor(0.1, 0.1, 0.15, 1.0);
+
+// --- GLSL Shaders ---
+const vsSource = `
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    void main() {
+        vec2 zeroToOne = a_position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        gl_PointSize = 5.0; // Size of the points (masses)
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+function createProgram(gl, vsSource, fsSource) {
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program linking error:', gl.getProgramInfoLog(program));
+        gl.deleteProgram(program);
+        return null;
+    }
+    return program;
+}
+
+const program = createProgram(gl, vsSource, fsSource);
+const positionAttributeLocation = gl.getAttribLocation(program, 'a_position');
+const resolutionUniformLocation = gl.getUniformLocation(program, 'u_resolution');
+const colorUniformLocation = gl.getUniformLocation(program, 'u_color');
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.enableVertexAttribArray(positionAttributeLocation);
+gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+// --- Soft Body Class ---
+class SoftBodySphere {
+    constructor(x, y, radius, numPoints, stiffness, color, isPlayer = false) {
+        this.center = { x, y };
+        this.radius = radius;
+        this.points = [];
+        this.springs = [];
+        this.color = color;
+        this.isPlayer = isPlayer;
+
+        // Create points around a circle
+        for (let i = 0; i < numPoints; i++) {
+            const angle = (i / numPoints) * Math.PI * 2;
+            this.points.push({
+                x: x + Math.cos(angle) * radius,
+                y: y + Math.sin(angle) * radius,
+                oldx: x + Math.cos(angle) * radius,
+                oldy: y + Math.sin(angle) * radius,
+            });
+        }
+
+        // Create springs connecting points
+        for (let i = 0; i < numPoints; i++) {
+            for (let j = i + 1; j < numPoints; j++) {
+                const dist = Math.hypot(this.points[i].x - this.points[j].x, this.points[i].y - this.points[j].y);
+                this.springs.push({
+                    p1: i,
+                    p2: j,
+                    length: dist,
+                    stiffness: stiffness
+                });
+            }
+        }
+    }
+
+    update(dt, gravity, friction) {
+        // 1. Update points (Verlet Integration)
+        for (const point of this.points) {
+            const vx = (point.x - point.oldx) * friction;
+            const vy = (point.y - point.oldy) * friction;
+            point.oldx = point.x;
+            point.oldy = point.y;
+            point.x += vx;
+            point.y += vy;
+            point.y += gravity * dt * dt; // Apply gravity
+        }
+
+        // 2. Solve springs
+        const iterations = 4; // More iterations = stiffer body
+        for (let i = 0; i < iterations; i++) {
+            for (const spring of this.springs) {
+                const p1 = this.points[spring.p1];
+                const p2 = this.points[spring.p2];
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const dist = Math.hypot(dx, dy);
+                const diff = (spring.length - dist) / dist * spring.stiffness;
+                const offsetX = dx * diff * 0.5;
+                const offsetY = dy * diff * 0.5;
+
+                p1.x -= offsetX;
+                p1.y -= offsetY;
+                p2.x += offsetX;
+                p2.y += offsetY;
+            }
+        }
+        
+        // 3. Update center
+        let totalX = 0, totalY = 0;
+        for(const point of this.points) {
+            totalX += point.x;
+            totalY += point.y;
+        }
+        this.center.x = totalX / this.points.length;
+        this.center.y = totalY / this.points.length;
+    }
+
+    applyForce(fx, fy) {
+        for (const point of this.points) {
+            point.x += fx;
+            point.y += fy;
+        }
+    }
+
+    constrain() {
+        for (const point of this.points) {
+            const vx = (point.x - point.oldx);
+            const vy = (point.y - point.oldy);
+
+            if (point.x > canvas.width) {
+                point.x = canvas.width;
+                point.oldx = point.x + vx;
+            } else if (point.x < 0) {
+                point.x = 0;
+                point.oldx = point.x + vx;
+            }
+            if (point.y > canvas.height) {
+                point.y = canvas.height;
+                point.oldy = point.y + vy;
+            } else if (point.y < 0) {
+                point.y = 0;
+                point.oldy = point.y + vy;
+            }
+        }
+    }
+    
+    getFlatPoints() {
+        const flat = [];
+        for(const point of this.points) {
+            flat.push(point.x, point.y);
+        }
+        return flat;
+    }
+}
+
+// --- Collision Handling ---
+function handleCollisions(spheres) {
+    for (let i = 0; i < spheres.length; i++) {
+        for (let j = i + 1; j < spheres.length; j++) {
+            const s1 = spheres[i];
+            const s2 = spheres[j];
+            const dx = s2.center.x - s1.center.x;
+            const dy = s2.center.y - s1.center.y;
+            const dist = Math.hypot(dx, dy);
+            const min_dist = s1.radius + s2.radius;
+
+            if (dist < min_dist) {
+                // Collision detected
+                const overlap = (min_dist - dist) / dist;
+                const offsetX = dx * overlap * 0.5;
+                const offsetY = dy * overlap * 0.5;
+
+                // Move spheres apart
+                s1.applyForce(-offsetX, -offsetY);
+                s2.applyForce(offsetX, offsetY);
+            }
+        }
+    }
+}
+
+// --- Game State ---
+const gravity = 1500;
+const friction = 0.99;
+const spheres = [];
+spheres.push(new SoftBodySphere(200, 150, 50, 16, 0.4, [0.2, 0.6, 1.0, 1.0], true)); // Player
+spheres.push(new SoftBodySphere(500, 200, 60, 16, 0.3, [1.0, 0.5, 0.2, 1.0]));
+spheres.push(new SoftBodySphere(800, 100, 40, 16, 0.5, [0.4, 1.0, 0.4, 1.0]));
+
+const playerSphere = spheres[0];
+const playerForce = 4;
+let moveLeft = false;
+let moveRight = false;
+let moveUp = false;
+
+// --- Touch Controls ---
+const btnLeft = document.getElementById('btn-left');
+const btnRight = document.getElementById('btn-right');
+const btnUp = document.getElementById('btn-up');
+
+btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); moveLeft = true; });
+btnLeft.addEventListener('touchend', (e) => { e.preventDefault(); moveLeft = false; });
+btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); moveRight = true; });
+btnRight.addEventListener('touchend', (e) => { e.preventDefault(); moveRight = false; });
+btnUp.addEventListener('touchstart', (e) => { e.preventDefault(); moveUp = true; });
+btnUp.addEventListener('touchend', (e) => { e.preventDefault(); moveUp = false; });
+
+// --- Render Loop ---
+let lastTime = 0;
+function animate(currentTime) {
+    currentTime *= 0.001; // convert to seconds
+    const deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+
+    // Update player movement
+    if (moveLeft) playerSphere.applyForce(-playerForce, 0);
+    if (moveRight) playerSphere.applyForce(playerForce, 0);
+    if (moveUp) playerSphere.applyForce(0, -playerForce * 2); // Stronger jump
+
+    // Update physics
+    for (const sphere of spheres) {
+        sphere.update(deltaTime, gravity, friction);
+        sphere.constrain();
+    }
+    handleCollisions(spheres);
+
+    // Render
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+    gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+    for (const sphere of spheres) {
+        const positions = sphere.getFlatPoints();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+        gl.uniform4fv(colorUniformLocation, sphere.color);
+        
+        // Draw points
+        gl.drawArrays(gl.POINTS, 0, sphere.points.length);
+        // Draw lines (springs)
+        gl.drawArrays(gl.LINE_LOOP, 0, sphere.points.length);
+    }
+
+    requestAnimationFrame(animate);
+}
+
+// Start the simulation
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
