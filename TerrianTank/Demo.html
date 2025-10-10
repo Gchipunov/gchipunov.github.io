@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <title>WebGL Terrain Pounder</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            z-index: 10;
+        }
+        .btn {
+            padding: 20px 30px;
+            font-size: 24px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: 2px solid white;
+            border-radius: 10px;
+            user-select: none; /* Prevents text selection on tap */
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div id="forward" class="btn">▲</div>
+        <div id="left" class="btn">◄</div>
+        <div id="pound" class="btn">POUND</div>
+        <div id="right" class="btn">►</div>
+        <div id="backward" class="btn">▼</div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+        }
+    }
+    </script>
+    
+    <script type="module" src="game.js"></script>
+</body>
+</html>
