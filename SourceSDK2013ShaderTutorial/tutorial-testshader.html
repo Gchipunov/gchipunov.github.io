@@ -33,7 +33,56 @@
 yourusername.github.io</code></pre>
 
             <a href="https://www.shadertoy.com/view/3fjBD1" >   <img src="https://gchipunov.github.io/SourceSDK2013ShaderTutorial/InitialShaderCoding.PNG" /> 
-        </a>     </section>
+        </a>    
+                <h3>Example vertex shader</h3>
+             <pre><code>// common vertex shader defines provided with this header
+#include "common_vs_fxc.h"
+
+// define an output structure
+struct VS_OUTPUT
+{
+	// position vector (float4)
+	float4 pos       : POSITION0;
+
+	// texture coordinates (uv - float2)
+	float2 texCoord  : TEXCOORD0;
+};
+
+// main function - note C style definition
+// takes a position vector (float4)
+// returns a VS_OUTPUT struct
+VS_OUTPUT main( float4 inPos: POSITION )
+{
+	// declare an empty VS_OUTPUT to fill
+	VS_OUTPUT o = (VS_OUTPUT) 0;
+
+	// compute the sign of the input position
+	inPos.xy = sign( inPos.xy);
+
+	// set the output position using the xy of the input
+	o.pos = float4( inPos.xy, 0.0f, 1.0f);
+
+	// get into range [0,1]
+	o.texCoord = (float2(o.pos.x, -o.pos.y) + 1.0f)/2.0f;
+	return o;
+}</code></pre>
+            <h3>Example Pixel/Fragment shader</h3>
+             <pre><code>// specify a texture sampler, the actual source of this is specified in a vmt
+sampler2D Texture0 : register( s0 );<br>
+// same function declaration style as vertex shaders
+// pixel shaders return the colour value of the pixel (hence the float4)
+float4 main( float2 texCoord  : TEXCOORD0 ) : COLOR
+{
+	// sample the texture at the specified texture coordinates
+	float4 tex = tex2D( Texture0, texCoord );<br>     
+	// greyscale the pixel colour values
+	// - perform a dot product between the pixel colour and the specified vector
+	// - 0.222, 0.707, 0.071 is found throughout image processing for gray scale effects.
+	float4 grey = dot(float3(0.222, 0.707, 0.071), tex);<br>  
+	// return the pixel colour in the form of a float4.          
+	return grey;
+}</code></pre>
+            </section>
 
             <section>
                 <h2>Step 2: Add HTML and CSS Files</h2>
