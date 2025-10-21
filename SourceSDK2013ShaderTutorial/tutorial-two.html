@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How to Set Up Your GitHub Pages Blog - My Tutorial Blog</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header>
+        <div class="container">
+            <h1><a href="index.html">The Code Tutor 💡</a></h1>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#tutorial-start">Tutorial Start</a></li>
+                    <li><a href="about.html">About</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <article class="post-content">
+            <h1>How to Set Up Your GitHub Pages Blog</h1>
+            <p class="post-meta">Published on October 21, 2025 | 10 Min Read</p>
+
+            <section id="tutorial-start">
+                <h2>Step 1: Create a GitHub Repository</h2>
+                <p>The first step is to create a new repository on GitHub. **Crucially**, you must name the repository exactly as your GitHub username, followed by `.github.io` (e.g., `yourusername.github.io`). This is how GitHub Pages automatically recognizes and deploys your site.</p>
+                <pre><code># The repository name is key!
+yourusername.github.io</code></pre>
+            </section>
+
+            <section>
+                <h2>Step 2: Add HTML and CSS Files</h2>
+                <p>Once your repository is created, you need to add your core files:</p>
+                <ul>
+                    <li>**`index.html`**: Your main blog page (the one with the latest posts).</li>
+                    <li>**`style.css`**: Your styling rules.</li>
+                    <li>**`tutorial-one.html`**: The file you are currently reading (your tutorial content).</li>
+                </ul>
+                <p>Ensure your `index.html` and other post pages link to the `style.css` file correctly in the `<head>` section.</p>
+                <pre><code>&lt;link rel="stylesheet" href="style.css"&gt;</code></pre>
+            </section>
+
+            <section>
+                <h2>Step 3: Commit and Push</h2>
+                <p>Commit your files and push them to the `main` or `master` branch of your new repository. GitHub Pages will automatically build your site. In a few minutes, your blog will be live at `https://yourusername.github.io`!</p>
+            </section>
+        </article>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 The Code Tutor. All rights reserved. Hosted on GitHub Pages.</p>
+        </div>
+    </footer>
+
+</body>
+</html>
