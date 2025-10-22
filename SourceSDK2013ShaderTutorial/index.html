@@ -1,214 +1,62 @@
-/* Basic Reset and Variables */
-:root {
-    --primary-color: #333;
-    --secondary-color: #007bff;
-    --text-color: #444;
-    --light-bg: #f4f4f4;
-    --max-width: 800px;
-}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Source SDK 2013 Shader tutorials</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+    <header>
+        <div class="container">
+            <h1><a href="index.html">The Code Tutor 💡</a></h1>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="tutorial-testshader.html">testshader for vgui Quad</a></li>
+                    <li><a href="about.html">About</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
 
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-    line-height: 1.6;
-    color: var(--text-color);
-    background: #fff;
-}
+    <main class="container">
+        <article class="post-content">
+            <h1>Under construction</h1>
+            <p class="post-meta">Published on October 21, 2025 | Watch live stream <a href="https://www.youtube.com/@GeorgiyChipunov" >https://www.youtube.com/@GeorgiyChipunov</a> </a></p>
 
-/* Layout Container */
-.container {
-    max-width: var(--max-width);
-    margin: 0 auto;
-    padding: 0 15px;
-}
+            <section id="tutorial-start">
+                <h2>Step 1: Create a GitHub Repository</h2>
+                <p>The first step is to create a new repository on GitHub. **Crucially**, you must name the repository exactly as your GitHub username, followed by `.github.io` (e.g., `yourusername.github.io`). This is how GitHub Pages automatically recognizes and deploys your site.</p>
+                <pre><code># The repository name is key!
+yourusername.github.io</code></pre>
+            </section>
 
-/* Header and Navigation */
-header {
-    background: var(--primary-color);
-    color: #fff;
-    padding: 1rem 0;
-    margin-bottom: 2rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
+            <section>
+                <h2>Step 2: Add HTML and CSS Files</h2>
+                <p>Once your repository is created, you need to add your core files:</p>
+                <ul>
+                    <li>**`index.html`**: Your main blog page (the one with the latest posts).</li>
+                    <li>**`style.css`**: Your styling rules.</li>
+                    <li>**`tutorial-one.html`**: The file you are currently reading (your tutorial content).</li>
+                </ul>
+                <p>Ensure your `index.html` and other post pages link to the `style.css` file correctly in the `<head>` section.</p>
+                <pre><code>&lt;link rel="stylesheet" href="style.css"&gt;</code></pre>
+            </section>
 
-header h1 a {
-    color: #fff;
-    text-decoration: none;
-    font-size: 1.5rem;
-}
+            <section>
+                <h2>Step 3: Commit and Push</h2>
+                <p>Commit your files and push them to the `main` or `master` branch of your new repository. GitHub Pages will automatically build your site. In a few minutes, your blog will be live at `https://yourusername.github.io`!</p>
+            </section>
+        </article>
+    </main>
 
-header .container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 The Code Tutor. All rights reserved. Hosted on GitHub Pages.</p>
+        </div>
+    </footer>
 
-nav ul {
-    list-style: none;
-    display: flex;
-}
-
-nav ul li {
-    margin-left: 1rem;
-}
-
-nav ul li a {
-    color: #fff;
-    text-decoration: none;
-    padding: 5px 10px;
-    transition: background 0.3s;
-}
-
-nav ul li a:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-}
-
-/* Hero Section */
-.hero {
-    text-align: center;
-    padding: 3rem 0;
-    background: var(--light-bg);
-    border-radius: 8px;
-    margin-bottom: 2rem;
-}
-
-.hero h2 {
-    font-size: 2.5rem;
-    margin-bottom: 0.5rem;
-    color: var(--primary-color);
-}
-
-.hero p {
-    font-size: 1.1rem;
-}
-
-/* Blog Post Snippets */
-#tutorials {
-    padding-bottom: 2rem;
-}
-
-#tutorials h3 {
-    border-bottom: 2px solid var(--light-bg);
-    padding-bottom: 0.5rem;
-    margin-bottom: 1.5rem;
-}
-
-.post-snippet {
-    border: 1px solid var(--light-bg);
-    padding: 1.5rem;
-    margin-bottom: 2rem;
-    border-radius: 8px;
-    transition: box-shadow 0.3s;
-}
-
-.post-snippet:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-
-.post-snippet h4 a {
-    text-decoration: none;
-    color: var(--secondary-color);
-    font-size: 1.75rem;
-}
-
-.post-meta {
-    font-size: 0.9rem;
-    color: #777;
-    margin-bottom: 1rem;
-}
-
-.read-more {
-    display: inline-block;
-    color: var(--secondary-color);
-    text-decoration: none;
-    font-weight: bold;
-    margin-top: 1rem;
-}
-
-/* Single Tutorial Page Content (Use the .post-content class for tutorial-one.html body) */
-.post-content h2, .post-content h3 {
-    margin-top: 2rem;
-    margin-bottom: 0.75rem;
-    color: var(--primary-color);
-}
-
-.post-content p {
-    margin-bottom: 1rem;
-}
-
-.post-content ul, .post-content ol {
-    margin-left: 20px;
-    margin-bottom: 1rem;
-}
-
-.post-content pre {
-    background: var(--primary-color);
-    color: #f8f8f2;
-    padding: 1rem;
-    border-radius: 4px;
-    overflow-x: auto;
-    font-size: 0.9rem;
-    margin: 1.5rem 0;
-}
-
-/* Footer */
-footer {
-    background: var(--primary-color);
-    color: #fff;
-    text-align: center;
-    padding: 1.5rem 0;
-    margin-top: 3rem;
-    font-size: 0.9rem;
-}
-
-/* Buttons and Pagination */
-.btn {
-    display: inline-block;
-    background: var(--secondary-color);
-    color: #fff;
-    padding: 10px 15px;
-    text-decoration: none;
-    border-radius: 4px;
-    transition: background 0.3s;
-}
-
-.btn:hover {
-    background: #0056b3;
-}
-
-.pagination {
-    text-align: center;
-    margin-top: 2rem;
-}
-
-
-/* ------------------------------------------------------------------ */
-/* Responsive Design (Mobile First adjustments) */
-/* ------------------------------------------------------------------ */
-
-@media (max-width: 600px) {
-    header .container {
-        flex-direction: column;
-        text-align: center;
-    }
-
-    nav ul {
-        margin-top: 1rem;
-        flex-direction: column;
-        align-items: center;
-    }
-
-    nav ul li {
-        margin: 0.5rem 0;
-    }
-
-    .hero h2 {
-        font-size: 2rem;
-    }
-}
+</body>
+</html>
