@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Skateboard Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+        /* Style for mobile controls - make them big and transparent */
+        .controls {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            height: 100px; /* Example height */
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none; /* Allows canvas interaction, but controls will be on top */
+        }
+        .control-button {
+            width: 15%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            cursor: pointer;
+            user-select: none;
+            pointer-events: auto; /* Re-enables pointer events for the buttons themselves */
+        }
+        #left-button { border-right: 2px solid white; }
+        #right-button { border-left: 2px solid white; }
+        #jump-button { margin-right: 10%; } /* Space for a jump/action button */
+    </style>
+</head>
+<body>
+    <canvas id="game-canvas"></canvas>
+
+    <div class="controls">
+        <div id="left-button" class="control-button">⬅️</div>
+        <div id="right-button" class="control-button">➡️</div>
+        <div id="jump-button" class="control-button">JUMP</div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
