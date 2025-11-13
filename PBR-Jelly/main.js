@@ -198,3 +198,78 @@ function createJellyParticles() {
     }
     return new Float32Array(particlePositions);
 }
+
+function initBuffers(width, height) {
+    // --- 1. Ground Plane (Platform) ---
+    
+    // We'll define a simple large rectangle at the bottom of the screen (0, 0).
+    const PLANE_HEIGHT = 50.0;
+    const PLANE_Y = 0.0; 
+    
+    // Vertices for a quad: (X, Y, Z) - two triangles make a rectangle
+    const planeVertices = [
+        // Bottom-Left
+        0.0, PLANE_Y, 0.0,
+        // Bottom-Right
+        width, PLANE_Y, 0.0,
+        // Top-Left
+        0.0, PLANE_Y + PLANE_HEIGHT, 0.0,
+        
+        // Top-Left (for the second triangle)
+        0.0, PLANE_Y + PLANE_HEIGHT, 0.0,
+        // Bottom-Right
+        width, PLANE_Y, 0.0,
+        // Top-Right
+        width, PLANE_Y + PLANE_HEIGHT, 0.0
+    ];
+
+    planeVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, planeVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(planeVertices), gl.STATIC_DRAW);
+    planeVBO.itemSize = 3; // Each vertex has 3 components (X, Y, Z)
+    planeVBO.numItems = planeVertices.length / 3; // Total number of vertices (6 for the quad)
+
+    // --- 2. Jelly Particle Grid (10x10) ---
+    
+    const jellyPositions = createJellyParticles();
+
+    jellyVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, jellyVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, jellyPositions, gl.DYNAMIC_DRAW); 
+    // Use DYNAMIC_DRAW because the particle positions will change every frame
+    jellyVBO.itemSize = 3; 
+    jellyVBO.numItems = PARTICLE_COUNT;
+}
+
+function drawScene() {
+    gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Upload the matrices to the shader program
+    gl.uniformMatrix4fv(program.pMatrixUniform, false, pMatrix);
+    gl.uniformMatrix4fv(program.mvMatrixUniform, false, mvMatrix);
+
+    // --- Draw the Ground Plane ---
+    gl.bindBuffer(gl.ARRAY_BUFFER, planeVBO);
+    gl.vertexAttribPointer(program.vertexPositionAttribute, planeVBO.itemSize, gl.FLOAT, false, 0, 0);
+
+    // Temporarily set fragment color for the plane (if using the simple shader)
+    // NOTE: In a real PBR/multi-object scene, you'd use uniforms to pass color/texture
+    // to draw a different color, you'd need a separate shader or uniform.
+    // Assuming a temporary uniform named uColor is available for now:
+    // gl.uniform4f(program.colorUniform, 0.5, 0.5, 0.5, 1.0); // Gray
+
+    gl.drawArrays(gl.TRIANGLES, 0, planeVBO.numItems);
+    
+    // --- Draw the Jelly Particles ---
+
+    // gl.uniform4f(program.colorUniform, 1.0, 0.0, 0.0, 1.0); // Red for Jelly
+
+    // Re-bind the jelly's buffer
+    gl.bindBuffer(gl.ARRAY_BUFFER, jellyVBO);
+    gl.vertexAttribPointer(program.vertexPositionAttribute, jellyVBO.itemSize, gl.FLOAT, false, 0, 0);
+
+    // Draw the particles as points
+    gl.drawArrays(gl.POINTS, 0, jellyVBO.numItems);
+}
+
