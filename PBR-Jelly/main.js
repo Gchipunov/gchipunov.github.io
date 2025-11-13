@@ -128,3 +128,44 @@ function initMatrices(width, height) {
 
 // Start the setup when the window loads
 window.onload = initWebGL;
+
+
+// Global VBOs and particle data
+let planeVBO;
+let jellyVBO;
+const GRID_SIZE = 10;
+const PARTICLE_COUNT = GRID_SIZE * GRID_SIZE;
+let particles = []; // Array to hold the 100 particle objects
+
+// ... (initWebGL, initShaders, initMatrices from previous step) ...
+
+/**
+ * Main function to initialize WebGL
+ */
+function initWebGL() {
+    // ... (Setup code from previous step) ...
+
+    initShaders();
+    initMatrices(canvas.width, canvas.height);
+    
+    // NEW: Initialize geometry buffers
+    initBuffers(canvas.width, canvas.height);
+
+    // Start the rendering loop
+    tick(); 
+}
+
+/**
+ * The main render/update loop
+ */
+function tick() {
+    requestAnimationFrame(tick);
+    // 1. UPDATE PHYSICS (PBD logic goes here)
+    // updatePhysics(); 
+    
+    // 2. RENDER SCENE
+    drawScene();
+}
+
+// Start the setup when the window loads
+window.onload = initWebGL;
