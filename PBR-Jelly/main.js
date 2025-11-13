@@ -168,4 +168,33 @@ function tick() {
 }
 
 // Start the setup when the window loads
-window.onload = initWebGL;
+//window.onload = initWebGL;
+
+// Dimensions for the jelly object
+const JELLY_START_X = 250;
+const JELLY_START_Y = 200;
+const PARTICLE_SPACING = 5.0; // Spacing in pixels
+
+function createJellyParticles() {
+    // We'll store particle position data as a flat array of X, Y, Z coordinates (Z=0 for 2D)
+    const particlePositions = []; 
+
+    for (let i = 0; i < GRID_SIZE; i++) {
+        for (let j = 0; j < GRID_SIZE; j++) {
+            const x = JELLY_START_X + j * PARTICLE_SPACING;
+            const y = JELLY_START_Y + i * PARTICLE_SPACING;
+
+            // Store the position for the WebGL buffer
+            particlePositions.push(x, y, 0.0); // X, Y, Z
+
+            // Store the full particle object for PBD physics later
+            particles.push({
+                position: [x, y, 0.0],
+                velocity: [0.0, 0.0, 0.0],
+                mass: 1.0
+                // ... other PBD data
+            });
+        }
+    }
+    return new Float32Array(particlePositions);
+}
