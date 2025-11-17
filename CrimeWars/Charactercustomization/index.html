@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crimewars: Character Customization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .scroll-section::-webkit-scrollbar {
+            width: 8px;
+        }
+        .scroll-section::-webkit-scrollbar-track {
+            background: #111827; /* bg-gray-900 */
+        }
+        .scroll-section::-webkit-scrollbar-thumb {
+            background: #4B5563; /* bg-gray-600 */
+            border-radius: 4px;
+        }
+        .scroll-section::-webkit-scrollbar-thumb:hover {
+            background: #6B7280; /* bg-gray-500 */
+        }
+        /* Custom ring focus for interaction */
+        .ring-focus:focus {
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.5); /* Purple ring */
+            outline: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 sm:p-8">
+
+    <div id="app" class="max-w-6xl mx-auto">
+        <h1 class="text-4xl sm:text-5xl font-extrabold text-purple-400 mb-2 tracking-wider">CRIMEWARS Dossier Generator</h1>
+        <p class="text-gray-400 mb-6">Forge your identity. Customize your physical features and allocate skill points before deployment.</p>
+
+        <div id="auth-info" class="mb-4 text-xs text-right text-gray-500">
+            <!-- Auth Info will be populated here -->
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Character Preview (Column 1) -->
+            <div class="lg:col-span-1 bg-gray-800 p-6 rounded-xl shadow-2xl h-full flex flex-col items-center">
+                <h2 class="text-2xl font-bold mb-4 text-purple-300">Target Profile</h2>
+                
+                <!-- Character Avatar -->
+                <div id="character-preview" class="w-48 h-48 bg-gray-900 rounded-full border-4 border-purple-500 shadow-inner flex flex-col justify-center items-center text-6xl mb-6">
+                    <div id="hair-preview" class="text-4xl absolute -top-4"></div>
+                    <div id="face-preview" class="text-4xl">👤</div>
+                    <div id="clothing-preview" class="text-4xl absolute bottom-0">👔</div>
+                </div>
+
+                <div class="w-full text-center">
+                    <input type="text" id="character-name" placeholder="Enter Alias (e.g., 'Shadow')"
+                        class="w-full p-2 bg-gray-700 border border-gray-600 rounded-lg text-lg text-center font-bold mb-4 ring-focus"
+                        oninput="updateCharacterName(this.value)">
+                </div>
+
+                <!-- Stats Summary -->
+                <div class="w-full mt-4 p-4 bg-gray-700 rounded-lg">
+                    <h3 class="font-semibold text-lg mb-2 text-purple-300">Allocated Attributes</h3>
+                    <ul id="stats-summary" class="text-sm space-y-1">
+                        <!-- Stats will be dynamically populated here -->
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Customization Controls (Columns 2 & 3) -->
+            <div class="lg:col-span-2 bg-gray-800 p-6 rounded-xl shadow-2xl h-full flex flex-col">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
+
+                    <!-- Appearance Section -->
+                    <div class="flex flex-col">
+                        <h2 class="text-2xl font-bold mb-4 text-purple-300">Appearance</h2>
+                        <div class="space-y-6 flex-grow scroll-section overflow-y-auto pr-2">
+
+                            <!-- Skin Color -->
+                            <div class="border-b border-gray-700 pb-4">
+                                <h3 class="font-semibold mb-2">Skin Tone</h3>
+                                <div id="skin-options" class="flex flex-wrap gap-2">
+                                    <!-- Skin color options -->
+                                </div>
+                            </div>
+
+                            <!-- Hair Style -->
+                            <div class="border-b border-gray-700 pb-4">
+                                <h3 class="font-semibold mb-2">Hair Style</h3>
+                                <div id="hair-style-options" class="flex flex-wrap gap-2">
+                                    <!-- Hair style options -->
+                                </div>
+                            </div>
+
+                            <!-- Clothing -->
+                            <div class="pb-4">
+                                <h3 class="font-semibold mb-2">Wardrobe</h3>
+                                <div id="clothing-options" class="flex flex-wrap gap-2">
+                                    <!-- Clothing options -->
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Attribute Allocation Section -->
+                    <div class="flex flex-col">
+                        <h2 class="text-2xl font-bold mb-4 text-purple-300">Attribute Allocation</h2>
+                        
+                        <div class="bg-gray-700 p-3 rounded-lg mb-4 text-center">
+                            <span class="font-bold text-lg text-green-400" id="points-remaining">5</span> points remaining
+                        </div>
+                        
+                        <div id="stat-allocation" class="space-y-4 flex-grow scroll-section overflow-y-auto pr-2">
+                            <!-- Stat controls will be dynamically populated here -->
+                        </div>
+                        
+                        <button id="save-button" onclick="saveCharacter()" disabled
+                            class="mt-6 w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition duration-200 shadow-lg disabled:bg-gray-500 disabled:cursor-not-allowed ring-focus">
+                            Save Character (Loading...)
+                        </button>
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, getDoc, collection, query, where, addDoc, getDocs, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Global variables must be attached to the window object for non-module scripts to access them.
+        window.firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (window.firebaseConfig) {
+            // Set logging level for debugging Firebase
+            setLogLevel('debug');
+
+            // 1. Initialize Firebase
+            window.app = initializeApp(window.firebaseConfig);
+            window.db = getFirestore(window.app);
+            window.auth = getAuth(window.app);
+
+            // 2. Authentication
+            async function authenticate() {
+                try {
+                    // Use local persistence to keep the user signed in
+                    await setPersistence(window.auth, browserLocalPersistence);
+
+                    if (window.initialAuthToken) {
+                        await signInWithCustomToken(window.auth, window.initialAuthToken);
+                    } else {
+                        await signInAnonymously(window.auth);
+                    }
+                    console.log("Firebase authentication successful.");
+                } catch (error) {
+                    console.error("Firebase Auth Error:", error);
+                    // Fallback to anonymous sign-in if custom token fails, or just proceed if rules allow.
+                    try {
+                        await signInAnonymously(window.auth);
+                    } catch (e) {
+                        console.error("Anonymous Sign-in Failed:", e);
+                    }
+                }
+            }
+
+            // 3. Auth State Listener
+            onAuthStateChanged(window.auth, (user) => {
+                if (user) {
+                    window.userId = user.uid;
+                    document.getElementById('auth-info').innerHTML = `
+                        <span class="font-mono">User ID: ${window.userId}</span>
+                    `;
+                    console.log("User state changed. UID:", window.userId);
+                    // Once authenticated, start the application logic (loading data)
+                    window.isAuthReady = true;
+                    window.initializeSystem();
+                } else {
+                    window.userId = null;
+                    document.getElementById('auth-info').innerHTML = `<span class="text-red-400">Not Signed In</span>`;
+                    window.isAuthReady = true;
+                    window.initializeSystem(); // Initialize even if not signed in (will use random ID for storage if needed)
+                }
+                document.getElementById('save-button').disabled = false;
+                document.getElementById('save-button').textContent = 'Save Character Profile';
+            });
+
+            authenticate();
+        } else {
+            console.error("Firebase config is missing. Data persistence will be disabled.");
+            document.getElementById('save-button').disabled = false;
+            document.getElementById('save-button').textContent = 'Save Character (No Persistence)';
+            window.isAuthReady = true;
+            window.initializeSystem(); // Initialize without Firebase logic
+        }
+    </script>
+
+    <script>
+        // --- Game and State Definitions ---
+
+        const APPEARANCE_OPTIONS = {
+            skin: {
+                title: 'Skin Tone',
+                options: {
+                    '#ffdbac': 'Fair',
+                    '#f1c27d': 'Tan',
+                    '#e0ac69': 'Golden',
+                    '#c68642': 'Olive',
+                    '#8d5524': 'Brown',
+                    '#5c381f': 'Dark Brown',
+                },
+                default: '#e0ac69',
+            },
+            hair: {
+                title: 'Hair Style',
+                options: {
+                    '🧑‍🦱': 'Curly',
+                    '🧑': 'Short',
+                    '🧑‍🦲': 'Shaved',
+                    '👩‍🦰': 'Long',
+                    '🦹': 'Hooded',
+                },
+                default: '🧑',
+            },
+            clothing: {
+                title: 'Clothing',
+                options: {
+                    '👔': 'Suit',
+                    '🥋': 'Tactical Vest',
+                    '🧥': 'Trench Coat',
+                    '👕': 'T-Shirt',
+                    '🦺': 'Vest',
+                },
+                default: '👔',
+            }
+        };
+
+        const STAT_NAMES = {
+            STR: { fullName: 'Strength', description: 'Raw power and physical endurance.' },
+            DEX: { fullName: 'Dexterity', description: 'Agility, speed, and fine motor skills.' },
+            INT: { fullName: 'Intelligence', description: 'Knowledge, reasoning, and hacking ability.' },
+            CHA: { fullName: 'Charisma', description: 'Leadership, persuasion, and negotiation.' },
+        };
+
+        const INITIAL_POINTS = 5;
+        const BASE_STAT = 10;
+        const DOC_ID = 'my_character'; // Fixed document ID for the character data
+
+        let characterState = {
+            name: 'Shadow',
+            appearance: {
+                skin: APPEARANCE_OPTIONS.skin.default,
+                hair: APPEARANCE_OPTIONS.hair.default,
+                clothing: APPEARANCE_OPTIONS.clothing.default,
+            },
+            attributes: {
+                STR: BASE_STAT,
+                DEX: BASE_STAT,
+                INT: BASE_STAT,
+                CHA: BASE_STAT,
+            },
+            pointsRemaining: INITIAL_POINTS
+        };
+
+        // --- Character Logic and Rendering ---
+
+        function updateCharacterName(name) {
+            characterState.name = name;
+            // The name is already updated in the input field, no need to update it again.
+            saveCharacterDelayed();
+        }
+
+        function updateAppearance(category, value) {
+            characterState.appearance[category] = value;
+            renderCharacterPreview();
+            saveCharacterDelayed();
+        }
+
+        function updateStat(stat, change) {
+            const currentPoints = characterState.pointsRemaining;
+            const currentStatValue = characterState.attributes[stat];
+
+            if (change > 0) { // Increment
+                if (currentPoints > 0) {
+                    characterState.attributes[stat] += 1;
+                    characterState.pointsRemaining -= 1;
+                }
+            } else if (change < 0) { // Decrement
+                if (currentStatValue > BASE_STAT) {
+                    characterState.attributes[stat] -= 1;
+                    characterState.pointsRemaining += 1;
+                }
+            }
+            renderStatControls();
+            renderCharacterPreview(); // To reflect potential stat changes in summary
+            saveCharacterDelayed();
+        }
+
+        function renderCharacterPreview() {
+            const previewElement = document.getElementById('character-preview');
+            const faceElement = document.getElementById('face-preview');
+            const hairElement = document.getElementById('hair-preview');
+
+            // 1. Update Colors
+            previewElement.style.backgroundColor = characterState.appearance.skin;
+            
+            // 2. Update Emojis
+            hairElement.textContent = characterState.appearance.hair;
+            faceElement.textContent = '👤'; // Placeholder for the face itself
+            document.getElementById('clothing-preview').textContent = characterState.appearance.clothing;
+            
+            // 3. Update Name Input
+            document.getElementById('character-name').value = characterState.name;
+
+            // 4. Update Stats Summary
+            const summaryEl = document.getElementById('stats-summary');
+            summaryEl.innerHTML = Object.keys(characterState.attributes).map(stat => {
+                const value = characterState.attributes[stat];
+                return `
+                    <li class="flex justify-between items-center">
+                        <span class="font-mono text-purple-200">${stat} (${STAT_NAMES[stat].fullName}):</span>
+                        <span class="font-bold text-lg ${value > BASE_STAT ? 'text-green-400' : 'text-gray-300'}">${value}</span>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        function renderAppearanceControls() {
+            // Skin Color
+            const skinEl = document.getElementById('skin-options');
+            skinEl.innerHTML = Object.keys(APPEARANCE_OPTIONS.skin.options).map(color => `
+                <button onclick="updateAppearance('skin', '${color}')"
+                    class="w-8 h-8 rounded-full shadow-md transition duration-150 ease-in-out hover:scale-110 ring-focus ${characterState.appearance.skin === color ? 'border-4 border-purple-500' : ''}"
+                    style="background-color: ${color};"
+                    title="${APPEARANCE_OPTIONS.skin.options[color]}">
+                </button>
+            `).join('');
+
+            // Hair Style
+            const hairEl = document.getElementById('hair-style-options');
+            hairEl.innerHTML = Object.keys(APPEARANCE_OPTIONS.hair.options).map(emoji => `
+                <button onclick="updateAppearance('hair', '${emoji}')"
+                    class="p-2 text-2xl rounded-lg bg-gray-700 hover:bg-gray-600 transition duration-150 ease-in-out ring-focus ${characterState.appearance.hair === emoji ? 'border-2 border-purple-500' : 'border border-gray-700'}"
+                    title="${APPEARANCE_OPTIONS.hair.options[emoji]}">
+                    ${emoji}
+                </button>
+            `).join('');
+            
+            // Clothing
+            const clothingEl = document.getElementById('clothing-options');
+            clothingEl.innerHTML = Object.keys(APPEARANCE_OPTIONS.clothing.options).map(emoji => `
+                <button onclick="updateAppearance('clothing', '${emoji}')"
+                    class="p-2 text-2xl rounded-lg bg-gray-700 hover:bg-gray-600 transition duration-150 ease-in-out ring-focus ${characterState.appearance.clothing === emoji ? 'border-2 border-purple-500' : 'border border-gray-700'}"
+                    title="${APPEARANCE_OPTIONS.clothing.options[emoji]}">
+                    ${emoji}
+                </button>
+            `).join('');
+        }
+
+        function renderStatControls() {
+            const statEl = document.getElementById('stat-allocation');
+            const pointsRemainingEl = document.getElementById('points-remaining');
+            pointsRemainingEl.textContent = characterState.pointsRemaining;
+
+            statEl.innerHTML = Object.keys(STAT_NAMES).map(stat => {
+                const value = characterState.attributes[stat];
+                const isMaxed = value >= (BASE_STAT + INITIAL_POINTS); // Max possible is BASE_STAT + INITIAL_POINTS
+                const isBase = value <= BASE_STAT;
+                const canAllocate = characterState.pointsRemaining > 0 && !isMaxed;
+                const canDecrease = value > BASE_STAT;
+
+                return `
+                    <div class="p-4 bg-gray-700 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center">
+                        <div class="mb-2 md:mb-0">
+                            <h4 class="font-bold text-xl text-purple-200">${STAT_NAMES[stat].fullName} (${stat})</h4>
+                            <p class="text-xs text-gray-400">${STAT_NAMES[stat].description}</p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <!-- Decrease Button -->
+                            <button onclick="updateStat('${stat}', -1)" ${canDecrease ? '' : 'disabled'}
+                                class="w-8 h-8 bg-red-600 hover:bg-red-700 disabled:bg-gray-500 text-white font-extrabold rounded-full transition duration-150 ring-focus">
+                                -
+                            </button>
+                            
+                            <!-- Stat Value Display -->
+                            <span class="text-3xl font-mono w-10 text-center ${value > BASE_STAT ? 'text-green-400' : 'text-gray-300'}">${value}</span>
+                            
+                            <!-- Increase Button -->
+                            <button onclick="updateStat('${stat}', 1)" ${canAllocate ? '' : 'disabled'}
+                                class="w-8 h-8 bg-green-600 hover:bg-green-700 disabled:bg-gray-500 text-white font-extrabold rounded-full transition duration-150 ring-focus">
+                                +
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- Firebase Integration (Save/Load) ---
+        let saveTimeout;
+
+        function saveCharacterDelayed() {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(saveCharacter, 1500); // Debounce save operation
+        }
+
+        async function saveCharacter() {
+            if (!window.isAuthReady || !window.db || !window.userId) {
+                console.warn("Save failed: Firebase not fully initialized or user ID missing.");
+                // Optionally show a temporary message to the user
+                return;
+            }
+
+            try {
+                const characterRef = doc(window.db, `artifacts/${window.appId}/users/${window.userId}/crimewars_characters`, DOC_ID);
+                await setDoc(characterRef, characterState);
+                console.log("Character saved successfully to Firestore.");
+            } catch (error) {
+                console.error("Error saving document:", error);
+            }
+        }
+
+        function loadCharacter() {
+            if (!window.isAuthReady || !window.db || !window.userId) {
+                console.warn("Load skipped: Firebase not fully initialized or user ID missing.");
+                return;
+            }
+
+            try {
+                const characterRef = doc(window.db, `artifacts/${window.appId}/users/${window.userId}/crimewars_characters`, DOC_ID);
+
+                // Use onSnapshot for real-time updates (and initial load)
+                onSnapshot(characterRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const loadedData = docSnap.data();
+                        // Deep merge to ensure all keys are present even if new ones are added later
+                        characterState = {
+                            ...characterState, // Use default structure as a base
+                            ...loadedData,
+                            appearance: {
+                                ...characterState.appearance,
+                                ...loadedData.appearance
+                            },
+                            attributes: {
+                                ...characterState.attributes,
+                                ...loadedData.attributes
+                            }
+                        };
+                        console.log("Character loaded from Firestore.");
+                    } else {
+                        console.log("No character profile found. Using defaults.");
+                        // If no profile exists, save the default state right away
+                        saveCharacter();
+                    }
+                    // Re-render the UI after loading or using defaults
+                    renderUI();
+                }, (error) => {
+                    console.error("Error listening to document:", error);
+                    // Fallback to rendering the default UI if snapshot fails
+                    renderUI();
+                });
+            } catch (error) {
+                console.error("Error setting up snapshot listener:", error);
+                renderUI(); // Render defaults
+            }
+        }
+
+        // --- Initialization ---
+
+        function renderUI() {
+            renderAppearanceControls();
+            renderStatControls();
+            renderCharacterPreview();
+        }
+
+        // Exposed global function to be called by the module script after auth is ready
+        window.initializeSystem = function() {
+            console.log("System initialized.");
+            if (window.db) {
+                loadCharacter(); // Load data from Firebase
+            } else {
+                renderUI(); // Render defaults without Firebase
+            }
+        };
+
+        // If Firebase is not available (for local testing), initialize immediately
+        if (!window.firebaseConfig) {
+             window.initializeSystem();
+        }
+    </script>
+</body>
+</html>
