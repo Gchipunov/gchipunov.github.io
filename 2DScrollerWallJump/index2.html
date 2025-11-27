@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Platformer: Mobile Controls</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #222;
+            font-family: sans-serif;
+            /* Prevent selecting text while playing */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        /* --- TOUCH CONTROLS CSS --- */
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            height: 120px;
+            pointer-events: none; /* Let touches pass through the empty areas */
+            display: flex;
+            justify-content: space-between;
+            padding: 0 40px;
+            box-sizing: border-box;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 20px;
+            pointer-events: auto; /* Re-enable touches on the buttons */
+        }
+
+        .btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: white;
+            font-size: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none; /* Critical: prevents browser scrolling/zooming */
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            transition: background 0.1s;
+        }
+
+        .btn:active, .btn.active-touch {
+            background: rgba(255, 255, 255, 0.5);
+            transform: scale(0.95);
+        }
+
+        /* Hide controls on desktops that don't support touch (optional) */
+        @media (hover: hover) and (pointer: fine) {
+           /* Uncomment the line below if you want buttons hidden on PC */
+           /* #controls { display: none; } */
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>WebGL Platformer</h1>
+        <p>Keyboard: Arrows/WASD to Move & Jump</p>
+        <p>Mobile: Use on-screen buttons</p>
+        <p>Jump against wall to Wall Jump. Press into wall to Slide.</p>
+    </div>
+    
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="controls">
+        <div class="control-group">
+            <div id="btn-left" class="btn">←</div>
+            <div id="btn-right" class="btn">→</div>
+        </div>
+        <div class="control-group">
+            <div id="btn-jump" class="btn" style="background: rgba(100, 255, 100, 0.2);">↑</div>
+        </div>
+    </div>
+
+<script>
+/**
+ * ------------------------------------------------------------------
+ * SECTION 1: WEBGL BOILERPLATE & SHADERS
+ * ------------------------------------------------------------------
+ */
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) {
+    alert("WebGL not supported");
+}
+
+// Vertex Shader
+const vsSource = `
+    attribute vec2 a_position;
+    
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation; 
+    uniform vec2 u_objPos;      
+    uniform vec2 u_objScale;    
+    
+    void main() {
+        vec2 position = (a_position * u_objScale) + u_objPos;
+        position = position - u_translation;
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+`;
+
+// Fragment Shader
+const fsSource = `
+    precision mediump float;
+    uniform vec4 u_color;
+    
+    void main() {
+        gl_FragColor = u_color;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+}
+
+const positionLocation = gl.getAttribLocation(program, "a_position");
+const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+const translationLocation = gl.getUniformLocation(program, "u_translation");
+const objPosLocation = gl.getUniformLocation(program, "u_objPos");
+const objScaleLocation = gl.getUniformLocation(program, "u_objScale");
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1,
+]), gl.STATIC_DRAW);
+
+/**
+ * ------------------------------------------------------------------
+ * SECTION 2: GAME ENGINE & PHYSICS
+ * ------------------------------------------------------------------
+ */
+
+// Input Handling
+const keys = {};
+window.addEventListener('keydown', (e) => keys[e.code] = true);
+window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+/* --- NEW: MOBILE INPUT HANDLING --- */
+function setupTouchButton(id, keyCodes) {
+    const btn = document.getElementById(id);
+    
+    const startHandler = (e) => {
+        e.preventDefault(); // Prevents mouse emulation and scrolling
+        btn.classList.add('active-touch');
+        keyCodes.forEach(code => keys[code] = true);
+    };
+
+    const endHandler = (e) => {
+        e.preventDefault();
+        btn.classList.remove('active-touch');
+        keyCodes.forEach(code => keys[code] = false);
+    };
+
+    // Use touchstart/touchend for low latency
+    btn.addEventListener('touchstart', startHandler, { passive: false });
+    btn.addEventListener('touchend', endHandler, { passive: false });
+    btn.addEventListener('touchcancel', endHandler, { passive: false });
+    
+    // Fallback for mouse clicks (testing on PC)
+    btn.addEventListener('mousedown', startHandler);
+    btn.addEventListener('mouseup', endHandler);
+    btn.addEventListener('mouseleave', endHandler);
+}
+
+// Map buttons to the same keys logic used by keyboard
+setupTouchButton('btn-left', ['ArrowLeft']);
+setupTouchButton('btn-right', ['ArrowRight']);
+setupTouchButton('btn-jump', ['Space', 'ArrowUp']);
+
+
+// Game Constants
+const GRAVITY = 0.6;
+const FRICTION = 0.8;
+const MOVE_SPEED = 0.8;
+const JUMP_FORCE = -14;
+const WALL_SLIDE_SPEED = 2;
+const WALL_JUMP_FORCE_X = 10;
+const WALL_JUMP_FORCE_Y = -12;
+const MAX_SPEED = 10;
+
+let camera = { x: 0, y: 0 };
+
+const player = {
+    x: 100,
+    y: 300,
+    w: 30,
+    h: 50,
+    vx: 0,
+    vy: 0,
+    color: [0.2, 0.8, 0.2, 1],
+    isGrounded: false,
+    isWallSliding: false,
+    wallDir: 0
+};
+
+const platforms = [
+    { x: 0, y: 500, w: 2000, h: 50, color: [0.5, 0.5, 0.5, 1] },
+    { x: 400, y: 350, w: 100, h: 150, color: [0.7, 0.3, 0.3, 1] },
+    { x: 700, y: 200, w: 50, h: 300, color: [0.7, 0.3, 0.3, 1] },
+    { x: 900, y: 400, w: 200, h: 20, color: [0.3, 0.3, 0.8, 1] },
+    { x: 1200, y: 300, w: 50, h: 200, color: [0.7, 0.3, 0.3, 1] },
+    { x: -50, y: 0, w: 50, h: 1000, color: [0.5, 0.5, 0.5, 1] }
+];
+
+// Procedural platforms
+for(let i = 0; i < 20; i++) {
+    platforms.push({
+        x: 1500 + (i * 300),
+        y: 200 + Math.random() * 200,
+        w: 100 + Math.random() * 100,
+        h: 30,
+        color: [0.4, 0.4, 0.4, 1]
+    });
+    if (i % 3 === 0) {
+        platforms.push({
+            x: 1500 + (i * 300) + 200,
+            y: 100,
+            w: 40,
+            h: 300,
+            color: [0.6, 0.2, 0.2, 1]
+        });
+    }
+}
+
+function checkCollision(rect1, rect2) {
+    return (rect1.x < rect2.x + rect2.w &&
+            rect1.x + rect1.w > rect2.x &&
+            rect1.y < rect2.y + rect2.h &&
+            rect1.y + rect1.h > rect2.y);
+}
+
+function updatePhysics() {
+    // 1. Apply Forces (Checks both keys AND virtual touch keys)
+    if (keys['ArrowRight'] || keys['KeyD']) player.vx += MOVE_SPEED;
+    if (keys['ArrowLeft'] || keys['KeyA']) player.vx -= MOVE_SPEED;
+
+    player.vx *= FRICTION;
+    player.vy += GRAVITY;
+
+    if (player.vx > MAX_SPEED) player.vx = MAX_SPEED;
+    if (player.vx < -MAX_SPEED) player.vx = -MAX_SPEED;
+
+    // 2. X Movement
+    player.x += player.vx;
+    player.wallDir = 0;
+
+    for (let p of platforms) {
+        if (checkCollision(player, p)) {
+            if (player.vx > 0) {
+                player.x = p.x - player.w;
+                player.wallDir = 1;
+            } else if (player.vx < 0) {
+                player.x = p.x + p.w;
+                player.wallDir = -1;
+            }
+            player.vx = 0;
+        }
+    }
+
+    // 3. Wall Sliding
+    let inputDir = (keys['ArrowRight'] || keys['KeyD']) ? 1 : (keys['ArrowLeft'] || keys['KeyA']) ? -1 : 0;
+    
+    player.isWallSliding = false;
+    if (!player.isGrounded && player.wallDir !== 0 && player.vy > 0) {
+        player.isWallSliding = true;
+        if (player.vy > WALL_SLIDE_SPEED) {
+            player.vy = WALL_SLIDE_SPEED;
+        }
+    }
+
+    // 4. Y Movement
+    player.y += player.vy;
+    player.isGrounded = false;
+
+    for (let p of platforms) {
+        if (checkCollision(player, p)) {
+            if (player.vy > 0) {
+                player.y = p.y - player.h;
+                player.isGrounded = true;
+                player.isWallSliding = false;
+            } else if (player.vy < 0) {
+                player.y = p.y + p.h;
+            }
+            player.vy = 0;
+        }
+    }
+
+    // 5. Jump
+    if (keys['Space'] || keys['ArrowUp'] || keys['KeyW']) {
+        if (!keys.jumpPressed) {
+            if (player.isGrounded) {
+                player.vy = JUMP_FORCE;
+            } else if (player.isWallSliding || player.wallDir !== 0) {
+                player.vy = WALL_JUMP_FORCE_Y;
+                player.vx = -player.wallDir * WALL_JUMP_FORCE_X;
+            }
+            keys.jumpPressed = true;
+        }
+    } else {
+        keys.jumpPressed = false;
+    }
+
+    // 6. Camera
+    let targetCamX = player.x - (gl.canvas.width / 2) + (player.w / 2);
+    let targetCamY = player.y - (gl.canvas.height / 2);
+    if(targetCamY > 100) targetCamY = 100; 
+
+    camera.x += (targetCamX - camera.x) * 0.1;
+    camera.y += (targetCamY - camera.y) * 0.1;
+}
+
+/**
+ * ------------------------------------------------------------------
+ * SECTION 3: RENDERING
+ * ------------------------------------------------------------------
+ */
+
+function drawRect(x, y, w, h, color) {
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(objPosLocation, x, y);
+    gl.uniform2f(objScaleLocation, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function render() {
+    const displayWidth = canvas.clientWidth;
+    const displayHeight = canvas.clientHeight;
+    if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+        canvas.width = displayWidth;
+        canvas.height = displayHeight;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    }
+
+    gl.clearColor(0.13, 0.13, 0.13, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(program);
+
+    gl.uniform2f(resolutionLocation, gl.canvas.width, gl.canvas.height);
+    gl.uniform2f(translationLocation, camera.x, camera.y);
+
+    gl.enableVertexAttribArray(positionLocation);
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    for (let p of platforms) {
+        drawRect(p.x, p.y, p.w, p.h, p.color);
+    }
+
+    let pColor = player.isWallSliding ? [0.8, 0.8, 0.2, 1] : player.color;
+    drawRect(player.x, player.y, player.w, player.h, pColor);
+
+    requestAnimationFrame(gameLoop);
+}
+
+function gameLoop() {
+    updatePhysics();
+    render();
+}
+
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
