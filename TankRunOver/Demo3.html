@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS: Enhanced Tank Commander</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        
+        /* General UI Container Styling */
+        #ui, #controls, #radar-container {
+            position: absolute;
+            color: white;
+            padding: 10px;
+            user-select: none;
+        }
+
+        /* Info UI */
+        #ui {
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 5px;
+            pointer-events: none;
+        }
+        h1 { margin: 0 0 5px 0; font-size: 20px; }
+        #health-bar {
+            width: 100px;
+            height: 10px;
+            background-color: #555;
+            border: 1px solid white;
+            border-radius: 2px;
+            margin-top: 5px;
+        }
+        #health-level {
+            height: 100%;
+            background-color: limegreen;
+            transition: width 0.3s;
+        }
+        
+        /* Mobile Controls UI */
+        #controls {
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: all; 
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .dpad-button {
+            width: 60px; height: 60px; border-radius: 50%;
+            background: rgba(50, 50, 50, 0.7);
+            color: white; font-size: 20px; font-weight: bold;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            touch-action: manipulation;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        #turn-controls { display: flex; gap: 10px; }
+        #move-controls { display: flex; flex-direction: column; align-items: center; }
+        #move-controls .dpad-button:last-child { margin-top: 10px; }
+
+        /* Radar Styling (New) */
+        #radar-container {
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid gray;
+            padding: 0;
+            border-radius: 5px;
+        }
+        #radar-canvas {
+            display: block;
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>RTS Tank Commander</h1>
+    <p>Health:</p>
+    <div id="health-bar"><div id="health-level"></div></div>
+    <p>Score: <span id="score">0</span></p>
+    <p>Status: <span id="status">Active</span></p>
+</div>
+
+<div id="radar-container">
+    <canvas id="radar-canvas" width="150" height="150"></canvas>
+</div>
+
+<div id="controls">
+    <div id="turn-controls">
+        <button id="turn-left" class="dpad-button">↶</button>
+        <button id="turn-right" class="dpad-button">↷</button>
+    </div>
+    <div id="move-controls">
+        <button id="move-forward" class="dpad-button">▲</button>
+        <button id="move-backward" class="dpad-button">▼</button>
+    </div>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.158.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Global Variables ---
+    let scene, camera, renderer;
+    let tank, ground;
+    let soldiers = [];
+    let bullets = [];
+    let fireParticles = [];
+    let raycaster, mouse;
+    let targetPosition = new THREE.Vector3();
+    let isMovingRTS = false;
+    let score = 0;
+    
+    // --- Game Constants ---
+    const TANK_SPEED = 0.15;
+    const TURN_SPEED = 0.05;
+    const SOLDIER_COUNT = 50; // Increased soldier count
+    const BULLET_SPEED = 0.5;
+    const MAP_SIZE = 50;
+    
+    // --- New Game State ---
+    let tankHealth = 100;
+    const TANK_MAX_HEALTH = 100;
+
+    // --- Mobile Control State Variables ---
+    let isForwardPressed = false;
+    let isBackwardPressed = false;
+    let isTurningLeft = false;
+    let isTurningRight = false;
+    
+    // --- Radar Variables ---
+    let radarCanvas, radarContext;
+    const RADAR_SIZE = 150;
+    const RADAR_SCALE = RADAR_SIZE / MAP_SIZE; // Pixels per world unit
+
+    // --- Initialization ---
+    function init() {
+        // 1. Setup Scene, Camera, Renderer
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+
+        // Camera is initialized here, but position is set in animate()
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // 2. Lighting, Objects
+        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        scene.add(dirLight);
+
+        createGround();
+        createTank();
+        spawnSoldiers();
+
+        // 3. Radar Setup (New)
+        radarCanvas = document.getElementById('radar-canvas');
+        radarContext = radarCanvas.getContext('2d');
+        
+        // 4. Interaction Setup
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+
+        window.addEventListener('contextmenu', event => event.preventDefault());
+        window.addEventListener('pointerdown', onGroundClick);
+        window.addEventListener('resize', onWindowResize);
+        setupTouchControls();
+
+        // 5. Start Loop
+        animate();
+    }
+
+    // --- Object Creation ---
+
+    function createGround() {
+        const geometry = new THREE.PlaneGeometry(100, 100);
+        const material = new THREE.MeshStandardMaterial({ color: 0x3b7d3b });
+        ground = new THREE.Mesh(geometry, material);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+    }
+
+    function createTank() {
+        tank = new THREE.Group();
+        const bodyGeo = new THREE.BoxGeometry(2, 1, 3);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2E4053 });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 0.5;
+        body.castShadow = true;
+        tank.add(body);
+        const turretGeo = new THREE.BoxGeometry(1.2, 0.8, 1.5);
+        const turretMat = new THREE.MeshStandardMaterial({ color: 0x5D6D7E });
+        const turret = new THREE.Mesh(turretGeo, turretMat);
+        turret.position.y = 1.4;
+        turret.castShadow = true;
+        tank.add(turret);
+        const barrelGeo = new THREE.CylinderGeometry(0.2, 0.2, 2.5);
+        const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1B2631 });
+        const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 1.4, 1.5);
+        tank.add(barrel);
+        scene.add(tank);
+        tank.position.set(0, 0, 0);
+        targetPosition.copy(tank.position);
+        
+        // Custom properties
+        tank.userData.health = TANK_MAX_HEALTH;
+        tank.userData.lastHitTime = 0;
+    }
+
+    function spawnSoldiers() {
+        const geometry = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
+        const material = new THREE.MeshStandardMaterial({ color: 0x922B21 });
+        for (let i = 0; i < SOLDIER_COUNT; i++) {
+            const soldier = new THREE.Mesh(geometry, material.clone());
+            const x = (Math.random() - 0.5) * 40;
+            const z = (Math.random() - 0.5) * 40;
+            soldier.position.set(x, 0.8, z);
+            soldier.castShadow = true;
+            soldier.userData = {
+                alive: true,
+                walkSpeed: 0.02 + Math.random() * 0.03,
+                walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
+                shootTimer: Math.random() * 100 // Stagger initial shots
+            };
+            scene.add(soldier);
+            soldiers.push(soldier);
+        }
+    }
+
+    function shoot(origin, target, isPlayer) {
+        const bulletGeo = new THREE.SphereGeometry(0.1);
+        // Player bullets (if implemented) could be a different color
+        const bulletMat = new THREE.MeshBasicMaterial({ color: isPlayer ? 0xffff00 : 0xffa500 }); 
+        const bullet = new THREE.Mesh(bulletGeo, bulletMat);
+        
+        bullet.position.copy(origin);
+        bullet.position.y += 1.2; // Offset for soldier/tank height
+
+        const direction = new THREE.Vector3().subVectors(target, origin).normalize();
+        bullet.userData.velocity = direction.multiplyScalar(BULLET_SPEED);
+        bullet.userData.isPlayerBullet = isPlayer;
+
+        scene.add(bullet);
+        bullets.push(bullet);
+    }
+    
+    function addFireParticle(position) {
+        const geometry = new THREE.SphereGeometry(0.05 + Math.random() * 0.1);
+        const material = new THREE.MeshBasicMaterial({ color: 0xff4500 });
+        const particle = new THREE.Mesh(geometry, material);
+        particle.position.copy(position);
+        particle.userData.life = 0;
+        particle.userData.maxLife = 30; // 30 frames life
+        particle.userData.velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * 0.1, 
+            0.1 + Math.random() * 0.1, 
+            (Math.random() - 0.5) * 0.1
+        );
+        fireParticles.push(particle);
+        scene.add(particle);
+    }
+    
+    // --- Input Handlers (Mostly Unchanged) ---
+
+    function setupTouchControls() {
+        const controlsMap = {
+            'move-forward': () => isForwardPressed = true,
+            'move-backward': () => isBackwardPressed = true,
+            'turn-left': () => isTurningLeft = true,
+            'turn-right': () => isTurningRight = true,
+        };
+
+        const releaseMap = {
+            'move-forward': () => isForwardPressed = false,
+            'move-backward': () => isBackwardPressed = false,
+            'turn-left': () => isTurningLeft = false,
+            'turn-right': () => isTurningRight = false,
+        };
+
+        Object.keys(controlsMap).forEach(id => {
+            const button = document.getElementById(id);
+            if (button) {
+                button.addEventListener('touchstart', (e) => { e.preventDefault(); controlsMap[id](); isMovingRTS = false; });
+                button.addEventListener('touchend', (e) => { e.preventDefault(); releaseMap[id](); });
+                button.addEventListener('mousedown', controlsMap[id]);
+                button.addEventListener('mouseup', releaseMap[id]);
+                button.addEventListener('mouseleave', releaseMap[id]);
+            }
+        });
+    }
+
+    function onGroundClick(event) {
+        if (event.button !== 2 && event.type !== 'pointerdown') return;
+        if (event.target.classList.contains('dpad-button') || tankHealth <= 0) return;
+
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObject(ground);
+
+        if (intersects.length > 0) {
+            targetPosition.copy(intersects[0].point);
+            isMovingRTS = true;
+            isForwardPressed = isBackwardPressed = isTurningLeft = isTurningRight = false;
+            createClickMarker(targetPosition);
+        }
+    }
+
+    function createClickMarker(pos) {
+        const geo = new THREE.RingGeometry(0.5, 0.6, 32);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+        const marker = new THREE.Mesh(geo, mat);
+        marker.position.copy(pos);
+        marker.position.y = 0.05;
+        marker.rotation.x = -Math.PI / 2;
+        scene.add(marker);
+        setTimeout(() => { scene.remove(marker); geo.dispose(); mat.dispose(); }, 500);
+    }
+
+    // --- Game Logic ---
+
+    function moveTank() {
+        if (tankHealth <= 0) return;
+        
+        const isManualControl = isForwardPressed || isBackwardPressed || isTurningLeft || isTurningRight;
+
+        if (isManualControl) {
+            isMovingRTS = false;
+            
+            if (isTurningLeft) {
+                tank.rotation.y += TURN_SPEED;
+            } else if (isTurningRight) {
+                tank.rotation.y -= TURN_SPEED;
+            }
+
+            if (isForwardPressed) {
+                tank.translateZ(TANK_SPEED);
+            } else if (isBackwardPressed) {
+                tank.translateZ(-TANK_SPEED);
+            }
+        
+        } else if (isMovingRTS) {
+            const direction = new THREE.Vector3().subVectors(targetPosition, tank.position);
+            direction.y = 0;
+            const distance = direction.length();
+
+            if (distance < 0.2) {
+                isMovingRTS = false;
+                return;
+            }
+
+            direction.normalize();
+
+            const targetRotation = new THREE.Quaternion();
+            const lookMatrix = new THREE.Matrix4().lookAt(tank.position, targetPosition, tank.up);
+            targetRotation.setFromRotationMatrix(lookMatrix);
+            tank.quaternion.slerp(targetRotation, 0.1);
+
+            tank.position.add(direction.multiplyScalar(TANK_SPEED));
+        }
+    }
+
+    function updateSoldiers() {
+        soldiers.forEach(soldier => {
+            if (!soldier.userData.alive) return;
+
+            // AI Movement (Wander)
+            soldier.position.add(soldier.userData.walkDir.clone().multiplyScalar(soldier.userData.walkSpeed));
+            if (Math.abs(soldier.position.x) > 25 || Math.abs(soldier.position.z) > 25) {
+                soldier.userData.walkDir.multiplyScalar(-1);
+            }
+            if (Math.random() < 0.02) {
+                 soldier.userData.walkDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+            }
+
+            // Soldier Shooting Logic (New)
+            const dist = tank.position.distanceTo(soldier.position);
+            if (dist < 15 && soldier.userData.shootTimer-- <= 0) {
+                // Shoot at tank
+                shoot(soldier.position, tank.position, false);
+                soldier.userData.shootTimer = 100 + Math.random() * 50; // Cooldown
+            }
+
+            // Crushing Collision (Same as before)
+            if (dist < 1.5) {
+                crushSoldier(soldier);
+            }
+        });
+    }
+
+    function updateBullets() {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const bullet = bullets[i];
+            bullet.position.add(bullet.userData.velocity);
+
+            // Bullet despawn bounds check
+            if (Math.abs(bullet.position.x) > 50 || Math.abs(bullet.position.z) > 50) {
+                removeBullet(i);
+                continue;
+            }
+            
+            // Collision with Tank (Soldier's bullet)
+            if (!bullet.userData.isPlayerBullet) {
+                const dist = bullet.position.distanceTo(tank.position);
+                if (dist < 1.0) { // Hit!
+                    takeDamage(5); // Tank takes 5 damage
+                    removeBullet(i);
+                    continue;
+                }
+            }
+
+            // Collision with Soldiers (If Player shooting was implemented, this would be used)
+            // Note: Since player shooting isn't implemented, this part is skipped for now.
+        }
+    }
+    
+    function updateFireParticles() {
+        for (let i = fireParticles.length - 1; i >= 0; i--) {
+            const p = fireParticles[i];
+            p.position.add(p.userData.velocity);
+            p.userData.velocity.y -= 0.005; // Gravity effect
+            p.userData.life++;
+            
+            // Fade effect
+            p.material.opacity = 1 - (p.userData.life / p.userData.maxLife);
+            
+            if (p.userData.life >= p.userData.maxLife) {
+                scene.remove(p);
+                fireParticles.splice(i, 1);
+            }
+        }
+        
+        // Continuous fire when tank is damaged
+        if (tankHealth > 0 && tankHealth < 75 && Math.random() < 0.5) {
+             addFireParticle(tank.position.clone().add(new THREE.Vector3(
+                 (Math.random() - 0.5) * 1.5, 
+                 1.5, 
+                 (Math.random() - 0.5) * 1.5
+             )));
+        }
+    }
+
+    function removeBullet(index) {
+        scene.remove(bullets[index]);
+        bullets.splice(index, 1);
+    }
+
+    function crushSoldier(soldier) {
+        soldier.userData.alive = false;
+        soldier.scale.set(1.5, 0.1, 1.5);
+        soldier.position.y = 0.1;
+        soldier.material.color.setHex(0x550000);
+        score++;
+        document.getElementById('score').innerText = score;
+    }
+
+    function takeDamage(amount) {
+        if (tankHealth <= 0) return;
+        tankHealth -= amount;
+        
+        // Visual feedback (Flash red when hit)
+        tank.traverse(child => {
+            if (child.material) child.material.emissive.setHex(0xff0000);
+        });
+        setTimeout(() => {
+            tank.traverse(child => {
+                if (child.material) child.material.emissive.setHex(0x000000);
+            });
+        }, 100);
+        
+        if (tankHealth <= 0) {
+            tankHealth = 0;
+            isMovingRTS = false;
+            isForwardPressed = isBackwardPressed = isTurningLeft = isTurningRight = false;
+            document.getElementById('status').innerText = 'Destroyed!';
+            // Explode effect (replace tank mesh with particles, etc.)
+        }
+        updateHealthHUD();
+    }
+    
+    function updateHealthHUD() {
+        const healthLevel = document.getElementById('health-level');
+        const percentage = Math.max(0, tankHealth / TANK_MAX_HEALTH) * 100;
+        healthLevel.style.width = percentage + '%';
+        
+        if (percentage < 30) {
+            healthLevel.style.backgroundColor = 'red';
+        } else if (percentage < 60) {
+            healthLevel.style.backgroundColor = 'orange';
+        } else {
+            healthLevel.style.backgroundColor = 'limegreen';
+        }
+    }
+    
+    // --- Camera and Radar Updates (New) ---
+
+    function updateCamera() {
+        const offset = new THREE.Vector3(-10, 15, -10); // Isometric view offset
+        offset.applyEuler(tank.rotation); // Apply tank's rotation to the offset
+        
+        const targetPosition = new THREE.Vector3().addVectors(tank.position, offset);
+        
+        // Smooth interpolation for camera follow (Target Camera)
+        camera.position.lerp(targetPosition, 0.1); 
+        camera.lookAt(tank.position);
+    }
+
+    function drawRadar() {
+        radarContext.clearRect(0, 0, RADAR_SIZE, RADAR_SIZE);
+        radarContext.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        radarContext.fillRect(0, 0, RADAR_SIZE, RADAR_SIZE);
+        
+        const mapCenter = RADAR_SIZE / 2;
+
+        // Function to convert world coordinates to radar coordinates
+        const worldToRadar = (worldX, worldZ) => {
+            const radarX = mapCenter + worldX * RADAR_SCALE;
+            const radarZ = mapCenter - worldZ * RADAR_SCALE; // Z is inverted on radar
+            return { x: radarX, y: radarZ };
+        };
+
+        // Draw Tank (Green)
+        radarContext.fillStyle = 'limegreen';
+        radarContext.beginPath();
+        radarContext.arc(mapCenter, mapCenter, 3, 0, Math.PI * 2);
+        radarContext.fill();
+
+        // Draw Soldiers (Red)
+        soldiers.forEach(soldier => {
+            if (soldier.userData.alive) {
+                const pos = worldToRadar(soldier.position.x, soldier.position.z);
+                radarContext.fillStyle = 'red';
+                radarContext.beginPath();
+                radarContext.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
+                radarContext.fill();
+            }
+        });
+    }
+
+    // --- Main Loop ---
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        moveTank();
+        updateSoldiers();
+        updateBullets();
+        updateFireParticles();
+
+        updateCamera(); // Follow the tank
+        drawRadar();    // Update the minimap
+
+        renderer.render(scene, camera);
+    }
+
+    // Boot
+    init();
+    updateHealthHUD(); // Initialize HUD
+</script>
+</body>
+</html>
