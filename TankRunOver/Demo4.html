@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS: Level Progression Tank Commander</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        
+        /* General UI Container Styling */
+        #ui, #controls, #radar-container {
+            position: absolute;
+            color: white;
+            padding: 10px;
+            user-select: none;
+        }
+
+        /* Info UI */
+        #ui {
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 5px;
+            pointer-events: none;
+        }
+        h1 { margin: 0 0 5px 0; font-size: 20px; }
+        #health-bar {
+            width: 100px;
+            height: 10px;
+            background-color: #555;
+            border: 1px solid white;
+            border-radius: 2px;
+            margin-top: 5px;
+        }
+        #health-level {
+            height: 100%;
+            background-color: limegreen;
+            transition: width 0.3s;
+        }
+        
+        /* Mobile Controls UI */
+        #controls {
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: all; 
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .dpad-button {
+            width: 60px; height: 60px; border-radius: 50%;
+            background: rgba(50, 50, 50, 0.7);
+            color: white; font-size: 20px; font-weight: bold;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            touch-action: manipulation;
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0.9;
+            transition: opacity 0.1s;
+        }
+        .dpad-button:active {
+            opacity: 1;
+            background: rgba(100, 100, 100, 0.9);
+        }
+
+        /* Shoot Button Specific Styling */
+        #shoot-button {
+            background: rgba(200, 50, 50, 0.9);
+            border-color: yellow;
+            font-size: 24px;
+        }
+        #shoot-button:active {
+            background: rgba(255, 0, 0, 1.0);
+        }
+
+        #turn-controls { display: flex; gap: 10px; }
+        #move-controls { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            margin-right: 10px; /* Space out controls */
+        }
+        #move-controls .dpad-button:last-child { margin-top: 10px; }
+
+        /* Radar Styling */
+        #radar-container {
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid gray;
+            padding: 0;
+            border-radius: 5px;
+        }
+        #radar-canvas {
+            display: block;
+        }
+        
+        /* Level Notification */
+        #level-notification {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            color: yellow;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px 40px;
+            border-radius: 10px;
+            display: none;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>RTS Tank Commander</h1>
+    <p>Level: <span id="level-display">1</span></p>
+    <p>Health:</p>
+    <div id="health-bar"><div id="health-level"></div></div>
+    <p>Kills: <span id="score">0</span> / <span id="level-goal">50</span></p>
+    <p>Status: <span id="status">Active</span></p>
+</div>
+
+<div id="level-notification"></div>
+
+<div id="radar-container">
+    <canvas id="radar-canvas" width="150" height="150"></canvas>
+</div>
+
+<div id="controls">
+    <div id="turn-controls">
+        <button id="turn-left" class="dpad-button">↶</button>
+        <button id="turn-right" class="dpad-button">↷</button>
+    </div>
+    <div id="move-controls">
+        <button id="move-forward" class="dpad-button">▲</button>
+        <button id="move-backward" class="dpad-button">▼</button>
+    </div>
+    <button id="shoot-button" class="dpad-button">💥</button>
+</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.158.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Global Variables ---
+    let scene, camera, renderer;
+    let tank, ground;
+    let soldiers = [];
+    let enemyTanks = []; // New array for enemy tanks
+    let bullets = [];
+    let fireParticles = [];
+    let raycaster, mouse;
+    let targetPosition = new THREE.Vector3();
+    let isMovingRTS = false;
+    let score = 0;
+    
+    // --- Game Constants & State ---
+    const TANK_SPEED = 0.15;
+    const TURN_SPEED = 0.05;
+    const BULLET_SPEED = 0.5;
+    const MAP_SIZE = 50;
+    
+    let tankHealth = 100;
+    const TANK_MAX_HEALTH = 100;
+
+    let currentLevel = 1;
+    let killGoal = 50; 
+    let tankFireCooldown = 0;
+    const TANK_FIRE_RATE = 40; // frames per shot
+    
+    const LEVEL_CONFIG = {
+        1: { soldierCount: 50, tankCount: 0, killGoal: 50, soldierDamage: 5, soldierFireRate: 100 },
+        2: { soldierCount: 160, tankCount: 0, killGoal: 210, soldierDamage: 7, soldierFireRate: 80 },
+        3: { soldierCount: 0, tankCount: 3, killGoal: 3, soldierDamage: 10, soldierFireRate: 60 } // Kill enemy tanks for level goal
+    };
+
+    // --- Mobile Control State Variables ---
+    let isForwardPressed = false;
+    let isBackwardPressed = false;
+    let isTurningLeft = false;
+    let isTurningRight = false;
+    let isShooting = false;
+    
+    // --- Radar Variables ---
+    let radarCanvas, radarContext;
+    const RADAR_SIZE = 150;
+    const RADAR_SCALE = RADAR_SIZE / MAP_SIZE;
+
+    // --- Initialization ---
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        scene.add(dirLight);
+
+        createGround();
+        createTank();
+        
+        radarCanvas = document.getElementById('radar-canvas');
+        radarContext = radarCanvas.getContext('2d');
+        
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+
+        window.addEventListener('contextmenu', event => event.preventDefault());
+        window.addEventListener('pointerdown', onGroundClick);
+        window.addEventListener('resize', onWindowResize);
+        setupTouchControls();
+        
+        startLevel(1); 
+        animate();
+    }
+    
+    // --- Level Progression Functions (New) ---
+
+    function startLevel(level) {
+        currentLevel = level;
+        const config = LEVEL_CONFIG[level];
+        
+        // Clear previous entities
+        soldiers.forEach(s => scene.remove(s));
+        enemyTanks.forEach(t => scene.remove(t));
+        bullets.forEach(b => scene.remove(b));
+        fireParticles.forEach(p => scene.remove(p));
+        soldiers = [];
+        enemyTanks = [];
+        bullets = [];
+        fireParticles = [];
+
+        // Update score and goal display
+        if (level === 1) {
+            score = 0; // Reset score only on the first level
+        }
+        killGoal = config.killGoal;
+        
+        // Reset/Heal tank
+        tankHealth = TANK_MAX_HEALTH;
+        updateHealthHUD();
+        tank.position.set(0, 0, 0);
+        tank.rotation.set(0, 0, 0);
+        targetPosition.copy(tank.position);
+
+        // Spawn new entities
+        if (config.soldierCount > 0) {
+            spawnSoldiers(config.soldierCount);
+        }
+        if (config.tankCount > 0) {
+            spawnEnemyTanks(config.tankCount);
+        }
+        
+        document.getElementById('level-display').innerText = currentLevel;
+        document.getElementById('level-goal').innerText = killGoal;
+        document.getElementById('score').innerText = score;
+        showLevelNotification(`Level ${currentLevel}: ${config.tankCount > 0 ? 'Tank Battle!' : 'Infantry Assault!'}`, 2000);
+    }
+
+    function checkLevelCompletion() {
+        if (score >= killGoal) {
+            if (currentLevel < 3) {
+                startLevel(currentLevel + 1);
+            } else {
+                showLevelNotification("Victory! You survived the tank battle!", 5000);
+            }
+        }
+    }
+    
+    function showLevelNotification(message, duration) {
+        const notification = document.getElementById('level-notification');
+        notification.innerText = message;
+        notification.style.display = 'block';
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, duration);
+    }
+
+    // --- Object Creation ---
+
+    function createGround() {
+        const geometry = new THREE.PlaneGeometry(100, 100);
+        const material = new THREE.MeshStandardMaterial({ color: 0x3b7d3b });
+        ground = new THREE.Mesh(geometry, material);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+    }
+
+    function createTank(isEnemy = false, color = 0x2E4053) {
+        const tankGroup = new THREE.Group();
+        const bodyGeo = new THREE.BoxGeometry(2, 1, 3);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: color });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 0.5;
+        body.castShadow = true;
+        tankGroup.add(body);
+        
+        const turretGeo = new THREE.BoxGeometry(1.2, 0.8, 1.5);
+        const turretMat = new THREE.MeshStandardMaterial({ color: isEnemy ? 0x900C3F : 0x5D6D7E });
+        const turret = new THREE.Mesh(turretGeo, turretMat);
+        turret.position.y = 1.4;
+        turret.castShadow = true;
+        tankGroup.add(turret);
+        
+        const barrelGeo = new THREE.CylinderGeometry(0.2, 0.2, 2.5);
+        const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1B2631 });
+        const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 1.4, 1.5);
+        tankGroup.add(barrel);
+        
+        scene.add(tankGroup);
+        
+        if (!isEnemy) {
+            tank = tankGroup;
+            tank.position.set(0, 0, 0);
+            tank.userData.health = TANK_MAX_HEALTH;
+            tank.userData.type = 'player';
+        } else {
+            tankGroup.userData.health = 50; // Enemy tanks are weaker
+            tankGroup.userData.type = 'enemy';
+            tankGroup.userData.shootTimer = Math.random() * 100;
+            return tankGroup;
+        }
+    }
+
+    function spawnSoldiers(count) {
+        const geometry = new THREE.CapsuleGeometry(0.3, 1, 4, 8);
+        const material = new THREE.MeshStandardMaterial({ color: 0x922B21 });
+        
+        for (let i = 0; i < count; i++) {
+            const soldier = new THREE.Mesh(geometry, material.clone());
+            const x = (Math.random() - 0.5) * 40;
+            const z = (Math.random() - 0.5) * 40;
+            soldier.position.set(x, 0.8, z);
+            soldier.castShadow = true;
+            soldier.userData = {
+                alive: true,
+                type: 'soldier',
+                walkSpeed: 0.02 + Math.random() * 0.03,
+                walkDir: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize(),
+                shootTimer: Math.random() * LEVEL_CONFIG[currentLevel].soldierFireRate 
+            };
+            scene.add(soldier);
+            soldiers.push(soldier);
+        }
+    }
+    
+    function spawnEnemyTanks(count) {
+        for (let i = 0; i < count; i++) {
+            const enemyTank = createTank(true, 0x880000); // Red color for enemy
+            const x = (Math.random() - 0.5) * 40;
+            const z = (Math.random() - 0.5) * 40;
+            enemyTank.position.set(x, 0, z);
+            enemyTanks.push(enemyTank);
+        }
+    }
+
+    function shoot(origin, target, isPlayer, damage) {
+        const bulletGeo = new THREE.SphereGeometry(isPlayer ? 0.3 : 0.1);
+        const bulletMat = new THREE.MeshBasicMaterial({ color: isPlayer ? 0xffff00 : 0xffa500 }); 
+        const bullet = new THREE.Mesh(bulletGeo, bulletMat);
+        
+        bullet.position.copy(origin);
+        bullet.position.y += isPlayer ? 1.5 : 1.2; // Offset height
+        
+        const direction = new THREE.Vector3().subVectors(target, origin).normalize();
+        bullet.userData.velocity = direction.multiplyScalar(BULLET_SPEED * (isPlayer ? 1.5 : 1.0));
+        bullet.userData.isPlayerBullet = isPlayer;
+        bullet.userData.damage = damage;
+
+        scene.add(bullet);
+        bullets.push(bullet);
+    }
+    
+    function playerShoot() {
+        if (tankHealth <= 0 || tankFireCooldown > 0) return;
+        
+        // Target acquisition: Raycast forward
+        const barrelPosition = new THREE.Vector3();
+        tank.children[2].getWorldPosition(barrelPosition); // Get world position of the barrel
+        
+        const forwardVector = new THREE.Vector3(0, 0, 1);
+        forwardVector.applyQuaternion(tank.quaternion);
+
+        const raycasterTank = new THREE.Raycaster(barrelPosition, forwardVector, 0, 50);
+        
+        // Prioritize enemy tanks over soldiers
+        const enemyIntersects = raycasterTank.intersectObjects(enemyTanks.filter(t => t.userData.health > 0), true);
+        const soldierIntersects = raycasterTank.intersectObjects(soldiers.filter(s => s.userData.alive), true);
+
+        let targetHit = null;
+        if (enemyIntersects.length > 0) {
+            // Find the closest enemy tank
+            targetHit = enemyIntersects[0].object.parent; // Parent is the actual tank Group
+        } else if (soldierIntersects.length > 0) {
+            // Find the closest soldier
+            targetHit = soldierIntersects[0].object;
+        }
+
+        let targetPoint = new THREE.Vector3();
+
+        if (targetHit) {
+            targetHit.getWorldPosition(targetPoint);
+        } else {
+            // If no target, shoot straight forward 30 units
+            targetPoint.copy(barrelPosition).add(forwardVector.multiplyScalar(30));
+        }
+
+        // Fire the big tank shell
+        shoot(barrelPosition, targetPoint, true, 20); // Tank shell deals 20 damage
+        
+        // Reset cooldown
+        tankFireCooldown = TANK_FIRE_RATE;
+        // Visual/Sound effect placeholder
+        console.log("Tank Fired!");
+    }
+    
+    // --- Input Handlers ---
+
+    function setupTouchControls() {
+        const controlsMap = {
+            'move-forward': () => isForwardPressed = true,
+            'move-backward': () => isBackwardPressed = true,
+            'turn-left': () => isTurningLeft = true,
+            'turn-right': () => isTurningRight = true,
+            'shoot-button': () => isShooting = true, // New: Track shoot button state
+        };
+
+        const releaseMap = {
+            'move-forward': () => isForwardPressed = false,
+            'move-backward': () => isBackwardPressed = false,
+            'turn-left': () => isTurningLeft = false,
+            'turn-right': () => isTurningRight = false,
+            'shoot-button': () => isShooting = false,
+        };
+
+        Object.keys(controlsMap).forEach(id => {
+            const button = document.getElementById(id);
+            if (button) {
+                // For shoot button, we only want an instant single shot per press
+                if (id === 'shoot-button') {
+                    button.addEventListener('touchstart', (e) => { e.preventDefault(); playerShoot(); });
+                    button.addEventListener('mousedown', (e) => { e.preventDefault(); playerShoot(); });
+                } else {
+                    button.addEventListener('touchstart', (e) => { e.preventDefault(); controlsMap[id](); isMovingRTS = false; });
+                    button.addEventListener('touchend', (e) => { e.preventDefault(); releaseMap[id](); });
+                    button.addEventListener('mousedown', controlsMap[id]);
+                    button.addEventListener('mouseup', releaseMap[id]);
+                    button.addEventListener('mouseleave', releaseMap[id]);
+                }
+            }
+        });
+    }
+
+    function onGroundClick(event) {
+        if (event.button !== 2 && event.type !== 'pointerdown') return;
+        if (event.target.classList.contains('dpad-button') || tankHealth <= 0) return;
+
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObject(ground);
+
+        if (intersects.length > 0) {
+            targetPosition.copy(intersects[0].point);
+            isMovingRTS = true;
+            isForwardPressed = isBackwardPressed = isTurningLeft = isTurningRight = false;
+            createClickMarker(targetPosition);
+        }
+    }
+
+    // --- Damage and Entity Updates ---
+
+    function takeDamage(target, amount) {
+        if (target.userData.health <= 0) return;
+        target.userData.health -= amount;
+        
+        // Visual flash
+        target.traverse(child => {
+            if (child.material) child.material.emissive.setHex(0xff0000);
+        });
+        setTimeout(() => {
+            target.traverse(child => {
+                if (child.material) child.material.emissive.setHex(0x000000);
+            });
+        }, 100);
+        
+        if (target.userData.health <= 0) {
+            if (target.userData.type === 'player') {
+                tankHealth = 0;
+                document.getElementById('status').innerText = 'Destroyed! Game Over.';
+            } else if (target.userData.type === 'enemy') {
+                destroyEnemyTank(target);
+            }
+        }
+        
+        if (target.userData.type === 'player') {
+            tankHealth = target.userData.health;
+            updateHealthHUD();
+            if (tankHealth <= 0) {
+                isMovingRTS = false;
+                isForwardPressed = isBackwardPressed = isTurningLeft = isTurningRight = false;
+            }
+        }
+    }
+
+    function destroyEnemyTank(enemyTank) {
+        enemyTank.userData.health = 0;
+        enemyTank.visible = false; 
+        scene.remove(enemyTank); 
+        score++;
+        document.getElementById('score').innerText = score;
+        checkLevelCompletion();
+    }
+
+    function crushSoldier(soldier) {
+        soldier.userData.alive = false;
+        soldier.scale.set(1.5, 0.1, 1.5);
+        soldier.position.y = 0.1;
+        soldier.material.color.setHex(0x550000);
+        score++;
+        document.getElementById('score').innerText = score;
+        checkLevelCompletion(); // Check completion after every soldier kill
+    }
+
+    function updateSoldierAI() {
+        const config = LEVEL_CONFIG[currentLevel];
+        soldiers.forEach(soldier => {
+            if (!soldier.userData.alive) return;
+
+            soldier.position.add(soldier.userData.walkDir.clone().multiplyScalar(soldier.userData.walkSpeed));
+            if (Math.abs(soldier.position.x) > 25 || Math.abs(soldier.position.z) > 25) {
+                soldier.userData.walkDir.multiplyScalar(-1);
+            }
+            if (Math.random() < 0.02) {
+                 soldier.userData.walkDir = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
+            }
+
+            const dist = tank.position.distanceTo(soldier.position);
+            
+            // Soldier fire logic uses current level stats
+            if (dist < 15 && soldier.userData.shootTimer-- <= 0) {
+                shoot(soldier.position, tank.position, false, config.soldierDamage);
+                soldier.userData.shootTimer = config.soldierFireRate + Math.random() * 50; 
+            }
+            
+            if (dist < 1.5) {
+                crushSoldier(soldier);
+            }
+        });
+    }
+    
+    function updateEnemyTankAI() {
+        enemyTanks.forEach(enemyTank => {
+            if (enemyTank.userData.health <= 0) return;
+            
+            // Look at player tank
+            enemyTank.lookAt(tank.position.x, enemyTank.position.y, tank.position.z);
+
+            const dist = tank.position.distanceTo(enemyTank.position);
+            
+            // Enemy Tank fire (Higher damage, lower rate)
+            if (dist < 25 && enemyTank.userData.shootTimer-- <= 0) {
+                const barrelPos = new THREE.Vector3();
+                // Find barrel relative to the enemy tank group
+                enemyTank.children[2].getWorldPosition(barrelPos);
+                shoot(barrelPos, tank.position, false, 15); // Enemy tank shell deals 15 damage
+                enemyTank.userData.shootTimer = 150 + Math.random() * 50;
+            }
+            
+            // Simple movement AI: Move closer if too far
+            if (dist > 10) {
+                 enemyTank.translateZ(TANK_SPEED * 0.5);
+            }
+        });
+    }
+
+    function updateBullets() {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const bullet = bullets[i];
+            bullet.position.add(bullet.userData.velocity);
+
+            if (Math.abs(bullet.position.x) > 50 || Math.abs(bullet.position.z) > 50) {
+                removeBullet(i);
+                continue;
+            }
+            
+            // Collision with Player Tank (Enemy's bullet)
+            if (!bullet.userData.isPlayerBullet) {
+                const dist = bullet.position.distanceTo(tank.position);
+                if (dist < 1.0 && tankHealth > 0) {
+                    takeDamage(tank, bullet.userData.damage);
+                    removeBullet(i);
+                    continue;
+                }
+            } 
+            // Collision with Enemies (Player's bullet)
+            else {
+                // Check Soldiers first
+                let hitEnemy = null;
+                for (const soldier of soldiers) {
+                    if (soldier.userData.alive && bullet.position.distanceTo(soldier.position) < 1.0) {
+                        hitEnemy = soldier;
+                        break;
+                    }
+                }
+                
+                // Check Enemy Tanks
+                if (!hitEnemy) {
+                    for (const enemyTank of enemyTanks) {
+                        if (enemyTank.userData.health > 0 && bullet.position.distanceTo(enemyTank.position) < 1.5) {
+                            hitEnemy = enemyTank;
+                            break;
+                        }
+                    }
+                }
+
+                if (hitEnemy) {
+                    if (hitEnemy.userData.type === 'soldier') {
+                        // Soldier is crushed by bullet impact (instant kill)
+                        crushSoldier(hitEnemy);
+                    } else if (hitEnemy.userData.type === 'enemy') {
+                        takeDamage(hitEnemy, bullet.userData.damage);
+                    }
+                    removeBullet(i);
+                    continue;
+                }
+            }
+        }
+    }
+    
+    function updateFireParticles() {
+        // ... (Fire particle logic remains the same) ...
+        for (let i = fireParticles.length - 1; i >= 0; i--) {
+            const p = fireParticles[i];
+            p.position.add(p.userData.velocity);
+            p.userData.velocity.y -= 0.005; 
+            p.userData.life++;
+            p.material.opacity = 1 - (p.userData.life / p.userData.maxLife);
+            if (p.userData.life >= p.userData.maxLife) {
+                scene.remove(p);
+                fireParticles.splice(i, 1);
+            }
+        }
+        
+        // Continuous fire when tank is damaged
+        if (tankHealth > 0 && tankHealth < 75 && Math.random() < 0.5) {
+             addFireParticle(tank.position.clone().add(new THREE.Vector3(
+                 (Math.random() - 0.5) * 1.5, 
+                 1.5, 
+                 (Math.random() - 0.5) * 1.5
+             )));
+        }
+    }
+
+    function removeBullet(index) {
+        scene.remove(bullets[index]);
+        bullets.splice(index, 1);
+    }
+    
+    // --- HUD, Camera, Radar Updates ---
+
+    function updateHealthHUD() {
+        const healthLevel = document.getElementById('health-level');
+        const percentage = Math.max(0, tankHealth / TANK_MAX_HEALTH) * 100;
+        healthLevel.style.width = percentage + '%';
+        
+        if (percentage < 30) {
+            healthLevel.style.backgroundColor = 'red';
+        } else if (percentage < 60) {
+            healthLevel.style.backgroundColor = 'orange';
+        } else {
+            healthLevel.style.backgroundColor = 'limegreen';
+        }
+    }
+    
+    function updateCamera() {
+        const offset = new THREE.Vector3(-10, 15, -10);
+        offset.applyEuler(tank.rotation);
+        
+        const targetPos = new THREE.Vector3().addVectors(tank.position, offset);
+        
+        camera.position.lerp(targetPos, 0.1); 
+        camera.lookAt(tank.position);
+    }
+
+    function drawRadar() {
+        radarContext.clearRect(0, 0, RADAR_SIZE, RADAR_SIZE);
+        radarContext.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        radarContext.fillRect(0, 0, RADAR_SIZE, RADAR_SIZE);
+        
+        const mapCenter = RADAR_SIZE / 2;
+        const worldToRadar = (worldX, worldZ) => {
+            const radarX = mapCenter + worldX * RADAR_SCALE;
+            const radarZ = mapCenter - worldZ * RADAR_SCALE;
+            return { x: radarX, y: radarZ };
+        };
+
+        // Draw Tank (Green)
+        radarContext.fillStyle = 'limegreen';
+        radarContext.beginPath();
+        radarContext.arc(mapCenter, mapCenter, 3, 0, Math.PI * 2);
+        radarContext.fill();
+
+        // Draw Soldiers (Red Dots)
+        soldiers.forEach(soldier => {
+            if (soldier.userData.alive) {
+                const pos = worldToRadar(soldier.position.x, soldier.position.z);
+                radarContext.fillStyle = 'red';
+                radarContext.beginPath();
+                radarContext.arc(pos.x, pos.y, 1.5, 0, Math.PI * 2);
+                radarContext.fill();
+            }
+        });
+        
+        // Draw Enemy Tanks (Dark Red Squares - Bosses)
+        enemyTanks.forEach(enemyTank => {
+            if (enemyTank.userData.health > 0) {
+                const pos = worldToRadar(enemyTank.position.x, enemyTank.position.z);
+                radarContext.fillStyle = 'darkred';
+                radarContext.fillRect(pos.x - 3, pos.y - 3, 6, 6);
+            }
+        });
+    }
+
+    // --- Main Loop ---
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        if (tankHealth > 0) {
+            // Decrement player fire cooldown
+            if (tankFireCooldown > 0) {
+                tankFireCooldown--;
+            }
+
+            moveTank();
+            updateSoldierAI();
+            updateEnemyTankAI();
+        }
+        
+        updateBullets();
+        updateFireParticles();
+        updateCamera();
+        drawRadar();
+
+        renderer.render(scene, camera);
+    }
+
+    // Boot
+    init();
+    updateHealthHUD();
+</script>
+</body>
+</html>
