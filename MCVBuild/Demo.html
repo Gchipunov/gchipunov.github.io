@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Concrete Commander - WebGL RTS</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas */
+        }
+        #hud-bottom {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 160px;
+            background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0));
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+        }
+        .panel {
+            background: rgba(20, 30, 40, 0.85);
+            border: 2px solid #4a90e2;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            box-shadow: 0 0 20px rgba(74, 144, 226, 0.3);
+            backdrop-filter: blur(5px);
+            transition: opacity 0.3s;
+        }
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        button {
+            background: linear-gradient(to bottom, #3a4a5a, #2a3a4a);
+            color: white;
+            border: 1px solid #5a6a7a;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100px;
+            height: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.1s;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background: #4a90e2;
+            border-color: #7ab0f2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        button:active {
+            transform: translateY(1px);
+        }
+        button:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        #info-box {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #4a90e2;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+        #cursor-tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            font-size: 12px;
+            z-index: 1000;
+        }
+    </style>
+    <!-- Three.js from CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="ui-layer">
+        <div id="info-box">
+            <h3>Mission Control</h3>
+            <p>1. Select MCV (Yellow Truck)</p>
+            <p>2. Right Click to Move</p>
+            <p>3. Click "DEPLOY" to build Base</p>
+        </div>
+
+        <div id="hud-bottom">
+            <!-- MCV Controls -->
+            <div id="panel-mcv" class="panel hidden">
+                <div style="color:white; margin-right:10px; width: 100px;">
+                    <h3>MCV</h3>
+                    <small>Mobile Construction Vehicle</small>
+                </div>
+                <button id="btn-deploy">
+                    <span class="icon">🏗️</span>
+                    Deploy
+                </button>
+            </div>
+
+            <!-- Construction Yard Controls -->
+            <div id="panel-base" class="panel hidden">
+                <div style="color:white; margin-right:10px; width: 100px;">
+                    <h3>Const. Yard</h3>
+                    <small>Main Base</small>
+                </div>
+                <button id="btn-power">
+                    <span class="icon">⚡</span>
+                    Power
+                </button>
+                <button id="btn-refinery">
+                    <span class="icon">🏭</span>
+                    Factory
+                </button>
+                <button id="btn-silo">
+                    <span class="icon">☢️</span>
+                    Silo
+                </button>
+            </div>
+        </div>
+        <div id="cursor-tooltip"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- GAME CONFIGURATION ---
+        const COLORS = {
+            ground: 0x2a2a2a,
+            grid: 0x444444,
+            selection: 0x00ff00,
+            mcvBody: 0xffaa00, // Construction Yellow
+            mcvParts: 0x333333,
+            base: 0xffcc00,
+            power: 0x44ff44,
+            factory: 0xff4444,
+            silo: 0x8888ff,
+            ghostValid: 0x00ff00,
+            ghostInvalid: 0xff0000
+        };
+
+        const GRID_SIZE = 100;
+        const TILE_SIZE = 10;
+
+        // --- GLOBAL VARIABLES ---
+        let scene, camera, renderer, controls, raycaster;
+        let mouse = new THREE.Vector2();
+        let groundPlane;
+        
+        // Game State
+        let units = [];
+        let buildings = [];
+        let effects = [];
+        let selectedEntity = null;
+        let placementMode = null; // { type: 'power', mesh: ghostMesh }
+        
+        let clock = new THREE.Clock();
+
+        // --- INITIALIZATION ---
+        function init() {
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x101015);
+            scene.fog = new THREE.FogExp2(0x101015, 0.008);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.set(-30, 40, 30);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
+            controls.minDistance = 10;
+            controls.maxDistance = 100;
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // Ground
+            const planeGeometry = new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE);
+            const planeMaterial = new THREE.MeshStandardMaterial({ 
+                color: COLORS.ground,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            groundPlane = new THREE.Mesh(planeGeometry, planeMaterial);
+            groundPlane.rotation.x = -Math.PI / 2;
+            groundPlane.receiveShadow = true;
+            scene.add(groundPlane);
+
+            const gridHelper = new THREE.GridHelper(GRID_SIZE, 20, COLORS.grid, COLORS.grid);
+            scene.add(gridHelper);
+
+            // Raycaster
+            raycaster = new THREE.Raycaster();
+
+            // Initial Units
+            spawnMCV(new THREE.Vector3(0, 0, 0));
+
+            // Events
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('pointerdown', onPointerDown);
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('contextmenu', (e) => e.preventDefault()); // Block right click menu
+
+            // UI Listeners
+            document.getElementById('btn-deploy').addEventListener('click', deployMCV);
+            document.getElementById('btn-power').addEventListener('click', () => startPlacement('power'));
+            document.getElementById('btn-refinery').addEventListener('click', () => startPlacement('factory'));
+            document.getElementById('btn-silo').addEventListener('click', () => startPlacement('silo'));
+
+            // Start Loop
+            animate();
+        }
+
+        // --- ASSET GENERATION (Procedural Meshes) ---
+
+        function createSelectionRing() {
+            const geometry = new THREE.RingGeometry(2.5, 3, 32);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: COLORS.selection, 
+                transparent: true, 
+                opacity: 0.6,
+                side: THREE.DoubleSide 
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.y = 0.1;
+            mesh.visible = false;
+            return mesh;
+        }
+
+        // MCV - The Truck
+        function createMCVMesh() {
+            const group = new THREE.Group();
+
+            // Chassis
+            const bodyGeo = new THREE.BoxGeometry(2, 1.5, 4);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: COLORS.mcvBody });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.25;
+            body.castShadow = true;
+            group.add(body);
+
+            // Cab
+            const cabGeo = new THREE.BoxGeometry(2, 1.2, 1.5);
+            const cabMat = new THREE.MeshStandardMaterial({ color: 0xdd9900 });
+            const cab = new THREE.Mesh(cabGeo, cabMat);
+            cab.position.set(0, 1.6, 1.5);
+            cab.castShadow = true;
+            group.add(cab);
+
+            // Windshield
+            const windGeo = new THREE.BoxGeometry(1.8, 0.6, 0.1);
+            const windMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
+            const wind = new THREE.Mesh(windGeo, windMat);
+            wind.position.set(0, 1.7, 2.26);
+            group.add(wind);
+
+            // Mixer / Crane part
+            const mixerGeo = new THREE.CylinderGeometry(0.8, 1, 3.5, 12);
+            const mixerMat = new THREE.MeshStandardMaterial({ color: 0x999999 });
+            const mixer = new THREE.Mesh(mixerGeo, mixerMat);
+            mixer.rotation.x = Math.PI / 2;
+            mixer.position.set(0, 2.6, -0.5);
+            mixer.rotation.z = 0.2; // Tilt slightly
+            mixer.castShadow = true;
+            mixer.name = "mixer"; // for animation
+            group.add(mixer);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const positions = [
+                [-1.1, 0.5, 1.5], [1.1, 0.5, 1.5],
+                [-1.1, 0.5, -1.2], [1.1, 0.5, -1.2],
+                [-1.1, 0.5, -0.2], [1.1, 0.5, -0.2]
+            ];
+            
+            positions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                group.add(wheel);
+            });
+
+            return group;
+        }
+
+        // Construction Yard - The Base
+        function createYardMesh() {
+            const group = new THREE.Group();
+
+            // Main Platform
+            const baseGeo = new THREE.BoxGeometry(6, 1, 6);
+            const baseMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = 0.5;
+            base.castShadow = true;
+            base.receiveShadow = true;
+            group.add(base);
+
+            // Building Body
+            const bodyGeo = new THREE.BoxGeometry(4, 3, 4);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: COLORS.base });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 2;
+            body.castShadow = true;
+            group.add(body);
+
+            // Crane Arm
+            const craneGeo = new THREE.BoxGeometry(0.5, 6, 0.5);
+            const craneMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+            const crane = new THREE.Mesh(craneGeo, craneMat);
+            crane.position.set(2, 3, 2);
+            group.add(crane);
+
+            const jibGeo = new THREE.BoxGeometry(4, 0.5, 0.5);
+            const jib = new THREE.Mesh(jibGeo, craneMat);
+            jib.position.set(0, 6, 2);
+            group.add(jib);
+
+            return group;
+        }
+
+        function createBuildingMesh(type) {
+            const group = new THREE.Group();
+            let color = 0xffffff;
+            
+            if (type === 'power') {
+                color = COLORS.power;
+                const cyl = new THREE.Mesh(
+                    new THREE.CylinderGeometry(1.5, 2, 4, 16),
+                    new THREE.MeshStandardMaterial({ color: color })
+                );
+                cyl.position.y = 2;
+                cyl.castShadow = true;
+                group.add(cyl);
+                
+                // Details
+                const ring = new THREE.Mesh(
+                    new THREE.TorusGeometry(1, 0.2, 8, 16),
+                    new THREE.MeshStandardMaterial({ color: 0x222222, emissive: 0x44ff44, emissiveIntensity: 0.5 })
+                );
+                ring.rotation.x = Math.PI/2;
+                ring.position.y = 4.1;
+                group.add(ring);
+            } else if (type === 'factory') {
+                color = COLORS.factory;
+                const box = new THREE.Mesh(
+                    new THREE.BoxGeometry(4, 2.5, 4),
+                    new THREE.MeshStandardMaterial({ color: color })
+                );
+                box.position.y = 1.25;
+                box.castShadow = true;
+                group.add(box);
+                
+                // Smokestacks
+                const stackGeo = new THREE.CylinderGeometry(0.3, 0.3, 2);
+                const stackMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+                const s1 = new THREE.Mesh(stackGeo, stackMat); s1.position.set(-1, 3, -1);
+                const s2 = new THREE.Mesh(stackGeo, stackMat); s2.position.set(1, 3, -1);
+                group.add(s1); group.add(s2);
+            } else if (type === 'silo') {
+                color = COLORS.silo;
+                const dome = new THREE.Mesh(
+                    new THREE.SphereGeometry(2, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+                    new THREE.MeshStandardMaterial({ color: color })
+                );
+                dome.position.y = 0;
+                dome.scale.y = 1.5;
+                group.add(dome);
+            }
+
+            return group;
+        }
+
+        // --- GAME LOGIC ---
+
+        class MCV {
+            constructor(position) {
+                this.type = 'MCV';
+                this.mesh = createMCVMesh();
+                this.mesh.position.copy(position);
+                this.mesh.position.y = 0;
+                
+                this.selectionRing = createSelectionRing();
+                this.mesh.add(this.selectionRing);
+
+                scene.add(this.mesh);
+                
+                // Properties
+                this.target = null;
+                this.speed = 8;
+                this.isMoving = false;
+                this.deployed = false;
+                this.transforming = false;
+
+                // Bind to mesh for raycasting
+                this.mesh.userData.entity = this;
+            }
+
+            update(dt) {
+                if (this.transforming) {
+                    // Animation Logic
+                    const mixer = this.mesh.getObjectByName('mixer');
+                    if (mixer) mixer.rotation.y += dt * 5;
+                    this.mesh.scale.multiplyScalar(1.01);
+                    if (this.mesh.scale.x > 1.5) {
+                        this.finishDeploy();
+                    }
+                    return;
+                }
+
+                if (this.deployed) return;
+
+                if (this.target) {
+                    const direction = new THREE.Vector3().subVectors(this.target, this.mesh.position);
+                    direction.y = 0; // Keep on ground
+                    const dist = direction.length();
+
+                    if (dist < 0.2) {
+                        this.isMoving = false;
+                        this.target = null;
+                    } else {
+                        this.isMoving = true;
+                        direction.normalize();
+                        
+                        // Rotate towards target
+                        const targetRotation = Math.atan2(direction.x, direction.z);
+                        // Simple lerp rotation (can be improved with Quaternions)
+                        this.mesh.rotation.y = targetRotation;
+
+                        this.mesh.position.add(direction.multiplyScalar(this.speed * dt));
+                        
+                        // Wheel animation
+                        this.mesh.position.y = Math.sin(Date.now() * 0.02) * 0.05; 
+                    }
+                }
+            }
+
+            deploy() {
+                if (this.isMoving || this.deployed) return;
+                this.transforming = true;
+                // Center on grid before deploying
+                this.mesh.position.x = Math.round(this.mesh.position.x);
+                this.mesh.position.z = Math.round(this.mesh.position.z);
+                
+                // Deselect while transforming
+                if (selectedEntity === this) deselect();
+            }
+
+            finishDeploy() {
+                this.transforming = false;
+                this.deployed = true;
+                
+                const pos = this.mesh.position.clone();
+                
+                // Remove MCV
+                scene.remove(this.mesh);
+                units = units.filter(u => u !== this);
+
+                // Create Building
+                spawnConstructionYard(pos);
+            }
+
+            setSelected(bool) {
+                this.selectionRing.visible = bool;
+                if(bool) document.getElementById('panel-mcv').classList.remove('hidden');
+            }
+        }
+
+        class ConstructionYard {
+            constructor(position) {
+                this.type = 'Base';
+                this.mesh = createYardMesh();
+                this.mesh.position.copy(position);
+                this.mesh.position.y = 0; // Ensure grounded
+
+                // Animate building appearing (pop up)
+                this.mesh.scale.set(0.1, 0.1, 0.1);
+                this.targetScale = 1;
+
+                this.selectionRing = createSelectionRing();
+                this.selectionRing.scale.set(1.5, 1.5, 1);
+                this.mesh.add(this.selectionRing);
+
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+            }
+
+            update(dt) {
+                if (this.mesh.scale.x < 1) {
+                    this.mesh.scale.addScalar(dt * 2);
+                    if(this.mesh.scale.x > 1) this.mesh.scale.set(1,1,1);
+                }
+            }
+
+            setSelected(bool) {
+                this.selectionRing.visible = bool;
+                if(bool) document.getElementById('panel-base').classList.remove('hidden');
+            }
+        }
+
+        class Building {
+            constructor(type, position) {
+                this.type = type;
+                this.mesh = createBuildingMesh(type);
+                this.mesh.position.copy(position);
+                
+                this.selectionRing = createSelectionRing();
+                this.mesh.add(this.selectionRing);
+
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+
+                // Build animation
+                this.mesh.scale.y = 0.01;
+                this.buildProgress = 0;
+            }
+
+            update(dt) {
+                if (this.buildProgress < 1) {
+                    this.buildProgress += dt;
+                    this.mesh.scale.y = this.buildProgress;
+                    if(this.buildProgress > 1) this.mesh.scale.y = 1;
+                }
+            }
+
+            setSelected(bool) {
+                this.selectionRing.visible = bool;
+            }
+        }
+
+        function spawnMCV(pos) {
+            const mcv = new MCV(pos);
+            units.push(mcv);
+            return mcv;
+        }
+
+        function spawnConstructionYard(pos) {
+            const yard = new ConstructionYard(pos);
+            buildings.push(yard);
+            // Auto select
+            selectEntity(yard);
+        }
+
+        // --- INTERACTION ---
+
+        function onPointerDown(event) {
+            if (event.target.closest('button')) return; // Ignore UI clicks
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // 1. Check Placement Mode
+            if (placementMode && event.button === 0) { // Left Click Place
+                placeBuilding();
+                return;
+            }
+            if (placementMode && event.button === 2) { // Right Click Cancel
+                cancelPlacement();
+                return;
+            }
+
+            // 2. Check Unit Selection / Movement
+            const intersectableObjects = [...units.map(u => u.mesh), ...buildings.map(b => b.mesh), groundPlane];
+            const intersects = raycaster.intersectObjects(intersectableObjects, true);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                const object = hit.object;
+
+                // Find root entity object
+                let entityRoot = object;
+                while(entityRoot.parent && !entityRoot.userData.entity) {
+                    entityRoot = entityRoot.parent;
+                }
+                const entity = entityRoot.userData.entity;
+
+                if (event.button === 0) { // Left Click
+                    if (entity) {
+                        selectEntity(entity);
+                    } else if (object === groundPlane) {
+                        deselect();
+                    }
+                } else if (event.button === 2) { // Right Click
+                    if (selectedEntity && selectedEntity.type === 'MCV' && object === groundPlane) {
+                        // Move command
+                        selectedEntity.target = hit.point.clone();
+                        createClickEffect(hit.point);
+                    }
+                }
+            }
+        }
+
+        function onPointerMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (placementMode) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(groundPlane);
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    // Snap to grid
+                    const snapX = Math.round(point.x / 5) * 5;
+                    const snapZ = Math.round(point.z / 5) * 5;
+                    placementMode.mesh.position.set(snapX, 0, snapZ);
+                    
+                    // Simple collision check logic could go here
+                }
+            }
+        }
+
+        function selectEntity(entity) {
+            deselect();
+            selectedEntity = entity;
+            selectedEntity.setSelected(true);
+        }
+
+        function deselect() {
+            if (selectedEntity) {
+                selectedEntity.setSelected(false);
+                selectedEntity = null;
+            }
+            document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+        }
+
+        function deployMCV() {
+            if (selectedEntity && selectedEntity.type === 'MCV') {
+                selectedEntity.deploy();
+            }
+        }
+
+        function startPlacement(type) {
+            if (placementMode) cancelPlacement();
+
+            const ghostGroup = createBuildingMesh(type);
+            // Make transparent
+            ghostGroup.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = child.material.clone();
+                    child.material.transparent = true;
+                    child.material.opacity = 0.5;
+                    child.material.emissive = 0x00ff00;
+                    child.material.emissiveIntensity = 0.2;
+                    child.castShadow = false;
+                }
+            });
+            
+            scene.add(ghostGroup);
+            placementMode = {
+                type: type,
+                mesh: ghostGroup
+            };
+
+            const tooltip = document.getElementById('cursor-tooltip');
+            tooltip.style.display = 'block';
+            tooltip.innerText = "Left Click to Place | Right Click to Cancel";
+            
+            // Follow cursor listener update
+            document.body.style.cursor = 'crosshair';
+        }
+
+        function placeBuilding() {
+            if (!placementMode) return;
+
+            const pos = placementMode.mesh.position.clone();
+            const type = placementMode.type;
+
+            // Remove ghost
+            scene.remove(placementMode.mesh);
+            placementMode = null;
+
+            // Create real building
+            const b = new Building(type, pos);
+            buildings.push(b);
+            
+            document.body.style.cursor = 'default';
+            document.getElementById('cursor-tooltip').style.display = 'none';
+        }
+
+        function cancelPlacement() {
+            if (placementMode) {
+                scene.remove(placementMode.mesh);
+                placementMode = null;
+            }
+            document.body.style.cursor = 'default';
+            document.getElementById('cursor-tooltip').style.display = 'none';
+        }
+
+        function createClickEffect(pos) {
+            const geometry = new THREE.RingGeometry(0.5, 1, 32);
+            const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI/2;
+            mesh.position.copy(pos);
+            mesh.position.y = 0.1;
+            scene.add(mesh);
+            
+            effects.push({ mesh: mesh, age: 0 });
+        }
+
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = clock.getDelta();
+
+            // Update Units
+            units.forEach(u => u.update(dt));
+            buildings.forEach(b => b.update(dt));
+
+            // Update Effects
+            for (let i = effects.length - 1; i >= 0; i--) {
+                const fx = effects[i];
+                fx.age += dt;
+                fx.mesh.scale.addScalar(dt * 2);
+                fx.mesh.material.opacity -= dt * 2;
+                if (fx.age > 0.5) {
+                    scene.remove(fx.mesh);
+                    effects.splice(i, 1);
+                }
+            }
+            
+            // Update Tooltip position
+            if (placementMode) {
+                const tooltip = document.getElementById('cursor-tooltip');
+                // Convert 3D pos to screen
+                // Note: This is rough, mapping actual mouse CSS pos is better usually
+                // but we used raycasting. Let's just follow CSS mouse event if we tracked it globally
+                // For simplicity, just update text
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Mouse Tracker for tooltip CSS
+        document.addEventListener('mousemove', (e) => {
+            const tooltip = document.getElementById('cursor-tooltip');
+            if (tooltip.style.display === 'block') {
+                tooltip.style.left = e.clientX + 15 + 'px';
+                tooltip.style.top = e.clientY + 15 + 'px';
+            }
+        });
+
+        // Run Init
+        init();
+
+    </script>
+</body>
+</html>
