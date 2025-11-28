@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumber Commander - WebGL RTS</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas */
+        }
+        #hud-top {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            padding: 10px 15px;
+            background: rgba(0, 0, 0, 0.75);
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 100;
+        }
+        #hud-bottom {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 160px;
+            background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0));
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+        }
+        .panel {
+            background: rgba(20, 30, 40, 0.85);
+            border: 2px solid #4a90e2;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            box-shadow: 0 0 20px rgba(74, 144, 226, 0.3);
+            backdrop-filter: blur(5px);
+            transition: opacity 0.3s;
+        }
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        button {
+            background: linear-gradient(to bottom, #3a4a5a, #2a3a4a);
+            color: white;
+            border: 1px solid #5a6a7a;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100px;
+            height: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.1s;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background: #4a90e2;
+            border-color: #7ab0f2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        button:active {
+            transform: translateY(1px);
+        }
+        button:disabled {
+            background: #333;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        .warning-btn {
+            border-color: #e2a04a;
+            color: #ffddaa;
+        }
+        .warning-btn:hover {
+            background: #e28a4a;
+            border-color: #ffc288;
+        }
+        #info-box {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #4a90e2;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+        #cursor-tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        #warehouse-progress {
+            background: rgba(20, 30, 40, 0.85);
+            border: 2px solid #a24ae2;
+            border-radius: 8px;
+            padding: 15px;
+            color: white;
+            width: 250px;
+            pointer-events: auto;
+            margin-left: 20px;
+        }
+        #warehouse-progress-bar {
+            height: 20px;
+            background: #444;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+        #warehouse-progress-fill {
+            height: 100%;
+            width: 0%;
+            background-color: #a24ae2;
+            transition: width 0.1s linear;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="ui-layer">
+        
+        <div id="hud-top">
+            💰 Cash: <span id="cash-count">0</span> | 
+            🪵 Wood: <span id="wood-count">0</span>
+        </div>
+
+        <div id="info-box">
+            <h3>Lumber Control</h3>
+            <p>1. Select Truck</p>
+            <p>2. Right Click a **Tree** to Gather Wood</p>
+            <p>3. Right Click the **Barn** to Drop-off Wood</p>
+        </div>
+
+        <div id="hud-bottom">
+            <div id="panel-truck" class="panel hidden">
+                <div style="color:white; margin-right:10px; width: 100px;">
+                    <h3>Lumber Truck</h3>
+                    <small>Wood: <span id="truck-wood-count">0</span></small>
+                </div>
+                <button id="btn-goto-tree">
+                    <span class="icon">🌲</span>
+                    Harvest
+                </button>
+                <button id="btn-goto-barn">
+                    <span class="icon">🏠</span>
+                    Deliver
+                </button>
+            </div>
+
+            <div id="warehouse-progress" class="hidden">
+                <h3>Warehouse 🏭</h3>
+                <small>Converting $\text{10 Wood} \rightarrow \text{10 Cash}$</small>
+                <div id="warehouse-progress-bar">
+                    <div id="warehouse-progress-fill"></div>
+                </div>
+                <small id="warehouse-status">Waiting for Wood...</small>
+            </div>
+
+        </div>
+        <div id="cursor-tooltip"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js'; // For terrain
+
+        // --- GAME CONFIGURATION ---
+        const COLORS = {
+            ground: 0x4a7a4a, // Green/Brown for forest terrain
+            selection: 0x00ff00,
+            truckBody: 0x8b4513, // Brown/Wood color
+            truckParts: 0x333333,
+            barn: 0xa04040, // Red Barn
+            warehouse: 0x8888ff, // Blue Warehouse
+            treeTrunk: 0x654321,
+            treeLeaves: 0x228b22,
+            ghostValid: 0x00ff00,
+            ghostInvalid: 0xff0000
+        };
+
+        const GRID_SIZE = 100;
+
+        // --- GLOBAL VARIABLES ---
+        let scene, camera, renderer, controls, raycaster;
+        let mouse = new THREE.Vector2();
+        let groundMesh; // Now a terrain mesh
+        
+        // Game State
+        let units = [];
+        let buildings = [];
+        let resources = []; // For trees
+        let effects = [];
+        let selectedEntity = null;
+        
+        let clock = new THREE.Clock();
+
+        // Resources
+        const GameStats = {
+            wood: 0,
+            cash: 0
+        };
+
+        // Building references for trucks
+        let TheBarn = null;
+        let TheWarehouse = null;
+
+        // --- INITIALIZATION ---
+        function init() {
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x7ec0ee); // Sky blue
+            scene.fog = new THREE.FogExp2(0x7ec0ee, 0.005);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.set(-50, 60, 50);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.1;
+            controls.minDistance = 10;
+            controls.maxDistance = 150;
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            dirLight.position.set(50, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 1;
+            dirLight.shadow.camera.far = 200;
+            dirLight.shadow.camera.left = -GRID_SIZE / 2;
+            dirLight.shadow.camera.right = GRID_SIZE / 2;
+            dirLight.shadow.camera.top = GRID_SIZE / 2;
+            dirLight.shadow.camera.bottom = -GRID_SIZE / 2;
+            scene.add(dirLight);
+
+            // Terrain and Trees
+            generateTerrainAndTrees();
+
+            // Raycaster
+            raycaster = new THREE.Raycaster();
+
+            // Initial Entities
+            TheBarn = spawnBarn(new THREE.Vector3(-30, 0, 0));
+            TheWarehouse = spawnWarehouse(new THREE.Vector3(30, 0, 0));
+            
+            spawnLumberTruck(new THREE.Vector3(-10, 0, -10));
+            spawnLumberTruck(new THREE.Vector3(10, 0, -10));
+
+            // Events
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('pointerdown', onPointerDown);
+            window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            // UI Listeners (for selected truck)
+            document.getElementById('btn-goto-tree').addEventListener('click', () => {
+                if(selectedEntity && selectedEntity.type === 'LumberTruck') selectedEntity.startHarvestCycle();
+            });
+            document.getElementById('btn-goto-barn').addEventListener('click', () => {
+                if(selectedEntity && selectedEntity.type === 'LumberTruck') selectedEntity.startDeliveryCycle();
+            });
+
+
+            // Start Loop
+            animate();
+        }
+
+        // --- PROCEDURAL GENERATION ---
+
+        // NEW: Terrain Generation
+        function generateTerrainAndTrees() {
+            const width = GRID_SIZE;
+            const height = GRID_SIZE;
+            const resolution = 64;
+            const planeGeometry = new THREE.PlaneGeometry(width, height, resolution, resolution);
+            planeGeometry.rotateX(-Math.PI / 2);
+
+            const data = generateHeight(resolution + 1, resolution + 1);
+
+            for (let i = 0; i < planeGeometry.attributes.position.count; i++) {
+                const x = Math.floor(i / (resolution + 1));
+                const z = i % (resolution + 1);
+                const vertex = planeGeometry.attributes.position.getY(i);
+                
+                // Scale data to a height range (e.g., 0 to 15)
+                const y = data[i] * 15; 
+                planeGeometry.attributes.position.setY(i, y);
+
+                // Set color based on height (3 levels of height/color)
+                let color;
+                if (y < 4) { // Water/Lowland
+                    color = new THREE.Color(0x4a7a8a);
+                } else if (y < 8) { // Grassland
+                    color = new THREE.Color(COLORS.ground);
+                } else { // Highland
+                    color = new THREE.Color(0x606060);
+                }
+                planeGeometry.attributes.color.setX(i, color.r);
+                planeGeometry.attributes.color.setY(i, color.g);
+                planeGeometry.attributes.color.setZ(i, color.b);
+
+                // Place trees on middle-ground (y >= 4 and y < 10)
+                if (y >= 4 && y < 10 && Math.random() < 0.05) {
+                    const pos = new THREE.Vector3(
+                        (x / resolution) * width - width / 2, 
+                        y + 0.1, 
+                        (z / resolution) * height - height / 2
+                    );
+                    spawnTree(pos);
+                }
+            }
+
+            planeGeometry.attributes.position.needsUpdate = true;
+            planeGeometry.computeVertexNormals();
+
+            const planeMaterial = new THREE.MeshStandardMaterial({ 
+                vertexColors: true,
+                roughness: 0.8,
+                metalness: 0.1
+            });
+            groundMesh = new THREE.Mesh(planeGeometry, planeMaterial);
+            groundMesh.receiveShadow = true;
+            groundMesh.name = "Terrain";
+            scene.add(groundMesh);
+        }
+
+        // Perlin noise generation
+        function generateHeight(width, height) {
+            const size = width * height;
+            const data = new Uint8Array(size);
+            const perlin = new ImprovedNoise();
+            const z = Math.random() * 100;
+
+            let quality = 1;
+            const maxQuality = 8;
+            let total = 0;
+
+            for (let j = 0; j < 4; j++) {
+                quality *= maxQuality;
+                for (let i = 0; i < size; i++) {
+                    const x = i % width;
+                    const y = Math.floor(i / width);
+                    data[i] += Math.abs(perlin.noise(x / quality, y / quality, z) * quality * 0.5);
+                }
+                total += quality * 0.5;
+            }
+
+            // Normalize and scale from 0 to 1
+            for (let i = 0; i < size; i++) {
+                data[i] /= total;
+            }
+
+            return data;
+        }
+
+        // --- ASSET GENERATION ---
+
+        function createSelectionRing() {
+            const geometry = new THREE.RingGeometry(2.5, 3, 32);
+            const material = new THREE.MeshBasicMaterial({ 
+                color: COLORS.selection, 
+                transparent: true, 
+                opacity: 0.6,
+                side: THREE.DoubleSide 
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.y = 0.1;
+            mesh.visible = false;
+            return mesh;
+        }
+
+        // NEW: Truck Mesh (re-using MCV logic but renaming for clarity)
+        function createTruckMesh() {
+            const group = new THREE.Group();
+
+            // Chassis
+            const bodyGeo = new THREE.BoxGeometry(2, 1.5, 4);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: COLORS.truckBody });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 1.25;
+            body.castShadow = true;
+            group.add(body);
+
+            // Cab
+            const cabGeo = new THREE.BoxGeometry(2, 1.2, 1.5);
+            const cabMat = new THREE.MeshStandardMaterial({ color: 0xcc9966 });
+            const cab = new THREE.Mesh(cabGeo, cabMat);
+            cab.position.set(0, 1.6, 1.5);
+            cab.castShadow = true;
+            group.add(cab);
+
+            // Bed (where the wood goes)
+            const bedGeo = new THREE.BoxGeometry(1.8, 0.5, 2.5);
+            const bedMat = new THREE.MeshStandardMaterial({ color: 0x503010 });
+            const bed = new THREE.Mesh(bedGeo, bedMat);
+            bed.position.set(0, 1.7, -1.0);
+            bed.castShadow = true;
+            group.add(bed);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const positions = [
+                [-1.1, 0.5, 1.5], [1.1, 0.5, 1.5],
+                [-1.1, 0.5, -1.2], [1.1, 0.5, -1.2]
+            ];
+            
+            positions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                group.add(wheel);
+            });
+
+            return group;
+        }
+
+        // NEW: Barn Mesh
+        function createBarnMesh() {
+            const group = new THREE.Group();
+
+            // Main Body (Red)
+            const bodyGeo = new THREE.BoxGeometry(10, 6, 8);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: COLORS.barn });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 3;
+            body.castShadow = true;
+            group.add(body);
+
+            // Roof (Triangular part)
+            const roofShape = new THREE.Shape();
+            roofShape.moveTo( -5.5, 0 );
+            roofShape.lineTo( 0, 3 );
+            roofShape.lineTo( 5.5, 0 );
+            roofShape.lineTo( -5.5, 0 );
+
+            const extrudeSettings = {
+                steps: 1,
+                depth: 8.2,
+                bevelEnabled: false
+            };
+
+            const roofGeo = new THREE.ExtrudeGeometry( roofShape, extrudeSettings );
+            const roofMat = new THREE.MeshStandardMaterial({ color: 0x803030 });
+            const roof = new THREE.Mesh( roofGeo, roofMat );
+            roof.position.set(-5, 6, -4.1);
+            roof.rotation.y = Math.PI / 2;
+            roof.castShadow = true;
+            group.add(roof);
+
+            // Entrance Door
+            const doorGeo = new THREE.BoxGeometry(2, 4, 0.1);
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x503010 });
+            const door = new THREE.Mesh(doorGeo, doorMat);
+            door.position.set(0, 2, 4.05);
+            group.add(door);
+
+            return group;
+        }
+
+        // NEW: Warehouse Mesh
+        function createWarehouseMesh() {
+            const group = new THREE.Group();
+
+            // Large boxy body
+            const bodyGeo = new THREE.BoxGeometry(15, 7, 10);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: COLORS.warehouse });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 3.5;
+            body.castShadow = true;
+            group.add(body);
+
+            // Loading Dock
+            const dockGeo = new THREE.BoxGeometry(15, 1, 3);
+            const dockMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+            const dock = new THREE.Mesh(dockGeo, dockMat);
+            dock.position.set(0, 0.5, 6.5);
+            dock.castShadow = true;
+            group.add(dock);
+
+            // Window/Logo
+            const logoGeo = new THREE.BoxGeometry(3, 3, 0.1);
+            const logoMat = new THREE.MeshStandardMaterial({ color: 0xffeeaa, emissive: 0xffeeaa, emissiveIntensity: 0.5 });
+            const logo = new THREE.Mesh(logoGeo, logoMat);
+            logo.position.set(0, 5, 5.05);
+            group.add(logo);
+
+            return group;
+        }
+
+        // NEW: Tree Mesh
+        function createTreeMesh() {
+            const group = new THREE.Group();
+
+            // Trunk (Cylinder)
+            const trunkGeo = new THREE.CylinderGeometry(0.5, 0.6, 5, 8);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: COLORS.treeTrunk });
+            const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+            trunk.position.y = 2.5;
+            trunk.castShadow = true;
+            group.add(trunk);
+
+            // Leaves (Cone/Sphere)
+            const leavesGeo = new THREE.ConeGeometry(2.5, 5, 12);
+            const leavesMat = new THREE.MeshStandardMaterial({ color: COLORS.treeLeaves });
+            const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+            leaves.position.y = 6;
+            leaves.castShadow = true;
+            group.add(leaves);
+
+            return group;
+        }
+
+        // --- ENTITY CLASSES ---
+
+        class Selectable {
+            constructor(type) {
+                this.type = type;
+                this.mesh = new THREE.Group(); // Base mesh
+                this.selectionRing = createSelectionRing();
+                this.mesh.add(this.selectionRing);
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+            }
+            setSelected(bool) {
+                this.selectionRing.visible = bool;
+            }
+            // Utility to snap to terrain height
+            getTerrainHeight(position) {
+                // A simplified way: create a raycaster and check groundMesh
+                const origin = new THREE.Vector3(position.x, 50, position.z);
+                const dir = new THREE.Vector3(0, -1, 0);
+                const tempRaycaster = new THREE.Raycaster(origin, dir);
+                const intersects = tempRaycaster.intersectObject(groundMesh);
+                if (intersects.length > 0) {
+                    return intersects[0].point.y;
+                }
+                return 0; // Default to 0 if no intersection
+            }
+        }
+
+        class Truck extends Selectable {
+            constructor(position) {
+                super('Truck');
+                this.type = 'LumberTruck';
+                scene.remove(this.mesh); // Remove placeholder group
+                this.mesh = createTruckMesh();
+                this.mesh.add(this.selectionRing);
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+
+                this.mesh.position.copy(position);
+                this.mesh.position.y = this.getTerrainHeight(position) + 1.0;
+                
+                // Truck Specifics
+                this.target = null;
+                this.speed = 8;
+                this.woodCarried = 0;
+                this.capacity = 5;
+                this.state = 'idle'; // 'idle', 'moving', 'gathering', 'delivering'
+
+                this.updateWoodUI();
+            }
+
+            update(dt) {
+                if (this.target) {
+                    const direction = new THREE.Vector3().subVectors(this.target, this.mesh.position);
+                    direction.y = 0;
+                    const dist = direction.length();
+
+                    if (dist < 3.0) { // Close enough to stop and act
+                        this.target = null;
+                        this.isMoving = false;
+                        this.act();
+                    } else {
+                        this.isMoving = true;
+                        direction.normalize();
+                        
+                        // Rotate towards target
+                        const targetRotation = Math.atan2(direction.x, direction.z);
+                        this.mesh.rotation.y = targetRotation;
+
+                        this.mesh.position.add(direction.multiplyScalar(this.speed * dt));
+                        this.mesh.position.y = this.getTerrainHeight(this.mesh.position) + 1.0;
+                    }
+                }
+                
+                if (this.state === 'gathering' && this.gatherTimer > 0) {
+                    this.gatherTimer -= dt;
+                    if (this.gatherTimer <= 0) {
+                        this.finishGathering();
+                    }
+                }
+            }
+
+            act() {
+                if (this.state === 'moving' || this.state === 'idle') {
+                    // This truck should only stop if it has an explicit target from a right-click move command
+                    this.state = 'idle';
+                }
+            }
+
+            // Command functions
+            startHarvestCycle() {
+                if (this.woodCarried >= this.capacity) {
+                    this.startDeliveryCycle();
+                    return;
+                }
+                const nearestTree = resources.find(r => r.type === 'Tree' && !r.isFelled);
+                if (nearestTree) {
+                    this.state = 'movingToTree';
+                    this.targetTree = nearestTree;
+                    this.target = nearestTree.mesh.position.clone();
+                } else {
+                    // No trees left
+                }
+            }
+
+            startDeliveryCycle() {
+                if (this.woodCarried === 0) {
+                    this.startHarvestCycle(); // Go back to harvesting
+                    return;
+                }
+                if (TheBarn) {
+                    this.state = 'movingToBarn';
+                    this.target = TheBarn.mesh.position.clone();
+                }
+            }
+
+            // NEW: Override act to handle custom states
+            act() {
+                if (this.state === 'movingToTree') {
+                    this.state = 'gathering';
+                    this.gatherTimer = 3.0; // 3 seconds to chop
+                    
+                    if (this.targetTree) {
+                        this.targetTree.startFelling();
+                    }
+                    
+                } else if (this.state === 'movingToBarn') {
+                    this.state = 'delivering';
+                    this.finishDelivery();
+                } else {
+                    this.state = 'idle';
+                }
+            }
+            
+            finishGathering() {
+                if (this.woodCarried < this.capacity) {
+                    this.woodCarried++;
+                    GameStats.wood++; // Resource gained locally first
+                    this.updateResourceUI();
+                }
+                
+                if(this.targetTree) this.targetTree.finishFelling();
+
+                this.updateWoodUI();
+                this.state = 'idle';
+                
+                // Immediately start moving to the barn if full
+                if (this.woodCarried >= this.capacity) {
+                    this.startDeliveryCycle();
+                } else {
+                    // Go back to another tree
+                    this.startHarvestCycle();
+                }
+            }
+
+            finishDelivery() {
+                if (this.woodCarried > 0) {
+                    // Barn automatically collects the wood
+                    GameStats.wood += this.woodCarried;
+                    this.woodCarried = 0;
+                    this.updateResourceUI();
+                }
+                this.updateWoodUI();
+                this.state = 'idle';
+
+                // Immediately start moving back to a tree
+                this.startHarvestCycle();
+            }
+
+            updateWoodUI() {
+                document.getElementById('truck-wood-count').innerText = `${this.woodCarried}/${this.capacity}`;
+            }
+
+            setSelected(bool) {
+                super.setSelected(bool);
+                if(bool) {
+                    document.getElementById('panel-truck').classList.remove('hidden');
+                    this.updateWoodUI();
+                } else {
+                    document.getElementById('panel-truck').classList.add('hidden');
+                }
+            }
+        }
+
+        class Tree extends Selectable {
+            constructor(position) {
+                super('Tree');
+                scene.remove(this.mesh);
+                this.mesh = createTreeMesh();
+                this.mesh.add(this.selectionRing);
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+
+                this.mesh.position.copy(position);
+                this.mesh.position.y = this.getTerrainHeight(position) + 0.1;
+                this.isFelled = false;
+            }
+
+            update(dt) {
+                // If it's the target, pulse the selection ring
+                if(selectedEntity && selectedEntity.targetTree === this) {
+                    this.selectionRing.visible = true;
+                    this.selectionRing.material.opacity = 0.5 + Math.sin(Date.now() * 0.01) * 0.2;
+                }
+            }
+
+            startFelling() {
+                // Simple effect for chopping
+                createClickEffect(this.mesh.position, 0x996633);
+            }
+            
+            finishFelling() {
+                this.isFelled = true;
+                // Simple animation to fall over
+                this.mesh.rotation.z = -Math.PI / 2;
+                this.mesh.position.y += 2.5; // Lift a bit so it sits on the ground
+                this.mesh.traverse(child => {
+                    if (child.isMesh) child.castShadow = false;
+                });
+                
+                // Mark for garbage collection / removal
+                resources = resources.filter(r => r !== this);
+            }
+            
+            setSelected(bool) {
+                // Trees are not generally selectable, but we'll show the ring for clarity
+                this.selectionRing.visible = bool;
+            }
+        }
+
+        class Barn extends Selectable {
+            constructor(position) {
+                super('Barn');
+                scene.remove(this.mesh);
+                this.mesh = createBarnMesh();
+                this.mesh.add(this.selectionRing);
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+
+                this.mesh.position.copy(position);
+                this.mesh.position.y = this.getTerrainHeight(position) + 0.1;
+            }
+            update(dt) {
+                // Barn doesn't need to update
+            }
+            setSelected(bool) {
+                this.selectionRing.visible = bool;
+                // No specific UI panel for barn
+            }
+        }
+
+        class Warehouse extends Selectable {
+            constructor(position) {
+                super('Warehouse');
+                scene.remove(this.mesh);
+                this.mesh = createWarehouseMesh();
+                this.mesh.add(this.selectionRing);
+                scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+
+                this.mesh.position.copy(position);
+                this.mesh.position.y = this.getTerrainHeight(position) + 0.1;
+
+                this.conversionTime = 15; // seconds
+                this.conversionProgress = 0;
+                this.conversionRate = 10; // wood/cash
+            }
+
+            update(dt) {
+                this.updateConversion(dt);
+            }
+
+            updateConversion(dt) {
+                const progressBar = document.getElementById('warehouse-progress-fill');
+                const statusText = document.getElementById('warehouse-status');
+
+                if (GameStats.wood >= this.conversionRate) {
+                    statusText.innerText = "Converting Wood to Cash...";
+                    this.conversionProgress += dt;
+                    
+                    if (this.conversionProgress >= this.conversionTime) {
+                        GameStats.wood -= this.conversionRate;
+                        GameStats.cash += this.conversionRate;
+                        this.conversionProgress = 0; // Reset
+                        this.updateResourceUI();
+                    }
+
+                    const progressPercent = (this.conversionProgress / this.conversionTime) * 100;
+                    progressBar.style.width = `${progressPercent}%`;
+
+                } else {
+                    statusText.innerText = `Waiting for ${this.conversionRate} Wood (Need ${this.conversionRate - GameStats.wood})...`;
+                    this.conversionProgress = 0;
+                    progressBar.style.width = '0%';
+                }
+            }
+
+            setSelected(bool) {
+                this.selectionRing.visible = bool;
+                if(bool) document.getElementById('warehouse-progress').classList.remove('hidden');
+                else document.getElementById('warehouse-progress').classList.add('hidden');
+            }
+        }
+
+
+        function spawnLumberTruck(pos) {
+            const truck = new Truck(pos);
+            units.push(truck);
+            return truck;
+        }
+
+        function spawnBarn(pos) {
+            const barn = new Barn(pos);
+            buildings.push(barn);
+            return barn;
+        }
+
+        function spawnWarehouse(pos) {
+            const warehouse = new Warehouse(pos);
+            buildings.push(warehouse);
+            return warehouse;
+        }
+        
+        function spawnTree(pos) {
+            const tree = new Tree(pos);
+            resources.push(tree);
+            return tree;
+        }
+
+        // --- UI & INTERACTION ---
+        function updateResourceUI() {
+            document.getElementById('wood-count').innerText = GameStats.wood;
+            document.getElementById('cash-count').innerText = GameStats.cash;
+        }
+
+        function onPointerDown(event) {
+            if (event.target.closest('button')) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersectableObjects = [
+                ...units.map(u => u.mesh), 
+                ...buildings.map(b => b.mesh),
+                ...resources.map(r => r.mesh),
+                groundMesh
+            ];
+            const intersects = raycaster.intersectObjects(intersectableObjects, true);
+
+            if (intersects.length > 0) {
+                const hit = intersects[0];
+                let entityRoot = hit.object;
+                while(entityRoot.parent && !entityRoot.userData.entity) {
+                    entityRoot = entityRoot.parent;
+                }
+                const entity = entityRoot.userData.entity;
+                const isGround = hit.object === groundMesh;
+
+                if (event.button === 0) { // Left Click
+                    if (entity) {
+                        selectEntity(entity);
+                    } else if (isGround) {
+                        deselect();
+                    }
+                } else if (event.button === 2) { // Right Click
+                    if (selectedEntity && selectedEntity.type === 'LumberTruck') {
+                        if (entity && entity.type === 'Tree') {
+                            selectedEntity.targetTree = entity;
+                            selectedEntity.state = 'movingToTree';
+                            selectedEntity.target = hit.point.clone();
+                            createClickEffect(hit.point, 0x00ff00);
+                        } else if (entity && entity.type === 'Barn') {
+                            selectedEntity.state = 'movingToBarn';
+                            selectedEntity.target = hit.point.clone();
+                            createClickEffect(hit.point, 0xff0000);
+                        } else if (entity && entity.type === 'Warehouse') {
+                            // Right click warehouse - maybe a special command later? For now, move to point.
+                            selectedEntity.state = 'moving';
+                            selectedEntity.target = hit.point.clone();
+                            createClickEffect(hit.point);
+                        } else if (isGround) {
+                            // General move command
+                            selectedEntity.state = 'moving';
+                            selectedEntity.target = hit.point.clone();
+                            createClickEffect(hit.point);
+                        }
+                    }
+                }
+            }
+        }
+
+        function selectEntity(entity) {
+            deselect();
+            selectedEntity = entity;
+            selectedEntity.setSelected(true);
+        }
+
+        function deselect() {
+            if (selectedEntity) {
+                selectedEntity.setSelected(false);
+                selectedEntity = null;
+            }
+            document.querySelectorAll('.panel, #warehouse-progress').forEach(p => p.classList.add('hidden'));
+        }
+
+        function createClickEffect(pos, color = 0xffffff) {
+            const geometry = new THREE.RingGeometry(0.5, 1, 32);
+            const material = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.rotation.x = -Math.PI/2;
+            mesh.position.copy(pos);
+            mesh.position.y = pos.y + 0.1;
+            scene.add(mesh);
+            
+            effects.push({ mesh: mesh, age: 0 });
+        }
+
+
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = clock.getDelta();
+
+            // Update Entities
+            units.forEach(u => u.update(dt));
+            buildings.forEach(b => b.update(dt));
+            resources.forEach(r => r.update(dt));
+
+            // Update Effects
+            for (let i = effects.length - 1; i >= 0; i--) {
+                const fx = effects[i];
+                fx.age += dt;
+                fx.mesh.scale.addScalar(dt * 2);
+                fx.mesh.material.opacity -= dt * 2;
+                if (fx.age > 0.5) {
+                    scene.remove(fx.mesh);
+                    effects.splice(i, 1);
+                }
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Run Init
+        init();
+
+    </script>
+</body>
+</html>
