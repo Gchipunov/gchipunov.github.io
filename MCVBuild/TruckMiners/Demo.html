@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS: Miner Command</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            pointer-events: none; /* Let clicks pass through to 3D scene */
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #stats-bar {
+            background: rgba(0, 0, 0, 0.7);
+            color: #4ff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            display: inline-block;
+            font-size: 20px;
+            font-weight: bold;
+            pointer-events: auto;
+            border: 1px solid #4ff;
+        }
+
+        #build-menu {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            pointer-events: auto;
+            display: flex;
+            gap: 10px;
+            border: 1px solid #555;
+        }
+
+        .btn {
+            background: #333;
+            color: white;
+            border: 1px solid #666;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: 0.2s;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .btn:hover { background: #555; border-color: #fff; }
+        .btn:active { background: #777; }
+        .btn.active { background: #00aa00; border-color: #0f0; }
+
+        #messages {
+            position: absolute;
+            top: 20%;
+            width: 100%;
+            text-align: center;
+            color: yellow;
+            font-size: 24px;
+            text-shadow: 2px 2px 0 #000;
+            opacity: 0;
+            transition: opacity 1s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="stats-bar">Credits: <span id="credits">100</span></div>
+        <div id="messages"></div>
+        
+        <div id="build-menu">
+            <button class="btn" onclick="setBuildMode('barracks', 150)">Build Barracks (150cr)</button>
+            <button class="btn" onclick="setBuildMode('refinery', 300)">Build Refinery (300cr)</button>
+            <button class="btn" onclick="cancelBuild()">Cancel</button>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Game Configuration ---
+        const CONFIG = {
+            TRUCK_SPEED: 0.1,
+            TRUCK_COST: 50,
+            MINING_RATE: 20, // Credits per trip
+            MINE_TIME: 60, // Frames to mine
+            COLORS: {
+                GROUND: 0x2b2b2b,
+                BASE: 0x0044ff,
+                BARRACKS: 0xff2222,
+                REFINERY: 0x00ffff,
+                TRUCK: 0xffff00,
+                ORE: 0xffaa00,
+                GHOST_VALID: 0x00ff00,
+                GHOST_INVALID: 0xff0000
+            }
+        };
+
+        // --- Global State ---
+        let state = {
+            credits: 100,
+            buildMode: null, // 'barracks' or 'refinery'
+            buildCost: 0,
+            units: [],
+            buildings: [],
+            ores: []
+        };
+
+        // --- Three.js Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+
+        // Orthographic Camera for RTS look
+        const aspect = window.innerWidth / window.innerHeight;
+        const d = 20;
+        const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+        camera.position.set(20, 20, 20);
+        camera.lookAt(scene.position);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Ground
+        const planeGeometry = new THREE.PlaneGeometry(60, 60);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.GROUND });
+        const ground = new THREE.Mesh(planeGeometry, planeMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        ground.name = "ground";
+        scene.add(ground);
+
+        // Raycaster (Mouse interaction)
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Ghost Building (Preview)
+        const ghostGeo = new THREE.BoxGeometry(2, 2, 2);
+        const ghostMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+        const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
+        ghostMesh.visible = false;
+        scene.add(ghostMesh);
+
+        // --- Game Entities ---
+
+        class Building {
+            constructor(type, x, z) {
+                this.type = type;
+                this.mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(2, 2, 2),
+                    new THREE.MeshStandardMaterial({ color: this.getColor(type) })
+                );
+                this.mesh.position.set(x, 1, z);
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = true;
+                
+                // Add label or identifying feature
+                if(type === 'base') {
+                    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3, 0.5), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                    flag.position.y = 1;
+                    this.mesh.add(flag);
+                }
+
+                this.mesh.userData = { type: type, entity: this };
+                scene.add(this.mesh);
+                state.buildings.push(this);
+            }
+
+            getColor(type) {
+                if (type === 'base') return CONFIG.COLORS.BASE;
+                if (type === 'barracks') return CONFIG.COLORS.BARRACKS;
+                if (type === 'refinery') return CONFIG.COLORS.REFINERY;
+                return 0xffffff;
+            }
+        }
+
+        class Ore {
+            constructor(x, z) {
+                this.amount = 500;
+                this.mesh = new THREE.Mesh(
+                    new THREE.DodecahedronGeometry(0.8),
+                    new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.ORE, roughness: 0.2, metalness: 0.8 })
+                );
+                this.mesh.position.set(x, 0.5, z);
+                this.mesh.castShadow = true;
+                scene.add(this.mesh);
+                state.ores.push(this);
+            }
+        }
+
+        class Truck {
+            constructor(x, z) {
+                this.mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.8, 0.8, 1.2),
+                    new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.TRUCK })
+                );
+                this.mesh.position.set(x, 0.4, z);
+                this.mesh.castShadow = true;
+                scene.add(this.mesh);
+                
+                this.state = 'IDLE'; // IDLE, MOVE_TO_ORE, MINING, MOVE_TO_BASE
+                this.target = null;
+                this.cargo = 0;
+                this.timer = 0;
+                
+                state.units.push(this);
+            }
+
+            update() {
+                if (this.state === 'IDLE') {
+                    // Find nearest ore
+                    this.target = this.findNearest(state.ores);
+                    if (this.target) this.state = 'MOVE_TO_ORE';
+                } 
+                else if (this.state === 'MOVE_TO_ORE') {
+                    if (!this.target || this.target.amount <= 0) {
+                        this.state = 'IDLE';
+                        return;
+                    }
+                    if (this.moveTowards(this.target.mesh.position)) {
+                        this.state = 'MINING';
+                        this.timer = CONFIG.MINE_TIME;
+                    }
+                } 
+                else if (this.state === 'MINING') {
+                    // Mining animation (shake)
+                    this.mesh.rotation.z = Math.sin(Date.now() * 0.02) * 0.1;
+                    this.timer--;
+                    if (this.timer <= 0) {
+                        this.cargo = CONFIG.MINING_RATE;
+                        this.mesh.rotation.z = 0;
+                        // Find nearest base or refinery
+                        const dropoffs = state.buildings.filter(b => b.type === 'base' || b.type === 'refinery');
+                        this.target = this.findNearest(dropoffs);
+                        this.state = 'MOVE_TO_BASE';
+                    }
+                } 
+                else if (this.state === 'MOVE_TO_BASE') {
+                    if (this.moveTowards(this.target.mesh.position)) {
+                        // Deposit
+                        addCredits(this.cargo);
+                        showMessage(`+${this.cargo} Credits`);
+                        this.cargo = 0;
+                        this.state = 'IDLE';
+                    }
+                }
+            }
+
+            moveTowards(targetPos) {
+                const speed = CONFIG.TRUCK_SPEED;
+                const dx = targetPos.x - this.mesh.position.x;
+                const dz = targetPos.z - this.mesh.position.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+
+                // Look at target
+                this.mesh.lookAt(targetPos.x, this.mesh.position.y, targetPos.z);
+
+                if (dist < 1.5) return true; // Arrived
+
+                this.mesh.position.x += (dx / dist) * speed;
+                this.mesh.position.z += (dz / dist) * speed;
+                return false;
+            }
+
+            findNearest(list) {
+                let nearest = null;
+                let minDst = Infinity;
+                list.forEach(obj => {
+                    const dist = this.mesh.position.distanceTo(obj.mesh.position);
+                    if (dist < minDst) {
+                        minDst = dist;
+                        nearest = obj;
+                    }
+                });
+                return nearest;
+            }
+        }
+
+        // --- Level Generation ---
+        function initLevel() {
+            // Main Base
+            new Building('base', 0, 0);
+
+            // Random Ores
+            for(let i=0; i<8; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 10 + Math.random() * 10;
+                new Ore(Math.cos(angle)*radius, Math.sin(angle)*radius);
+            }
+        }
+
+        // --- Logic & Events ---
+
+        function addCredits(amount) {
+            state.credits += amount;
+            document.getElementById('credits').innerText = state.credits;
+        }
+
+        function showMessage(text) {
+            const el = document.getElementById('messages');
+            el.innerText = text;
+            el.style.opacity = 1;
+            setTimeout(() => el.style.opacity = 0, 1500);
+        }
+
+        // Input Handling
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (state.buildMode) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObject(ground);
+                if (intersects.length > 0) {
+                    ghostMesh.visible = true;
+                    ghostMesh.position.copy(intersects[0].point);
+                    ghostMesh.position.y = 1;
+                    // Snap to grid roughly
+                    ghostMesh.position.x = Math.round(ghostMesh.position.x);
+                    ghostMesh.position.z = Math.round(ghostMesh.position.z);
+                    
+                    // Check affordance
+                    const canAfford = state.credits >= state.buildCost;
+                    ghostMesh.material.color.setHex(canAfford ? CONFIG.COLORS.GHOST_VALID : CONFIG.COLORS.GHOST_INVALID);
+                }
+            } else {
+                ghostMesh.visible = false;
+            }
+        });
+
+        window.addEventListener('mousedown', (event) => {
+            if(event.button !== 0) return; // Only left click
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Handle Build Placement
+            if (state.buildMode) {
+                const intersects = raycaster.intersectObject(ground);
+                if (intersects.length > 0 && state.credits >= state.buildCost) {
+                    const p = ghostMesh.position;
+                    new Building(state.buildMode, p.x, p.z);
+                    addCredits(-state.buildCost);
+                    showMessage(`${state.buildMode} Constructed`);
+                    
+                    // Reset mode if not holding shift (simple toggle off for now)
+                    state.buildMode = null;
+                    ghostMesh.visible = false;
+                } else if (state.credits < state.buildCost) {
+                    showMessage("Not enough credits!");
+                }
+                return;
+            }
+
+            // Handle Base Clicking (Spawn Truck)
+            const intersects = raycaster.intersectObjects(scene.children);
+            for (let i = 0; i < intersects.length; i++) {
+                const obj = intersects[i].object;
+                if (obj.userData.type === 'base') {
+                    if (state.credits >= CONFIG.TRUCK_COST) {
+                        addCredits(-CONFIG.TRUCK_COST);
+                        // Spawn truck near base
+                        const offsetX = (Math.random() - 0.5) * 4;
+                        const offsetZ = (Math.random() - 0.5) * 4;
+                        new Truck(obj.position.x + offsetX, obj.position.z + offsetZ);
+                        showMessage("Truck Constructed");
+                    } else {
+                        showMessage("Trucks cost " + CONFIG.TRUCK_COST);
+                    }
+                    break;
+                }
+            }
+        });
+
+        // UI Functions exposed to window
+        window.setBuildMode = (type, cost) => {
+            state.buildMode = type;
+            state.buildCost = cost;
+            ghostMesh.visible = true;
+        };
+
+        window.cancelBuild = () => {
+            state.buildMode = null;
+            ghostMesh.visible = false;
+        };
+
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Main Loop ---
+        initLevel();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Logic
+            state.units.forEach(u => u.update());
+
+            // Render
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
