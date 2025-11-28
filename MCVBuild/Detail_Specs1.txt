@@ -1,0 +1,12 @@
+
+Soldier flat when ran over
+
+Building Burning at 50% 75%
+
+Soldier blood by shot
+
+Soldier gib by tank cannon
+
+Soldier ashes from nuke
+
+Tank Body stays
