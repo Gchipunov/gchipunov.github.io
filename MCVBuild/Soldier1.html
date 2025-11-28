@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Concrete Commander - WebGL RTS</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background-color: #1a1a1a; user-select: none; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        
+        #hud-bottom {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 160px;
+            background: linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0));
+            display: flex; justify-content: center; align-items: center; pointer-events: auto;
+        }
+        
+        .panel {
+            background: rgba(20, 30, 40, 0.9); border: 2px solid #4a90e2; border-radius: 8px;
+            padding: 15px; display: flex; gap: 10px; box-shadow: 0 0 20px rgba(74, 144, 226, 0.3);
+            backdrop-filter: blur(5px); transition: opacity 0.2s;
+        }
+        .hidden { opacity: 0; pointer-events: none; display: none !important; }
+        
+        button {
+            background: linear-gradient(to bottom, #3a4a5a, #2a3a4a); color: white;
+            border: 1px solid #5a6a7a; padding: 5px; width: 90px; height: 80px;
+            border-radius: 4px; cursor: pointer; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; font-weight: bold; font-size: 12px;
+            transition: all 0.1s; text-transform: uppercase;
+        }
+        button:hover { background: #4a90e2; border-color: #7ab0f2; transform: translateY(-2px); }
+        button:active { transform: translateY(1px); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.active { background: #4a90e2; border-color: #fff; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
+        
+        .icon { font-size: 24px; margin-bottom: 5px; }
+        .panel-title { color: white; margin-right: 10px; width: 80px; font-size: 14px; }
+        .panel-title small { color: #888; font-size: 10px; display: block; }
+
+        #info-box {
+            position: absolute; top: 20px; left: 20px; color: #4a90e2;
+            background: rgba(0,0,0,0.8); padding: 15px; border-radius: 4px; pointer-events: none;
+        }
+        #cursor-tooltip {
+            position: absolute; background: rgba(0,0,0,0.8); color: white;
+            padding: 5px 10px; border-radius: 4px; pointer-events: none; display: none;
+            font-size: 12px; z-index: 1000; border: 1px solid #4a90e2;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="ui-layer">
+        <div id="info-box">
+            <h3>Mission Control</h3>
+            <p>1. Deploy MCV to build Base.</p>
+            <p>2. Build Barracks & Factory.</p>
+            <p>3. Train Soldiers & Tanks.</p>
+            <p>4. Select Units and Right Click to Attack/Move.</p>
+            <p style="color:#ff6666">Defend against the Southern attacks!</p>
+        </div>
+
+        <div id="hud-bottom">
+            <!-- MCV Controls -->
+            <div id="panel-mcv" class="panel hidden">
+                <div class="panel-title">MCV<small>Construction</small></div>
+                <button id="btn-deploy"><span class="icon">🏗️</span>Deploy</button>
+                <button id="btn-reverse"><span class="icon">🔄</span>Reverse</button>
+            </div>
+
+            <!-- Base Controls -->
+            <div id="panel-base" class="panel hidden">
+                <div class="panel-title">Yard<small>Structures</small></div>
+                <button onclick="game.startPlacement('barracks')"><span class="icon">⛺</span>Barracks</button>
+                <button onclick="game.startPlacement('warfactory')"><span class="icon">🏭</span>Factory</button>
+                <button onclick="game.undeployBase()" style="border-color:#e2a04a"><span class="icon">🚚</span>Pack Up</button>
+            </div>
+
+            <!-- Barracks Controls -->
+            <div id="panel-barracks" class="panel hidden">
+                <div class="panel-title">Barracks<small>Infantry</small></div>
+                <button onclick="game.produceUnit('soldier')"><span class="icon">🔫</span>Soldier</button>
+            </div>
+
+            <!-- Factory Controls -->
+            <div id="panel-warfactory" class="panel hidden">
+                <div class="panel-title">Factory<small>Vehicles</small></div>
+                <button onclick="game.produceUnit('tank')"><span class="icon">🚜</span>Tank</button>
+            </div>
+        </div>
+        <div id="cursor-tooltip"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIG ---
+        const COLORS = {
+            ground: 0x222222, grid: 0x333333,
+            p_soldier: 0x4488ff, e_soldier: 0xff4444,
+            tank: 0x4488ff, tank_turret: 0x3366cc,
+            base: 0xffcc00, factory: 0xff8844, barracks: 0x448844, mcvBody: 0xffaa00
+        };
+        const GRID_SIZE = 120;
+        const TILE_SIZE = 5;
+        const GRID_DIM = 25; // -60 to 60
+
+        // --- GLOBAL GAME STATE ---
+        class RTSGame {
+            constructor() {
+                this.scene = null; this.camera = null; this.renderer = null;
+                this.navGrid = [];
+                this.units = []; // Player units
+                this.buildings = []; // Player buildings
+                this.enemies = []; // Enemy units
+                this.projectiles = [];
+                this.effects = [];
+                
+                this.selectedEntity = null;
+                this.placementMode = null;
+                
+                this.clock = new THREE.Clock();
+                this.raycaster = new THREE.Raycaster();
+                this.mouse = new THREE.Vector2();
+                this.groundPlane = null;
+
+                // Enemy Wave Logic
+                this.waveTimer = 0;
+                this.waveInterval = 10; 
+            }
+
+            init() {
+                this.initGrid();
+                
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x101015);
+                this.scene.fog = new THREE.FogExp2(0x101015, 0.006);
+
+                this.camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 1000);
+                this.camera.position.set(-40, 60, 40);
+                this.camera.lookAt(0,0,0);
+
+                this.renderer = new THREE.WebGLRenderer({antialias:true});
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                document.getElementById('canvas-container').appendChild(this.renderer.domElement);
+
+                const controls = new OrbitControls(this.camera, this.renderer.domElement);
+                controls.maxPolarAngle = Math.PI/2 - 0.1;
+                controls.minDistance = 20; controls.maxDistance = 150;
+
+                const al = new THREE.AmbientLight(0xffffff, 0.5);
+                this.scene.add(al);
+                const dl = new THREE.DirectionalLight(0xffffff, 0.8);
+                dl.position.set(50, 100, 50);
+                dl.castShadow = true;
+                dl.shadow.mapSize.width = 2048; dl.shadow.mapSize.height = 2048;
+                this.scene.add(dl);
+
+                const pg = new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE);
+                const pm = new THREE.MeshStandardMaterial({color:COLORS.ground, roughness:0.8});
+                this.groundPlane = new THREE.Mesh(pg, pm);
+                this.groundPlane.rotation.x = -Math.PI/2;
+                this.groundPlane.receiveShadow = true;
+                this.scene.add(this.groundPlane);
+                
+                const gh = new THREE.GridHelper(GRID_SIZE, 24, COLORS.grid, COLORS.grid);
+                this.scene.add(gh);
+
+                this.raycaster = new THREE.Raycaster();
+
+                // Start with MCV
+                this.spawnUnit('mcv', new THREE.Vector3(0,0,0));
+
+                window.addEventListener('resize', ()=>this.onResize());
+                window.addEventListener('pointerdown', (e)=>this.onPointerDown(e));
+                window.addEventListener('pointermove', (e)=>this.onPointerMove(e));
+                window.addEventListener('contextmenu', e=>e.preventDefault());
+                
+                document.getElementById('btn-deploy').addEventListener('click', ()=>this.deployMCV());
+                document.getElementById('btn-reverse').addEventListener('click', (e)=>{
+                    if(this.selectedEntity && this.selectedEntity.type==='MCV') {
+                        this.selectedEntity.toggleReverse();
+                        e.currentTarget.classList.toggle('active', this.selectedEntity.reverseMode);
+                    }
+                });
+
+                this.animate();
+            }
+
+            // --- PATHFINDING ---
+            initGrid() {
+                this.navGrid = new Array(GRID_DIM).fill(0).map(() => new Array(GRID_DIM).fill(false));
+            }
+            worldToGrid(x, z) {
+                const gx = Math.round((x + (GRID_SIZE/2)) / TILE_SIZE);
+                const gz = Math.round((z + (GRID_SIZE/2)) / TILE_SIZE);
+                return { x: gx, z: gz };
+            }
+            gridToWorld(gx, gz) {
+                const wx = (gx * TILE_SIZE) - (GRID_SIZE/2);
+                const wz = (gz * TILE_SIZE) - (GRID_SIZE/2);
+                return new THREE.Vector3(wx, 0, wz);
+            }
+            setObstacle(pos, blocked) {
+                const g = this.worldToGrid(pos.x, pos.z);
+                if(g.x>=0 && g.x<GRID_DIM && g.z>=0 && g.z<GRID_DIM) this.navGrid[g.x][g.z] = blocked;
+            }
+            isWalkable(gx, gz) {
+                if(gx<0 || gx>=GRID_DIM || gz<0 || gz>=GRID_DIM) return false;
+                return !this.navGrid[gx][gz];
+            }
+            findPath(start, end) {
+                const sNode = this.worldToGrid(start.x, start.z);
+                const eNode = this.worldToGrid(end.x, end.z);
+                
+                if(!this.isWalkable(eNode.x, eNode.z)) {
+                    const offsets = [[0,1],[1,0],[0,-1],[-1,0]];
+                    let found=false;
+                    for(let o of offsets) {
+                        if(this.isWalkable(eNode.x+o[0], eNode.z+o[1])) {
+                            eNode.x+=o[0]; eNode.z+=o[1]; found=true; break;
+                        }
+                    }
+                    if(!found) return [];
+                }
+                
+                const open = [{x:sNode.x, z:sNode.z, f:0, g:0, p:null}];
+                const closed = new Set();
+                
+                while(open.length > 0) {
+                    open.sort((a,b)=>a.f - b.f);
+                    const curr = open.shift();
+                    const key = `${curr.x},${curr.z}`;
+                    if(key === `${eNode.x},${eNode.z}`) {
+                        const path = [];
+                        let temp = curr;
+                        while(temp) {
+                            path.unshift(this.gridToWorld(temp.x, temp.z));
+                            temp = temp.p;
+                        }
+                        return path;
+                    }
+                    closed.add(key);
+                    
+                    const neighbors = [[0,1],[0,-1],[1,0],[-1,0]];
+                    for(let n of neighbors) {
+                        const nx = curr.x+n[0]; const nz = curr.z+n[1];
+                        if(this.isWalkable(nx, nz) && !closed.has(`${nx},${nz}`)) {
+                            const g = curr.g + 1;
+                            const h = Math.abs(eNode.x-nx) + Math.abs(eNode.z-nz);
+                            const existing = open.find(o=>o.x===nx && o.z===nz);
+                            if(!existing || g < existing.g) {
+                                if(!existing) open.push({x:nx, z:nz, f:g+h, g:g, p:curr});
+                                else { existing.g=g; existing.f=g+h; existing.p=curr; }
+                            }
+                        }
+                    }
+                }
+                return [end]; 
+            }
+
+            // --- FACTORY ---
+            spawnUnit(type, pos, team='blue') {
+                let u = null;
+                if(type === 'mcv') u = new MCV(pos);
+                else if(type === 'soldier') u = new Soldier(pos, team);
+                else if(type === 'tank') u = new Tank(pos, team);
+                
+                if(team === 'blue') {
+                    this.units.push(u);
+                    if(type!=='mcv') u.move(new THREE.Vector3(pos.x + 5, 0, pos.z + 5)); 
+                }
+                else this.enemies.push(u);
+            }
+
+            produceUnit(type) {
+                if(!this.selectedEntity) return;
+                const buildingPos = this.selectedEntity.mesh.position;
+                const spawnPos = new THREE.Vector3(buildingPos.x, 0, buildingPos.z + 6);
+                this.spawnUnit(type, spawnPos, 'blue');
+            }
+
+            spawnEnemyWave() {
+                const count = 3 + Math.floor(this.clock.getElapsedTime() / 45); 
+                for(let i=0; i<count; i++) {
+                    const x = (Math.random() * 80) - 40;
+                    const z = 50; 
+                    this.spawnUnit('soldier', new THREE.Vector3(x, 0, z), 'red');
+                }
+            }
+
+            // --- INTERACTION ---
+            onPointerDown(e) {
+                if(e.target.closest('button')) return;
+                
+                this.mouse.x = (e.clientX/window.innerWidth)*2-1;
+                this.mouse.y = -(e.clientY/window.innerHeight)*2+1;
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+
+                if(this.placementMode) {
+                    if(e.button === 0) this.placeBuilding();
+                    else this.cancelPlacement();
+                    return;
+                }
+
+                const allObjs = [...this.units.map(u=>u.mesh), ...this.buildings.map(b=>b.mesh), ...this.enemies.map(e=>e.mesh), this.groundPlane];
+                const hits = this.raycaster.intersectObjects(allObjs, true);
+                
+                if(hits.length > 0) {
+                    const hit = hits[0];
+                    let obj = hit.object;
+                    // Traverse up to find the entity group
+                    while(obj.parent && !obj.userData.entity) obj = obj.parent;
+                    const entity = obj.userData.entity;
+
+                    if(e.button === 0) { // Select
+                        if(entity && entity.team === 'blue') this.select(entity);
+                        else if(hit.object === this.groundPlane) this.deselect();
+                    } 
+                    else if(e.button === 2) { // Command
+                        if(this.selectedEntity && this.selectedEntity.move) {
+                            if(hit.object === this.groundPlane) {
+                                this.selectedEntity.move(hit.point);
+                                this.createPing(hit.point);
+                            } else if (entity && entity.team === 'red') {
+                                // Attack command
+                                this.selectedEntity.target = entity;
+                                this.createPing(entity.mesh.position, 0xff0000);
+                            }
+                        }
+                    }
+                }
+            }
+
+            select(ent) {
+                this.deselect();
+                this.selectedEntity = ent;
+                ent.setSelected(true);
+            }
+            deselect() {
+                if(this.selectedEntity) this.selectedEntity.setSelected(false);
+                this.selectedEntity = null;
+                document.querySelectorAll('.panel').forEach(p=>p.classList.add('hidden'));
+            }
+
+            // --- BUILDINGS ---
+            startPlacement(type) {
+                if(this.placementMode) this.cancelPlacement();
+                const mesh = createBuildingMesh(type);
+                mesh.traverse(c=>{if(c.isMesh){c.material=c.material.clone(); c.material.opacity=0.5; c.material.transparent=true;}});
+                this.scene.add(mesh);
+                this.placementMode = { type: type, mesh: mesh };
+                
+                document.body.style.cursor='crosshair';
+                const tt = document.getElementById('cursor-tooltip');
+                tt.style.display='block'; tt.innerText="Left Click: Build | Right Click: Cancel";
+            }
+
+            placeBuilding() {
+                if(!this.placementMode) return;
+                const pos = this.placementMode.mesh.position.clone();
+                const gridP = this.worldToGrid(pos.x, pos.z);
+                if(!this.isWalkable(gridP.x, gridP.z)) { alert("Cannot build here!"); return; }
+
+                this.scene.remove(this.placementMode.mesh);
+                const b = new Building(this.placementMode.type, pos);
+                this.buildings.push(b);
+                this.placementMode = null;
+                document.body.style.cursor='default';
+                document.getElementById('cursor-tooltip').style.display='none';
+            }
+
+            cancelPlacement() {
+                if(this.placementMode) this.scene.remove(this.placementMode.mesh);
+                this.placementMode = null;
+                document.body.style.cursor='default';
+                document.getElementById('cursor-tooltip').style.display='none';
+            }
+
+            createExplosion(pos, radius) {
+                const geo = new THREE.SphereGeometry(1, 16, 16);
+                const mat = new THREE.MeshBasicMaterial({color: 0xffaa00, transparent:true});
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.copy(pos);
+                this.scene.add(mesh);
+                this.effects.push({ type:'explosion', mesh:mesh, scale:0.1, maxScale: radius, speed: 20 });
+            }
+
+            createPing(pos, color=0x00ff00) {
+                const geo = new THREE.RingGeometry(0.5, 1, 32);
+                const mat = new THREE.MeshBasicMaterial({color:color, transparent:true, opacity:0.8, side:THREE.DoubleSide});
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.rotation.x = -Math.PI/2; mesh.position.copy(pos); mesh.position.y=0.2;
+                this.scene.add(mesh);
+                this.effects.push({type:'ping', mesh:mesh, age:0});
+            }
+
+            // --- LOOP ---
+            animate() {
+                requestAnimationFrame(()=>this.animate());
+                const dt = this.clock.getDelta();
+
+                this.waveTimer += dt;
+                if(this.waveTimer > this.waveInterval) {
+                    this.spawnEnemyWave();
+                    this.waveTimer = 0;
+                }
+
+                this.units.forEach(u => u.update(dt));
+                this.enemies.forEach(e => e.update(dt));
+                this.buildings.forEach(b => b.update(dt));
+
+                for(let i=this.projectiles.length-1; i>=0; i--) {
+                    const p = this.projectiles[i];
+                    p.update(dt);
+                    if(p.remove) {
+                        this.scene.remove(p.mesh);
+                        this.projectiles.splice(i, 1);
+                    }
+                }
+
+                for(let i=this.effects.length-1; i>=0; i--) {
+                    const eff = this.effects[i];
+                    if(eff.type === 'ping') {
+                        eff.age += dt;
+                        eff.mesh.scale.addScalar(dt*2);
+                        eff.mesh.material.opacity -= dt;
+                        if(eff.age > 1) { this.scene.remove(eff.mesh); this.effects.splice(i,1); }
+                    } else if (eff.type === 'explosion') {
+                        eff.mesh.scale.addScalar(eff.speed * dt);
+                        eff.mesh.material.opacity -= dt * 0.5;
+                        if(eff.mesh.scale.x > eff.maxScale) {
+                            this.scene.remove(eff.mesh);
+                            this.effects.splice(i,1);
+                        }
+                    }
+                }
+
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            onResize() {
+                this.camera.aspect = window.innerWidth/window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+            
+            deployMCV() { if(this.selectedEntity && this.selectedEntity.type === 'MCV') this.selectedEntity.deploy(); }
+            undeployBase() { if(this.selectedEntity && this.selectedEntity.type === 'Base') this.selectedEntity.packUp(); }
+            onPointerMove(e) {
+                this.mouse.x = (e.clientX/window.innerWidth)*2-1;
+                this.mouse.y = -(e.clientY/window.innerHeight)*2+1;
+                if(this.placementMode) {
+                    this.raycaster.setFromCamera(this.mouse, this.camera);
+                    const h = this.raycaster.intersectObject(this.groundPlane);
+                    if(h.length>0) {
+                        const p = h[0].point;
+                        this.placementMode.mesh.position.set(Math.round(p.x/5)*5, 0, Math.round(p.z/5)*5);
+                    }
+                }
+                const tt = document.getElementById('cursor-tooltip');
+                if(tt.style.display==='block'){ tt.style.left=e.clientX+15+'px'; tt.style.top=e.clientY+15+'px'; }
+            }
+        }
+
+        // --- ASSETS ---
+        function createBuildingMesh(type) {
+            const g = new THREE.Group();
+            let m = new THREE.MeshStandardMaterial({color: 0xffffff});
+            if(type==='factory' || type==='warfactory') {
+                m.color.setHex(COLORS.factory);
+                g.add(new THREE.Mesh(new THREE.BoxGeometry(6,3,8), m)).position.y=1.5;
+                const ramp = new THREE.Mesh(new THREE.BoxGeometry(4,0.5,2), new THREE.MeshStandardMaterial({color:0x333333}));
+                ramp.position.set(0,0.25,4.5); ramp.rotation.x=0.2; g.add(ramp);
+            } else if(type==='barracks') {
+                m.color.setHex(COLORS.barracks);
+                g.add(new THREE.Mesh(new THREE.BoxGeometry(4,2,6), m)).position.y=1;
+                const roof = new THREE.Mesh(new THREE.ConeGeometry(3.5, 2, 4), new THREE.MeshStandardMaterial({color:0x224422}));
+                roof.position.y=3; roof.rotation.y=Math.PI/4; g.add(roof);
+            }
+            g.castShadow = true;
+            return g;
+        }
+
+        function createUnitMesh(type, team) {
+            const g = new THREE.Group();
+            const color = team==='blue' ? COLORS.p_soldier : COLORS.enemy;
+            
+            if(type==='soldier') {
+                const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.8, 4, 8), new THREE.MeshStandardMaterial({color: color}));
+                body.position.y=0.6; body.castShadow=true; g.add(body);
+                // Gun
+                const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.1,0.8), new THREE.MeshStandardMaterial({color:0x111111}));
+                gun.position.set(0.2, 0.9, 0.3); g.add(gun);
+            } else if (type==='tank') {
+                const hull = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1, 3.5), new THREE.MeshStandardMaterial({color: COLORS.tank}));
+                hull.position.y=0.8; hull.castShadow=true; g.add(hull);
+                const tur = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.8, 2), new THREE.MeshStandardMaterial({color: COLORS.tank_turret}));
+                tur.position.y=1.6; tur.castShadow=true; tur.name = "turret"; 
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3), new THREE.MeshStandardMaterial({color:0x333333}));
+                barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0, 1.5); tur.add(barrel); g.add(tur);
+                const tG = new THREE.BoxGeometry(0.5, 0.8, 3.8); const tM = new THREE.MeshStandardMaterial({color:0x111111});
+                const t1=new THREE.Mesh(tG,tM); t1.position.set(-1.2,0.4,0); g.add(t1);
+                const t2=new THREE.Mesh(tG,tM); t2.position.set(1.2,0.4,0); g.add(t2);
+            }
+            return g;
+        }
+
+        function createHealthBar(width, yOffset) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 16;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ff0000'; ctx.fillRect(0,0,64,16); 
+            ctx.fillStyle = '#00ff00'; ctx.fillRect(0,0,64,16); 
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(width, 0.25, 1); sprite.position.y = yOffset;
+            sprite.userData.ctx = ctx;
+            return sprite;
+        }
+
+        function updateHealthBar(sprite, hp, maxHp) {
+            const ctx = sprite.userData.ctx;
+            const pct = Math.max(0, hp/maxHp);
+            ctx.fillStyle = '#550000'; ctx.fillRect(0,0,64,16);
+            ctx.fillStyle = pct > 0.5 ? '#00ff00' : (pct > 0.2 ? '#ffff00' : '#ff0000');
+            ctx.fillRect(0,0,64*pct,16);
+            sprite.material.map.needsUpdate = true;
+        }
+
+        // --- CLASSES ---
+        class Unit {
+            constructor(pos, team, hp, speed) {
+                this.team = team; this.hp = hp; this.maxHp = hp; this.speed = speed;
+                this.mesh = null; this.path = []; this.target = null;
+                this.attackCooldown = 0; this.range = 10; this.damage = 10;
+            }
+            takeDamage(amt) {
+                this.hp -= amt;
+                if(this.healthBar) updateHealthBar(this.healthBar, this.hp, this.maxHp);
+                if(this.hp <= 0) {
+                    game.scene.remove(this.mesh);
+                    if(this.team==='blue') game.units = game.units.filter(u=>u!==this);
+                    else game.enemies = game.enemies.filter(u=>u!==this);
+                    const g = new THREE.BoxGeometry(this.mesh.scale.x, this.mesh.scale.y, this.mesh.scale.z);
+                    const m = new THREE.MeshBasicMaterial({color:0x000000});
+                    const d = new THREE.Mesh(g,m); d.position.copy(this.mesh.position);
+                    game.scene.add(d);
+                    setTimeout(()=>game.scene.remove(d), 500);
+                }
+            }
+            move(targetPoint) {
+                this.target = null;
+                const newPath = game.findPath(this.mesh.position, targetPoint);
+                if(newPath.length > 0) this.path = newPath;
+            }
+            update(dt) {
+                this.attackCooldown -= dt;
+                if(!this.target && this.attackCooldown <= 0) {
+                    const targets = this.team==='blue' ? game.enemies : [...game.units, ...game.buildings];
+                    let minDist = this.range; let nearest = null;
+                    for(let e of targets) {
+                        const d = this.mesh.position.distanceTo(e.mesh.position);
+                        if(d < minDist) { minDist = d; nearest = e; }
+                    }
+                    this.target = nearest;
+                }
+                if(this.target) {
+                    if(this.target.hp <= 0) this.target = null;
+                    else {
+                        const dist = this.mesh.position.distanceTo(this.target.mesh.position);
+                        if(dist <= this.range) {
+                            this.path = [];
+                            if(this.mesh.userData.type !== 'tank') this.mesh.lookAt(this.target.mesh.position);
+                            if(this.attackCooldown <= 0) {
+                                this.shoot(this.target);
+                                this.attackCooldown = this.rateOfFire || 1;
+                            }
+                        } else if (this.team === 'red' && Math.random() < 0.05) this.move(this.target.mesh.position);
+                    }
+                }
+                if(this.team === 'red' && !this.target && this.path.length === 0) {
+                    const base = game.buildings.find(b=>b.type==='Base') || game.buildings[0] || game.units[0];
+                    if(base) this.move(base.mesh.position);
+                }
+                if(this.path.length > 0) {
+                    const next = this.path[0];
+                    const dir = new THREE.Vector3().subVectors(next, this.mesh.position);
+                    dir.y = 0;
+                    if(dir.length() < 0.5) this.path.shift();
+                    else {
+                        if (this.type !== 'tank' && this.type !== 'MCV') {
+                            dir.normalize();
+                            this.mesh.position.add(dir.multiplyScalar(this.speed * dt));
+                            this.mesh.lookAt(this.mesh.position.clone().add(dir));
+                        }
+                    }
+                }
+            }
+            shoot(target) {
+                const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({color:0xffff00}));
+                bullet.position.copy(this.mesh.position).add(new THREE.Vector3(0,1,0));
+                game.scene.add(bullet);
+                game.projectiles.push({
+                    mesh: bullet, target: target, speed: 20, damage: this.damage,
+                    update: function(dt) {
+                        if(this.target.hp <= 0) { this.remove = true; return; }
+                        const dir = new THREE.Vector3().subVectors(this.target.mesh.position, this.mesh.position).normalize();
+                        this.mesh.position.add(dir.multiplyScalar(this.speed * dt));
+                        if(this.mesh.position.distanceTo(this.target.mesh.position) < 0.5) {
+                            this.target.takeDamage(this.damage);
+                            this.remove = true;
+                        }
+                    }
+                });
+            }
+            setSelected(b) { if(this.selMesh) this.selMesh.visible = b; }
+        }
+
+        class Soldier extends Unit {
+            constructor(pos, team) {
+                super(pos, team, 30, 4);
+                this.type = 'soldier'; this.range = 15; this.damage = 5; this.rateOfFire = 0.5;
+                this.mesh = createUnitMesh('soldier', team);
+                this.mesh.position.copy(pos);
+                game.scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+                const geo = new THREE.RingGeometry(0.5, 0.7, 16);
+                const mat = new THREE.MeshBasicMaterial({color:0x00ff00, side:THREE.DoubleSide, visible:false});
+                this.selMesh = new THREE.Mesh(geo, mat);
+                this.selMesh.rotation.x = -Math.PI/2; this.selMesh.position.y=0.1;
+                this.mesh.add(this.selMesh);
+                this.healthBar = createHealthBar(1, 2.0);
+                this.mesh.add(this.healthBar);
+            }
+        }
+
+        class Tank extends Unit {
+            constructor(pos, team) {
+                super(pos, team, 150, 7);
+                this.type = 'tank'; this.range = 25; this.damage = 40; this.rateOfFire = 2.0; this.turnSpeed = 3.0;
+                this.mesh = createUnitMesh('tank', team);
+                this.mesh.position.copy(pos);
+                game.scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+                const geo = new THREE.RingGeometry(1.5, 1.8, 32);
+                const mat = new THREE.MeshBasicMaterial({color:0x00ff00, side:THREE.DoubleSide, visible:false});
+                this.selMesh = new THREE.Mesh(geo, mat);
+                this.selMesh.rotation.x = -Math.PI/2; this.selMesh.position.y=0.1;
+                this.mesh.add(this.selMesh);
+                this.healthBar = createHealthBar(2, 3.0);
+                this.mesh.add(this.healthBar);
+            }
+            update(dt) {
+                super.update(dt);
+                if(this.target) {
+                    const turret = this.mesh.getObjectByName('turret');
+                    if(turret) {
+                        const local = this.mesh.worldToLocal(this.target.mesh.position.clone());
+                        turret.rotation.y = Math.atan2(local.x, local.z);
+                    }
+                }
+                if(this.path.length > 0) {
+                    const next = this.path[0];
+                    const dir = new THREE.Vector3().subVectors(next, this.mesh.position);
+                    dir.y = 0;
+                    if(dir.length() < 0.5) { this.path.shift(); return; }
+                    const targetAngle = Math.atan2(dir.x, dir.z);
+                    const curAngle = this.mesh.rotation.y;
+                    let diff = targetAngle - curAngle;
+                    while(diff > Math.PI) diff -= Math.PI*2;
+                    while(diff < -Math.PI) diff += Math.PI*2;
+                    this.mesh.rotation.y += Math.sign(diff) * Math.min(Math.abs(diff), this.turnSpeed * dt);
+                    const fwd = new THREE.Vector3(Math.sin(this.mesh.rotation.y), 0, Math.cos(this.mesh.rotation.y));
+                    this.mesh.position.add(fwd.multiplyScalar(this.speed * dt));
+                }
+            }
+        }
+
+        class Building {
+            constructor(type, pos) {
+                this.type = type; this.team = 'blue'; this.hp = type==='Base'?1000:300; this.maxHp=this.hp;
+                if(type === 'Base') {
+                    const g = new THREE.Group();
+                    const b = new THREE.Mesh(new THREE.BoxGeometry(6,1,6), new THREE.MeshStandardMaterial({color:0x555555}));
+                    b.position.y=0.5; g.add(b);
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(4,3,4), new THREE.MeshStandardMaterial({color:COLORS.base}));
+                    body.position.y=2; g.add(body);
+                    this.mesh = g;
+                } else this.mesh = createBuildingMesh(type);
+                this.mesh.position.copy(pos);
+                game.scene.add(this.mesh);
+                game.setObstacle(pos, true);
+                this.mesh.userData.entity = this;
+                const geo = new THREE.RingGeometry(2.5, 3, 32);
+                const mat = new THREE.MeshBasicMaterial({color:0x00ff00, side:THREE.DoubleSide, visible:false});
+                this.selMesh = new THREE.Mesh(geo, mat);
+                this.selMesh.rotation.x = -Math.PI/2; this.selMesh.position.y=0.1;
+                this.mesh.add(this.selMesh);
+                this.healthBar = createHealthBar(3, 5.0);
+                this.mesh.add(this.healthBar);
+                this.isPacking = false;
+            }
+            update(dt) {
+                if(this.isPacking) {
+                    this.mesh.scale.subScalar(dt*2);
+                    if(this.mesh.scale.x <= 0.1) this.finishPack();
+                }
+            }
+            setSelected(b) { 
+                this.selMesh.visible = b; 
+                if(b) {
+                    if(this.type === 'Base') document.getElementById('panel-base').classList.remove('hidden');
+                    if(this.type === 'barracks') document.getElementById('panel-barracks').classList.remove('hidden');
+                    if(this.type === 'warfactory') document.getElementById('panel-warfactory').classList.remove('hidden');
+                }
+            }
+            takeDamage(amt) {
+                this.hp -= amt;
+                if(this.healthBar) updateHealthBar(this.healthBar, this.hp, this.maxHp);
+                if(this.hp <= 0) {
+                    game.scene.remove(this.mesh);
+                    game.buildings = game.buildings.filter(b=>b!==this);
+                    game.createExplosion(this.mesh.position, 5);
+                    game.setObstacle(this.mesh.position, false);
+                    if(this.type==='Base') alert("GAME OVER! Base Destroyed.");
+                }
+            }
+            packUp() { this.isPacking = true; }
+            finishPack() {
+                const pos = this.mesh.position.clone();
+                game.setObstacle(pos, false);
+                game.scene.remove(this.mesh);
+                game.buildings = game.buildings.filter(b=>b!==this);
+                game.spawnUnit('mcv', pos, 'blue');
+            }
+        }
+
+        class MCV extends Unit {
+            constructor(pos) {
+                super(pos, 'blue', 500, 5);
+                this.type = 'MCV'; this.range = 0; this.reverseMode = false;
+                const group = new THREE.Group();
+                const body = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 4), new THREE.MeshStandardMaterial({ color: COLORS.mcvBody }));
+                body.position.y = 1.25; body.castShadow = true; group.add(body);
+                const cab = new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 1.5), new THREE.MeshStandardMaterial({ color: 0xdd9900 }));
+                cab.position.set(0, 1.6, 1.5); cab.castShadow = true; group.add(cab);
+                const mixer = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1, 3.5, 12), new THREE.MeshStandardMaterial({ color: 0x999999 }));
+                mixer.rotation.x = Math.PI / 2; mixer.position.set(0, 2.6, -0.5); mixer.rotation.z = 0.2; mixer.castShadow = true; mixer.name = "mixer"; group.add(mixer);
+                const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 12);
+                const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+                [[-1.1,0.5,1.5],[1.1,0.5,1.5],[-1.1,0.5,-1.2],[1.1,0.5,-1.2]].forEach(p=>{
+                    const w=new THREE.Mesh(wheelGeo, wheelMat); w.rotation.z=Math.PI/2; w.position.set(...p); group.add(w);
+                });
+                this.mesh = group;
+                this.mesh.position.copy(pos);
+                game.scene.add(this.mesh);
+                this.mesh.userData.entity = this;
+                const geo = new THREE.RingGeometry(2.5, 3, 32);
+                const mat = new THREE.MeshBasicMaterial({color:0x00ff00, side:THREE.DoubleSide, visible:false});
+                this.selMesh = new THREE.Mesh(geo, mat);
+                this.selMesh.rotation.x = -Math.PI/2; this.selMesh.position.y=0.1;
+                this.mesh.add(this.selMesh);
+                this.healthBar = createHealthBar(2, 3.0);
+                this.mesh.add(this.healthBar);
+                this.transforming = false;
+            }
+            toggleReverse() { this.reverseMode = !this.reverseMode; }
+            deploy() { if(this.isMoving) return; this.transforming = true; if(game.selectedEntity === this) game.deselect(); }
+            update(dt) {
+                if(this.transforming) {
+                    const mixer = this.mesh.getObjectByName('mixer');
+                    if (mixer) mixer.rotation.y += dt * 5;
+                    this.mesh.scale.multiplyScalar(1.02);
+                    if(this.mesh.scale.x > 1.5) {
+                        const pos = this.mesh.position.clone();
+                        game.scene.remove(this.mesh);
+                        game.units = game.units.filter(u=>u!==this);
+                        const b = new Building('Base', pos);
+                        game.buildings.push(b);
+                        game.select(b);
+                    }
+                    return;
+                }
+                if(this.path.length > 0) {
+                    const next = this.path[0];
+                    const dir = new THREE.Vector3().subVectors(next, this.mesh.position);
+                    dir.y = 0;
+                    if(dir.length() < 0.5) { this.path.shift(); return; }
+                    const targetAngle = Math.atan2(dir.x, dir.z) + (this.reverseMode ? Math.PI : 0);
+                    const curAngle = this.mesh.rotation.y;
+                    let diff = targetAngle - curAngle;
+                    while(diff > Math.PI) diff -= Math.PI*2;
+                    while(diff < -Math.PI) diff += Math.PI*2;
+                    this.mesh.rotation.y += Math.sign(diff) * Math.min(Math.abs(diff), 4*dt);
+                    const moveDir = this.reverseMode ? -1 : 1;
+                    const fwd = new THREE.Vector3(Math.sin(this.mesh.rotation.y), 0, Math.cos(this.mesh.rotation.y));
+                    this.mesh.position.add(fwd.multiplyScalar(this.speed * moveDir * dt));
+                }
+            }
+            setSelected(b) { 
+                this.selMesh.visible = b; 
+                if(b) {
+                    document.getElementById('panel-mcv').classList.remove('hidden');
+                    document.getElementById('btn-reverse').classList.toggle('active', this.reverseMode);
+                }
+            }
+        }
+
+        const game = new RTSGame();
+        game.init();
+        window.game = game;
+
+    </script>
+</body>
+</html>
