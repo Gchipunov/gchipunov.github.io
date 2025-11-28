@@ -1,0 +1,8 @@
+Prompt:
+code in webgl JavaScript full html page, mining trees with trucks that cut trees, theres trees out in the terrian, start with a base building, its a rts game with resources and as you mine trees the warehouse building will over time convert wood into cash
+
+The idea is to make trucks to get initial base building material for planks to make buildings, like farms
+The trucks need to be directed and redirected to get trees
+
+Details: add grass that can be run over
+
