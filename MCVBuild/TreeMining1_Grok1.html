@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebGL Tree Mining RTS</title>
+<style>
+  body { margin:0; overflow:hidden; font-family:Arial; background:#000; }
+  canvas { display:block; }
+  #ui {
+    position:absolute; top:10px; left:10px; color:white; background:rgba(0,0,0,0.5);
+    padding:10px; border-radius:5px; pointer-events:none;
+  }
+  button {
+    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+    padding:10px 20px; font-size:18px; pointer-events:all; cursor:pointer;
+  }
+</style>
+</head>
+<body>
+<div id="ui">Cash: <span id="cash">0</span> | Logs: <span id="logs">0</span> | Planks: <span id="planks">0</span></div>
+<button id="buildFarm">Build Farm (50 planks)</button>
+
+<script src="https://unpkg.com/regl@2.1.0/dist/regl.min.js"></script>
+<script>
+// ============== Simple WebGL RTS - Tree Mining with Trucks ==============
+
+const regl = createREGL({ extensions: ['OES_standard_derivatives'] });
+
+let cash = 500;
+let logs = 0;
+let planks = 0;
+const plankConversionTime = 3; // seconds per plank
+let plankTimer = 0;
+
+const camera = {
+  pos: [30, 40, 50],
+  target: [30, 0, 30],
+  distance: 80
+};
+
+let selectedTruck = null;
+let trucks = [];
+let trees = [];
+let buildings = [];
+let grass = [];
+
+// ------------------- Models (very low-poly) -------------------
+const truckMesh = {
+  positions: [
+    [-2,0,-4], [2,0,-4], [2,2,-4], [-2,2,-4],
+    [-2,0,4], [2,0,4], [2,2,4], [-2,2,4],
+    [-1.5,2,0], [1.5,2,0] // cabin top
+  ],
+  cells: [
+    [0,1,2],[0,2,3], [4,5,6],[4,6,7],
+    [0,4,7],[0,7,3], [1,5,6],[1,6,2],
+    [3,2,8],[2,8,9]
+  ],
+  color: [0.8,0.1,0.1]
+};
+
+const treeMesh = {
+  positions: [
+    // trunk
+    [-1,0,-1],[1,0,-1],[1,0,1],[-1,0,1],
+    [-1,6,-1],[1,6,-1],[1,6,1],[-1,6,1],
+    // leaves (simple pyramid)
+    [-4,6,-4],[4,6,-4],[4,6,4],[-4,6,4],[0,12,0]
+  ],
+  cells: [
+    [0,1,2],[0,2,3],[4,5,6],[4,6,7],[0,4,7],[0,7,3],[1,5,6],[1,6,2],
+    [8,9,10],[8,10,11],[8,11,12],[9,10,12],[10,11,12]
+  ],
+  trunkColor: [0.4,0.25,0.1],
+  leafColor: [0.0,0.6,0.0]
+};
+
+const buildingMesh = {
+  positions: [[-8,0,-8],[8,0,-8],[8,0,8],[-8,0,8],[-8,10,-8],[8,10,-8],[8,10,8],[-8,10,8]],
+  cells: [[0,1,2],[0,2,3],[4,5,6],[4,6,7],[0,4,7],[0,7,3],[1,5,6],[1,6,2],[0,1,5],[0,5,4]],
+  color: [0.5,0.4,0.7]
+};
+
+// ------------------- Create World -------------------
+function createTree(x, z) {
+  trees.push({ pos: [x, 0, z], alive: true, mesh: treeMesh });
+}
+
+function createGrass() {
+  for (let x = -100; x <= 100; x += 6) {
+    for (let z = -100; z <= 100; z += 6) {
+      if (Math.random() < 0.6) {
+        grass.push({
+          pos: [x + Math.random()*4 - 2, 0, z + Math.random()*4 - 2],
+          bend: 0,
+          bendTarget: 0
+        });
+      }
+    }
+  }
+}
+
+// Base warehouse at center
+buildings.push({ type: 'warehouse', pos: [30,0,30], mesh: buildingMesh });
+
+// Spawn initial truck
+trucks.push({
+  pos: [30, 0, 35],
+  rot: 0,
+  target: null,
+  state: 'idle', // idle, moving, cutting, returning
+  carry: 0,
+  speed: 8,
+  cutTimer: 0
+});
+
+// Spawn trees
+for (let i = 0; i < 120; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 20 + Math.random() * 70;
+  createTree(30 + Math.cos(angle)*dist, 30 + Math.sin(angle)*dist);
+}
+createGrass();
+
+// ------------------- Input -------------------
+const mouse = { x: 0, y: 0, down: false, rightDown: false };
+window.addEventListener('mousemove', e => {
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+});
+window.addEventListener('mousedown', e => {
+  if (e.button === 0) mouse.down = true;
+  if (e.button === 2) { mouse.rightDown = true; e.preventDefault(); }
+});
+window.addEventListener('mouseup', e => {
+  if (e.button === 0) mouse.down = false;
+  if (e.button === 2) mouse.rightDown = false;
+});
+window.addEventListener('contextmenu', e => e.preventDefault());
+
+// ------------------- Raycast to ground -------------------
+function screenToGround(x, y) {
+  const rect = regl._gl.canvas.getBoundingClientRect();
+  const nx = (x - rect.left) / rect.width * 2 - 1;
+  const ny = - (y - rect.top) / rect.height * 2 + 1;
+
+  // simple ray from camera
+  const rayOrigin = camera.pos.slice();
+  const rayDir = normalize([
+    nx * camera.distance,
+    ny * camera.distance - 20,
+    -camera.distance
+  ]);
+
+  // plane Y=0
+  const t = -rayOrigin[1] / rayDir[1];
+  if (t < 0) return null;
+  return [
+    rayOrigin[0] + rayDir[0] * t,
+    0,
+    rayOrigin[2] + rayDir[2] * t
+  ];
+}
+
+// ------------------- Shaders -------------------
+const drawTerrain = regl({
+  frag: `
+    precision mediump float;
+    varying vec3 vpos;
+    void main() {
+      float d = length(vpos.xz);
+      vec3 grass = vec3(0.1,0.5,0.1);
+      vec3 dirt = vec3(0.4,0.35,0.2);
+      gl_FragColor = vec4(mix(grass, dirt, smoothstep(30.0, 70.0, d)), 1.0);
+    }`,
+  vert: `
+    precision mediump float;
+    attribute vec3 position;
+    uniform mat4 proj, view;
+    varying vec3 vpos;
+    void main() {
+      vpos = position;
+      gl_Position = proj * view * vec4(position,1);
+    }`,
+  attributes: { position: [[-200,0,-200],[200,0,-200],[200,0,200],[-200,0,200]] },
+  elements: [[0,1,2],[0,2,3]],
+  depth: { enable: true }
+});
+
+const drawMesh = regl({
+  frag: `
+    precision mediump float;
+    uniform vec3 color;
+    varying vec3 vnormal;
+    void main() {
+      float light = dot(normalize(vnormal), normalize(vec3(1,1,1))) * 0.5 + 0.5;
+      gl_FragColor = vec4(color * light, 1);
+    }`,
+  vert: `
+    precision mediump float;
+    attribute vec3 position;
+    uniform mat4 proj, view, model;
+    varying vec3 vnormal;
+    void main() {
+      vec4 p = model * vec4(position,1);
+      vnormal = (model * vec4(normalize(cross(
+        position.yzx - position.zxy,
+        position.zxy - position.xyz
+      )),0)).xyz;
+      gl_Position = proj * view * p;
+    }`,
+  depth: { enable: true }
+});
+
+const drawGrass = regl({
+  frag: `
+    precision highp float;
+    varying vec2 uv;
+    varying float alpha;
+    void main() {
+      if (alpha < 0.1) discard;
+      gl_FragColor = vec4(0.05, 0.6 + uv.y*0.2, 0.05, alpha);
+    }`,
+  vert: `
+    precision highp float;
+    attribute vec3 pos;
+    attribute vec2 offset;
+    uniform mat4 proj, view;
+    uniform float time;
+    varying vec2 uv;
+    varying float alpha;
+    void main() {
+      vec3 p = pos;
+      p.x += offset.x * (sin(time*3.0 + pos.x*0.1) * 0.2 + offset.y * 2.0);
+      p.z += offset.z * (sin(time*3.0 + pos.z*0.1) * 0.2);
+      p.y += offset.y * 4.0;
+      alpha = offset.y;
+      uv = offset.xy * vec2(1,-1) + vec2(0.5,0);
+      gl_Position = proj * view * vec4(p,1);
+    }`,
+  attributes: {
+    pos: (context, props) => props.pos,
+    offset: [-0.1,0,0, 0.1,0,0, -0.1,1,0, 0.1,1,0]
+  },
+  elements: [0,1,2, 1,3,2],
+  blend: {
+    enable: true,
+    func: { srcRGB: 'src alpha', dstRGB: 'one minus src alpha' }
+  },
+  depth: { enable: false },
+  count: 6
+});
+
+// ------------------- Game Logic -------------------
+function update(dt) {
+  // Warehouse converts logs → planks over time
+  if (logs > 0) {
+    plankTimer += dt;
+    if (plankTimer > plankConversionTime) {
+      plankTimer = 0;
+      logs--;
+      planks++;
+    }
+  }
+
+  // Update trucks
+  trucks.forEach(truck => {
+    if (truck.state === 'moving' && truck.target) {
+      const dir = normalize(sub(truck.target, truck.pos));
+      const move = mul(dir, truck.speed * dt);
+      truck.pos = add(truck.pos, move);
+      truck.rot = Math.atan2(dir[0], dir[2]);
+
+      if (distance(truck.pos, truck.target) < 3) {
+        // Arrived
+        if (truck.carry > 0) {
+          logs += truck.carry;
+          cash += truck.carry * 10;
+          truck.carry = 0;
+          truck.state = 'idle';
+          truck.target = null;
+        } else {
+          // look for tree
+          let closest = null, dist = 999;
+          trees.forEach(t => {
+            if (t.alive) {
+              const d = distance(truck.pos, t.pos);
+              if (d < dist) { dist = d; closest = t; }
+            }
+          });
+          if (closest && dist < 8) {
+            truck.state = 'cutting';
+            truck.cutTimer = 3; // 3 seconds to cut
+            truck.targetTree = closest;
+          } else {
+            truck.state = 'idle';
+            truck.target = null;
+          }
+        }
+      }
+    }
+
+    if (truck.state === 'cutting') {
+      truck.cutTimer -= dt;
+      if (truck.cutTimer <= 0) {
+        truck.targetTree.alive = false;
+        truck.carry = 10; // 10 logs per tree
+        truck.state = 'returning';
+        truck.target = [30,0,30]; // warehouse
+      }
+    }
+  });
+
+  // Grass bending from trucks
+  grass.forEach(g => {
+    let closestDist = 999;
+    trucks.forEach(t => {
+      const d = distance2D(g.pos, t.pos);
+      if (d < 6) closestDist = Math.min(closestDist, d);
+    });
+    g.bendTarget = closestDist < 6 ? 1.0 - closestDist/6.0 : 0;
+    g.bend += (g.bendTarget - g.bend) * dt * 8;
+  });
+
+  // Camera orbit with mouse
+  if (mouse.down) {
+    camera.pos[0] = camera.target[0] + Math.cos(Date.now()*0.0003) * camera.distance;
+    camera.pos[2] = camera.target[2] + Math.sin(Date.now()*0.0003) * camera.distance;
+  }
+
+  // Right-click command
+  if (mouse.rightDown && selectedTruck) {
+    const groundPos = screenToGround(mouse.x, mouse.y);
+    if (groundPos) {
+      selectedTruck.target = groundPos;
+      selectedTruck.state = selectedTruck.carry > 0 ? 'moving' : 'moving';
+    }
+    mouse.rightDown = false;
+  }
+
+  // Left click selection
+  if (mouse.down) {
+    const groundPos = screenToGround(mouse.x, mouse.y);
+    if (groundPos) {
+      let closest = null, best = 999;
+      trucks.forEach(t => {
+        const d = distance2D(t.pos, groundPos);
+        if (d < 6 && d < best) { best = d; closest = t; }
+      });
+      selectedTruck = closest;
+    }
+    mouse.down = false;
+  }
+}
+
+// ------------------- Render -------------------
+const proj = mat4.create();
+const view = mat4.create();
+
+regl.frame(({time, viewportWidth, viewportHeight, deltaTime}) => {
+  update(deltaTime);
+
+  mat4.perspective(proj, Math.PI/4, viewportWidth/viewportHeight, 0.1, 1000);
+  mat4.lookAt(view, camera.pos, camera.target, [0,1,0]);
+
+  regl.clear({ color: [0.4,0.7,1,1], depth: 1 });
+
+  drawTerrain();
+
+  // Buildings
+  buildings.forEach(b => {
+    drawMesh({ model: translate(mat4.create(), b.pos), color: b.mesh.color || [0.7,0.7,0.7] });
+  });
+
+  // Trees
+  trees.forEach(t => {
+    if (t.alive) {
+      const model = translate(mat4.create(), t.pos);
+      drawMesh({ model, color: t.mesh.trunkColor, positions: t.mesh.positions, cells: t.mesh.cells });
+      drawMesh({ model, color: t.mesh.leafColor, positions: t.mesh.positions, cells: t.mesh.cells });
+    }
+  });
+
+  // Trucks
+  trucks.forEach(t => {
+    const model = mul(translate(mat4.create(), t.pos), rotateY(mat4.create(), t.rot));
+    drawMesh({ model, color: truckMesh.color, positions: truckMesh.positions, cells: truckMesh.cells });
+    if (t === selectedTruck) {
+      // selection ring
+      drawMesh({ model: mul(translate(mat4.create(), [t.pos[0],0.1,t.pos[2]]), scale(mat4.create(), [8,0.1,8])),
+        color: [1,1,0], positions: [[-1,0,-1],[1,0,-1],[1,0,1],[-1,0,1]], cells: [[0,1,2],[0,2,3]] });
+    }
+  });
+
+  // Grass
+  grass.forEach(g => {
+    const model = translate(mat4.create(), [g.pos[0], 0, g.pos[2]]);
+    model[0] = g.bend * 2; // simple bend
+    drawGrass({ pos: g.pos, time: time });
+  });
+
+  // UI
+  document.getElementById('cash').textContent = cash;
+  document.getElementById('logs').textContent = logs;
+  document.getElementById('planks').textContent = planks;
+});
+
+// Build farm button
+document.getElementById('buildFarm').onclick = () => {
+  if (planks >= 50) {
+    planks -= 50;
+    cash += 200; // farm gives money over time later
+    alert("Farm built! (Future feature: auto cash income)");
+  }
+};
+
+// ------------------- Math helpers -------------------
+function normalize(v) { const l = Math.hypot(...v); return v.map(x=>x/l); }
+function add(a,b) { return a.map((x,i)=>x+b[i]); }
+function sub(a,b) { return a.map((x,i)=>x-b[i]); }
+function mul(a,s) { return a.map(x=>x*s); }
+function distance(a,b) { return Math.hypot(...sub(a,b)); }
+function distance2D(a,b) { return Math.hypot(a[0]-b[0], a[2]-b[2]); }
+function translate(m, v) { mat4.translate(m,m,v); return m; }
+function rotateY(m, a) { mat4.rotateY(m,m,a); return m; }
+function scale(m, v) { mat4.scale(m,m,v); return m; }
+</script>
+</body>
+</html>
