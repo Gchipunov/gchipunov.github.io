@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Simplified WebGL RTS Base</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="info">
+        <h3>Resources:</h3>
+        <p>Wood: <span id="woodCount">0</span></p>
+        <p>Cash: <span id="cashCount">0</span></p>
+        <p>FPS: <span id="fps">0</span></p>
+    </div>
+
+    <script>
+        // --- Shaders ---
+        const VS_SOURCE = `
+            attribute vec4 a_position;
+            uniform mat4 u_modelViewProjectionMatrix;
+            void main() {
+                gl_Position = u_modelViewProjectionMatrix * a_position;
+            }
+        `;
+
+        const FS_SOURCE = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        // --- Game Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const gl = canvas.getContext('webgl');
+        let program;
+        let wood = 100;
+        let cash = 0;
+        const CONVERSION_RATE = 0.01; // Wood to Cash per frame (simplified)
+
+        function main() {
+            if (!gl) {
+                console.error('WebGL not supported');
+                return;
+            }
+
+            // 1. Initialize Shaders
+            const vertexShader = loadShader(gl.VERTEX_SHADER, VS_SOURCE);
+            const fragmentShader = loadShader(gl.FRAGMENT_SHADER, FS_SOURCE);
+            
+            program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Shader program link error: ' + gl.getProgramInfoLog(program));
+                return;
+            }
+
+            gl.useProgram(program);
+
+            // 2. Set up initial GL state
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            gl.enable(gl.DEPTH_TEST);
+            gl.clearColor(0.2, 0.3, 0.4, 1.0); // Dark blue sky
+
+            // 3. Define the geometry (A simple plane for the ground and a cube for the building)
+            const { groundBuffer, groundVertices, groundColor } = createGround();
+            const { buildingBuffer, buildingVertices, buildingColor } = createBuilding();
+
+            // 4. Start the Game Loop
+            let lastTime = 0;
+            let frameCount = 0;
+            let lastFPSUpdateTime = 0;
+            function gameLoop(currentTime) {
+                const deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+                frameCount++;
+
+                // FPS Update
+                if (currentTime - lastFPSUpdateTime >= 1000) {
+                    document.getElementById('fps').textContent = frameCount;
+                    frameCount = 0;
+                    lastFPSUpdateTime = currentTime;
+                }
+
+                updateGameLogic(deltaTime);
+                drawScene();
+                requestAnimationFrame(gameLoop);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Helper Functions ---
+
+        function loadShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compile error: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        // Simple Matrix Library (Simplified 4x4 Identity and Perspective)
+        const M4 = {
+            identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            perspective: (fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2);
+                const rangeInv = 1 / (near - far);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (near + far) * rangeInv, -1,
+                    0, 0, near * far * rangeInv * 2, 0
+                ];
+            },
+            translate: (m, x, y, z) => {
+                const out = [...m];
+                out[12] += m[0] * x + m[4] * y + m[8] * z;
+                out[13] += m[1] * x + m[5] * y + m[9] * z;
+                out[14] += m[2] * x + m[6] * y + m[10] * z;
+                out[15] += m[3] * x + m[7] * y + m[11] * z;
+                return out;
+            }
+        };
+
+        function createGround() {
+            // A large, simple square on the XZ plane (Y is up)
+            const vertices = new Float32Array([
+                -100.0, 0.0, -100.0,
+                 100.0, 0.0, -100.0,
+                -100.0, 0.0,  100.0,
+                -100.0, 0.0,  100.0,
+                 100.0, 0.0, -100.0,
+                 100.0, 0.0,  100.0,
+            ]);
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            return { buffer, vertices: vertices, color: [0.1, 0.5, 0.1, 1.0] }; // Green
+        }
+
+        function createBuilding() {
+            // A simple cube for a base building
+            const vertices = new Float32Array([
+                // Front face (Red)
+                -1, 0, 1, 1, 0, 1, 1, 2, 1, // Triangle 1
+                -1, 0, 1, 1, 2, 1, -1, 2, 1, // Triangle 2
+                // ... more faces needed for a full cube ...
+                // For simplicity, we just use the front face
+            ]);
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            return { buffer, vertices: vertices, color: [0.7, 0.7, 0.7, 1.0] }; // Grey
+        }
+
+
+        // --- Game Logic ---
+
+        function updateGameLogic(deltaTime) {
+            // Convert wood to cash over time (only if we have wood)
+            if (wood > 0) {
+                const woodConsumed = CONVERSION_RATE * deltaTime * 0.01; // Scale by delta time
+                wood -= woodConsumed;
+                cash += woodConsumed * 5; // Simplified conversion rate
+
+                if (wood < 0) wood = 0;
+            }
+
+            // Update UI
+            document.getElementById('woodCount').textContent = Math.floor(wood);
+            document.getElementById('cashCount').textContent = Math.floor(cash);
+
+            // *** TODO: Add logic for trucks mining trees, units moving, etc. ***
+        }
+
+        function drawScene() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Get shader locations
+            const u_MVP_loc = gl.getUniformLocation(program, 'u_modelViewProjectionMatrix');
+            const u_color_loc = gl.getUniformLocation(program, 'u_color');
+            const a_position_loc = gl.getAttribLocation(program, 'a_position');
+
+            // Camera Setup (View and Projection)
+            const fov = Math.PI / 4; // 45 degrees
+            const aspect = canvas.width / canvas.height;
+            const near = 0.1;
+            const far = 500.0;
+            const P = M4.perspective(fov, aspect, near, far);
+
+            let V = M4.identity();
+            // Move camera back and up to look down at the center
+            V = M4.translate(V, 0, -20, -10); // Translate camera *inverse* of the position
+
+            // 1. Draw Ground
+            const { groundBuffer, groundVertices, groundColor } = createGround();
+            let M_Ground = M4.identity();
+            M_Ground = M4.translate(M_Ground, 0, 0, 0); // Ground is at origin
+
+            const MVP_Ground = M4.identity();
+            // In a real implementation, you'd multiply P * V * M
+            // For this *extremely* simplified example, we'll just apply P and V for a basic effect.
+            // P * V * M_Ground:
+            // This is a placeholder as a real matrix multiplication library is too long for this example.
+            gl.uniformMatrix4fv(u_MVP_loc, false, M4.translate(P, 0, 0, -10)); // Basic camera effect for demonstration
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, groundBuffer);
+            gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(a_position_loc);
+            gl.uniform4fv(u_color_loc, groundColor);
+            gl.drawArrays(gl.TRIANGLES, 0, groundVertices.length / 3);
+
+            // 2. Draw Base Building (Grey Cube)
+            const { buildingBuffer, buildingVertices, buildingColor } = createBuilding();
+            let M_Building = M4.identity();
+            M_Building = M4.translate(M_Building, 0, 0, 0); // Position the building
+
+            // Draw with a slight camera shift for a 'view'
+            const MVP_Building = M4.identity();
+            // This is a placeholder for (P * V * M_Building)
+            let tempMVP = M4.translate(P, 0, 0, -10); // Start with camera view
+            tempMVP = M4.translate(tempMVP, 0, 0.5, -2); // Move building relative to camera
+
+            gl.uniformMatrix4fv(u_MVP_loc, false, tempMVP);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buildingBuffer);
+            gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(a_position_loc);
+            gl.uniform4fv(u_color_loc, buildingColor);
+            gl.drawArrays(gl.TRIANGLES, 0, buildingVertices.length / 3);
+
+            // *** TODO: Draw trees, trucks, more terrain, etc. ***
+        }
+
+        // Run the main setup function
+        main();
+    </script>
+</body>
+</html>
