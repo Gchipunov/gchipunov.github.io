@@ -360,6 +360,10 @@
                 } else { // Highland
                     color2 = new THREE.Color(0x606060);
                 }
+
+                // the following code can't be used!, it causes error because object doesn't exist,
+                // look at how planeMaterial is being defined as object and then for the shader, its being past to
+                // THREE.Mesh object.
             //    planeGeometry.attributes.color.setX(i, color.r);
             //    planeGeometry.attributes.color.setY(i, color.g);
             //    planeGeometry.attributes.color.setZ(i, color.b);
