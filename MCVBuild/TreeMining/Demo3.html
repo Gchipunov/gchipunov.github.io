@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS Mining Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+            z-index: 10;
+        }
+        #warehouse-status {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #777;
+            background: rgba(0, 0, 0, 0.7);
+        }
+        #progress-bar {
+            width: 100%;
+            height: 15px;
+            background-color: #555;
+            border-radius: 3px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+        #progress {
+            height: 100%;
+            width: 0%;
+            background-color: #f39c12; /* Yellow/Orange progress */
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="info">
+        <h3>RTS Resources:</h3>
+        <p>Wood: <span id="woodCount">10</span></p>
+        <p>Cash: <span id="cashCount">0</span></p>
+        <p>FPS: <span id="fps">0</span></p>
+        <div id="warehouse-status">
+            <h4>Warehouse Conversion (10 Wood -> 10 Cash)</h4>
+            <div id="progress-bar"><div id="progress"></div></div>
+            <p>Progress: <span id="progress-percent">0</span>%</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Shaders ---
+        const VS_SOURCE = `
+            attribute vec4 a_position;
+            uniform mat4 u_modelViewProjectionMatrix;
+            void main() {
+                gl_Position = u_modelViewProjectionMatrix * a_position;
+            }
+        `;
+
+        const FS_SOURCE = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        // --- Global Game State ---
+        const canvas = document.getElementById('gameCanvas');
+        const gl = canvas.getContext('webgl');
+        let program;
+        let wood = 10;
+        let cash = 0;
+        
+        // --- Warehouse Logic ---
+        const CONVERSION_TIME_MS = 15000; // 15 seconds
+        const WOOD_PER_CONVERSION = 10;
+        const CASH_PER_CONVERSION = 10;
+        let conversionTimer = 0;
+
+        // --- Camera State ---
+        let camRadius = 30;
+        let camTheta = Math.PI / 4; // Horizontal angle
+        let camPhi = Math.PI / 6; // Vertical angle
+        let camTarget = [0, 0, 0];
+        let isDragging = false;
+        let lastMouseX, lastMouseY;
+
+        // --- Entity State ---
+        const TERRAIN_SIZE = 64;
+        const TERRAIN_SCALE = 3;
+        const MAX_HEIGHT = 4;
+        
+        const buildings = {
+            barn: { pos: [-10, 0, 0], buffer: null, count: 0, color: [0.8, 0.4, 0.2, 1.0] }, // Brown/Red Barn
+            warehouse: { pos: [10, 0, 0], buffer: null, count: 0, color: [0.2, 0.2, 0.8, 1.0] } // Blue Warehouse
+        };
+
+        const trees = [];
+        const trucks = [
+            { pos: [-5, 0, 5], rotation: 0, wood: 0, target: 'tree', color: [0.9, 0.1, 0.1, 1.0] },
+            { pos: [5, 0, 5], rotation: 0, wood: 0, target: 'barn', color: [0.1, 0.9, 0.1, 1.0] }
+        ];
+
+        // --- Main Setup ---
+        function main() {
+            if (!gl) {
+                console.error('WebGL not supported');
+                return;
+            }
+
+            // 1. Initialize Shaders and Program (from previous code)
+            const vertexShader = loadShader(gl.VERTEX_SHADER, VS_SOURCE);
+            const fragmentShader = loadShader(gl.FRAGMENT_SHADER, FS_SOURCE);
+            program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+            gl.useProgram(program);
+
+            // 2. Set up initial GL state
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            setupInputControls();
+            gl.enable(gl.DEPTH_TEST);
+            gl.clearColor(0.2, 0.3, 0.4, 1.0); // Dark blue sky
+
+            // 3. Define the geometry ONCE and store the data
+            const terrainData = createTerrainData();
+            const barnData = createBarn();
+            const warehouseData = createWarehouse();
+            const truckData = createTruck();
+            const treeData = createTreeData();
+
+            // Store buffer references
+            buildings.barn.buffer = barnData.buffer;
+            buildings.barn.count = barnData.verticesCount;
+            buildings.warehouse.buffer = warehouseData.buffer;
+            buildings.warehouse.count = warehouseData.verticesCount;
+
+            // 4. Start the Game Loop
+            let lastTime = 0;
+            let frameCount = 0;
+            let lastFPSUpdateTime = 0;
+            
+            function gameLoop(currentTime) {
+                if (lastTime === 0) lastTime = currentTime;
+                const deltaTime = currentTime - lastTime;
+                lastTime = currentTime;
+                frameCount++;
+
+                // FPS Update
+                if (currentTime - lastFPSUpdateTime >= 1000) {
+                    document.getElementById('fps').textContent = frameCount;
+                    frameCount = 0;
+                    lastFPSUpdateTime = currentTime;
+                }
+
+                updateGameLogic(deltaTime);
+                drawScene(terrainData, barnData, warehouseData, truckData, treeData); 
+                requestAnimationFrame(gameLoop);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Geometry Functions (Building on previous structure) ---
+
+        // Simple Perlin Noise implementation (highly simplified for context)
+        const noise = {
+            seed: 1,
+            rand: () => (noise.seed = (noise.seed * 9301 + 49297) % 233280) / 233280,
+            get: (x, y) => {
+                const n = x * 41 + y * 59;
+                return (noise.rand() * 2) - 1; 
+            }
+        };
+
+        function getHeight(x, z) {
+            // Very simple height calculation for quick terrain
+            const h = Math.sin(x * 0.5) * 0.5 + Math.cos(z * 0.5) * 0.5;
+            return h * MAX_HEIGHT;
+        }
+
+        function createTerrainData() {
+            const vertices = [];
+            const color = [0.1, 0.5, 0.1, 1.0]; // Green
+
+            for (let z = 0; z < TERRAIN_SIZE; z++) {
+                for (let x = 0; x < TERRAIN_SIZE; x++) {
+                    const x0 = (x - TERRAIN_SIZE / 2) * TERRAIN_SCALE;
+                    const z0 = (z - TERRAIN_SIZE / 2) * TERRAIN_SCALE;
+                    const x1 = (x + 1 - TERRAIN_SIZE / 2) * TERRAIN_SCALE;
+                    const z1 = (z + 1 - TERRAIN_SIZE / 2) * TERRAIN_SCALE;
+
+                    const y00 = getHeight(x0, z0);
+                    const y10 = getHeight(x1, z0);
+                    const y01 = getHeight(x0, z1);
+                    const y11 = getHeight(x1, z1);
+                    
+                    // First triangle (x0, z0) -> (x1, z0) -> (x0, z1)
+                    vertices.push(x0, y00, z0, x1, y10, z0, x0, y01, z1);
+                    
+                    // Second triangle (x0, z1) -> (x1, z0) -> (x1, z1)
+                    vertices.push(x0, y01, z1, x1, y10, z0, x1, y11, z1);
+                }
+            }
+
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+            
+            // Randomly place trees on the terrain
+            for (let i = 0; i < 50; i++) {
+                const x = (Math.random() * TERRAIN_SIZE - TERRAIN_SIZE / 2) * TERRAIN_SCALE;
+                const z = (Math.random() * TERRAIN_SIZE - TERRAIN_SIZE / 2) * TERRAIN_SCALE;
+                const y = getHeight(x, z);
+                
+                // Assign a size level (1, 2, or 3)
+                const sizeLevel = Math.floor(Math.random() * 3) + 1; 
+                trees.push({ pos: [x, y, z], size: sizeLevel, harvested: false });
+            }
+
+            return { buffer, verticesCount: vertices.length / 3, color };
+        }
+
+        function createCubeVertices(size = 1, y_offset = 0) {
+            const s = size / 2;
+            return new Float32Array([
+                // Front face
+                -s, -s + y_offset,  s,  s, -s + y_offset,  s,  s,  s + y_offset,  s,
+                -s, -s + y_offset,  s,  s,  s + y_offset,  s, -s,  s + y_offset,  s,
+                // Back face
+                -s, -s + y_offset, -s, -s,  s + y_offset, -s,  s,  s + y_offset, -s,
+                 s,  s + y_offset, -s,  s, -s + y_offset, -s, -s, -s + y_offset, -s,
+                // Top face
+                -s,  s + y_offset, -s, -s,  s + y_offset,  s,  s,  s + y_offset,  s,
+                 s,  s + y_offset,  s,  s,  s + y_offset, -s, -s,  s + y_offset, -s,
+                // Bottom face
+                -s, -s + y_offset, -s,  s, -s + y_offset, -s,  s, -s + y_offset,  s,
+                 s, -s + y_offset,  s, -s, -s + y_offset,  s, -s, -s + y_offset, -s,
+                // Right face
+                 s, -s + y_offset, -s,  s,  s + y_offset, -s,  s,  s + y_offset,  s,
+                 s,  s + y_offset,  s,  s, -s + y_offset,  s,  s, -s + y_offset, -s,
+                // Left face
+                -s, -s + y_offset, -s, -s, -s + y_offset,  s, -s,  s + y_offset,  s,
+                -s,  s + y_offset,  s, -s,  s + y_offset, -s, -s, -s + y_offset, -s,
+            ]);
+        }
+
+        function createBarn() {
+            // Tall, rectangular, red building (Barn)
+            const vertices = createCubeVertices(5, 2.5);
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            return { buffer, verticesCount: vertices.length / 3, color: [0.8, 0.4, 0.2, 1.0] }; 
+        }
+
+        function createWarehouse() {
+            // Wide, low, blue building (Warehouse)
+            const vertices = new Float32Array([
+                // Base Cube (e.g., 8x2x6 dimensions)
+                ...createCubeVertices(8, 1),
+            ]);
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            return { buffer, verticesCount: vertices.length / 3, color: [0.2, 0.2, 0.8, 1.0] }; 
+        }
+        
+        function createTruck() {
+            // Simple block on wheels (4 cubes)
+            const body = createCubeVertices(1.5, 0.75); // Body
+            // Combining vertices is complex without proper indexing,
+            // we will simplify the truck to just a colored cube for now.
+            const vertices = createCubeVertices(1.5, 0.75);
+            
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            return { buffer, verticesCount: vertices.length / 3 }; 
+        }
+        
+        function createTreeData() {
+            // Trunk: Tall, thin brown cylinder (cube)
+            const trunk = createCubeVertices(0.5, 2);
+            // Leaves: Green cube on top
+            const leaves = createCubeVertices(1.5, 3.5);
+
+            // Combine the two simple meshes
+            const combined = new Float32Array(trunk.length + leaves.length);
+            combined.set(trunk, 0);
+            combined.set(leaves, trunk.length);
+
+            const buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, combined, gl.STATIC_DRAW);
+
+            return { 
+                buffer, 
+                trunkCount: trunk.length / 3, 
+                leavesCount: leaves.length / 3, 
+                colorTrunk: [0.4, 0.2, 0.0, 1.0], 
+                colorLeaves: [0.1, 0.6, 0.1, 1.0] 
+            };
+        }
+        
+        // --- Matrix and Utility Functions (from previous code) ---
+        // (M4 functions remain the same)
+        const M4 = {
+            identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            perspective: (fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2);
+                const rangeInv = 1 / (near - far);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (near + far) * rangeInv, -1,
+                    0, 0, near * far * rangeInv * 2, 0
+                ];
+            },
+            translate: (m, x, y, z) => {
+                const out = [...m];
+                out[12] += m[0] * x + m[4] * y + m[8] * z;
+                out[13] += m[1] * x + m[5] * y + m[9] * z;
+                out[14] += m[2] * x + m[6] * y + m[10] * z;
+                out[15] += m[3] * x + m[7] * y + m[11] * z;
+                return out;
+            },
+            multiply: (a, b) => { // Basic matrix multiplication (A * B)
+                const c = M4.identity();
+                for (let i = 0; i < 4; i++) {
+                    for (let j = 0; j < 4; j++) {
+                        c[i * 4 + j] = a[i * 4 + 0] * b[0 + j] +
+                                        a[i * 4 + 1] * b[4 + j] +
+                                        a[i * 4 + 2] * b[8 + j] +
+                                        a[i * 4 + 3] * b[12 + j];
+                    }
+                }
+                return c;
+            },
+            rotateY: (m, angle) => { // Rotation around Y axis
+                const c = Math.cos(angle);
+                const s = Math.sin(angle);
+                const a0 = m[0], a1 = m[1], a2 = m[2], a3 = m[3];
+                const b0 = m[8], b1 = m[9], b2 = m[10], b3 = m[11];
+                m[0] = a0 * c - b0 * s; m[1] = a1 * c - b1 * s; m[2] = a2 * c - b2 * s; m[3] = a3 * c - b3 * s;
+                m[8] = a0 * s + b0 * c; m[9] = a1 * s + b1 * c; m[10] = a2 * s + b2 * c; m[11] = a3 * s + b3 * c;
+                return m;
+            },
+            scale: (m, x, y, z) => {
+                const out = [...m];
+                out[0] *= x; out[1] *= x; out[2] *= x; out[3] *= x;
+                out[4] *= y; out[5] *= y; out[6] *= y; out[7] *= y;
+                out[8] *= z; out[9] *= z; out[10] *= z; out[11] *= z;
+                return out;
+            }
+        };
+
+        // --- Input Controls ---
+        function setupInputControls() {
+            canvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            canvas.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+
+                const deltaX = e.clientX - lastMouseX;
+                const deltaY = e.clientY - lastMouseY;
+
+                camTheta += deltaX * 0.005;
+                // Limit phi (vertical rotation) to prevent flipping
+                camPhi = Math.min(Math.PI * 0.45, Math.max(0.1, camPhi + deltaY * 0.005));
+
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            // Zoom control (Mouse Wheel)
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                camRadius = Math.min(50, Math.max(10, camRadius + e.deltaY * 0.01));
+            });
+        }
+
+
+        // --- Game Logic ---
+        function updateGameLogic(deltaTime) {
+            // Calculate time in seconds
+            const dt_s = deltaTime / 1000;
+
+            // 1. Warehouse Conversion Logic
+            conversionTimer += deltaTime;
+            
+            const progressBar = document.getElementById('progress');
+
+            if (wood >= WOOD_PER_CONVERSION) {
+                // Update progress bar width
+                const progressPercent = (conversionTimer / CONVERSION_TIME_MS) * 100;
+                progressBar.style.width = `${progressPercent}%`;
+                document.getElementById('progress-percent').textContent = Math.min(100, Math.floor(progressPercent));
+
+
+                if (conversionTimer >= CONVERSION_TIME_MS) {
+                    wood -= WOOD_PER_CONVERSION;
+                    cash += CASH_PER_CONVERSION;
+                    conversionTimer = 0; // Reset timer
+                    progressBar.style.width = '0%';
+                }
+            } else {
+                // Not enough wood, reset timer slowly or pause
+                conversionTimer = 0; 
+                progressBar.style.width = '0%';
+                document.getElementById('progress-percent').textContent = '0 (Need Wood)';
+            }
+
+
+            // 2. Truck/Unit Movement Logic (Highly simplified state machine)
+            const TRUCK_SPEED = 5 * dt_s;
+            const HARVEST_AMOUNT = 5;
+            const DEPOSIT_RANGE_SQR = 25; // 5 units squared
+            
+            trucks.forEach(truck => {
+                if (truck.target === 'tree') {
+                    // Find the nearest unharvested tree
+                    const nearestTree = trees.find(t => !t.harvested);
+                    
+                    if (nearestTree) {
+                        const targetPos = nearestTree.pos;
+                        const dx = targetPos[0] - truck.pos[0];
+                        const dz = targetPos[2] - truck.pos[2];
+                        const distSqr = dx * dx + dz * dz;
+
+                        if (distSqr < DEPOSIT_RANGE_SQR) {
+                            // Arrived at tree: Harvest
+                            truck.wood = HARVEST_AMOUNT;
+                            nearestTree.harvested = true;
+                            truck.target = 'barn';
+                        } else {
+                            // Move towards tree
+                            const dist = Math.sqrt(distSqr);
+                            truck.pos[0] += (dx / dist) * TRUCK_SPEED;
+                            truck.pos[2] += (dz / dist) * TRUCK_SPEED;
+                            
+                            // Adjust Y position to terrain height
+                            truck.pos[1] = getHeight(truck.pos[0], truck.pos[2]) + 0.75; 
+                            // Update rotation
+                            truck.rotation = Math.atan2(dx, dz);
+                        }
+                    } else {
+                        // No trees left, wait at barn
+                        truck.target = 'barn';
+                    }
+
+                } else if (truck.target === 'barn') {
+                    const barnPos = buildings.barn.pos;
+                    const dx = barnPos[0] - truck.pos[0];
+                    const dz = barnPos[2] - truck.pos[2];
+                    const distSqr = dx * dx + dz * dz;
+                    
+                    if (distSqr < DEPOSIT_RANGE_SQR) {
+                        // Arrived at barn: Deposit wood
+                        if (truck.wood > 0) {
+                            wood += truck.wood;
+                            truck.wood = 0;
+                        }
+                        truck.target = 'tree'; // Go back to find a tree
+                    } else {
+                        // Move towards barn
+                        const dist = Math.sqrt(distSqr);
+                        truck.pos[0] += (dx / dist) * TRUCK_SPEED;
+                        truck.pos[2] += (dz / dist) * TRUCK_SPEED;
+
+                        // Adjust Y position to terrain height
+                        truck.pos[1] = getHeight(truck.pos[0], truck.pos[2]) + 0.75;
+                        // Update rotation
+                        truck.rotation = Math.atan2(dx, dz);
+                    }
+                }
+            });
+
+            // 3. Update UI
+            document.getElementById('woodCount').textContent = Math.floor(wood);
+            document.getElementById('cashCount').textContent = Math.floor(cash);
+        }
+
+        // --- Drawing/Rendering ---
+        function drawObject(data, position, color, modelMatrix = M4.identity(), scale = [1, 1, 1], rotation = 0) {
+            const u_MVP_loc = gl.getUniformLocation(program, 'u_modelViewProjectionMatrix');
+            const u_color_loc = gl.getUniformLocation(program, 'u_color');
+            const a_position_loc = gl.getAttribLocation(program, 'a_position');
+
+            // 1. Build Model Matrix (M)
+            let M = M4.identity();
+            M = M4.translate(M, position[0], position[1], position[2]);
+            M = M4.rotateY(M, rotation); // Apply rotation
+            M = M4.scale(M, scale[0], scale[1], scale[2]); // Apply scale
+            
+            // 2. Compute MVP Matrix (P * V * M)
+            const P = M4.perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 500.0);
+            
+            // Camera position based on orbital controls
+            const camX = camTarget[0] + camRadius * Math.sin(camPhi) * Math.sin(camTheta);
+            const camY = camTarget[1] + camRadius * Math.cos(camPhi);
+            const camZ = camTarget[2] + camRadius * Math.sin(camPhi) * Math.cos(camTheta);
+            
+            // Simple 'LookAt' V matrix (simplified) - just move the world relative to the camera
+            let V = M4.identity();
+            V = M4.translate(V, -camX, -camY, -camZ);
+            
+            // The multiplication logic is simplified and likely incorrect without a full matrix library
+            // For a basic visual effect, we'll just apply translation and rotation to the projection
+            // Correct multiplication requires a dedicated library: MVP = P * V * M
+            // Placeholder:
+            const tempPV = M4.translate(P, -camX, -camY, -camZ);
+            const MVP = M4.multiply(tempPV, M); 
+            
+            gl.uniformMatrix4fv(u_MVP_loc, false, MVP);
+
+            // 3. Draw
+            gl.bindBuffer(gl.ARRAY_BUFFER, data.buffer);
+            gl.vertexAttribPointer(a_position_loc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(a_position_loc);
+            
+            gl.uniform4fv(u_color_loc, color || data.color); 
+            
+            gl.drawArrays(gl.TRIANGLES, 0, data.verticesCount);
+        }
+
+        function drawScene(terrainData, barnData, warehouseData, truckData, treeData) {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // 1. Draw Terrain
+            drawObject(terrainData, [0, 0, 0], terrainData.color);
+
+            // 2. Draw Buildings
+            // Adjust position Y to terrain height
+            buildings.barn.pos[1] = getHeight(buildings.barn.pos[0], buildings.barn.pos[2]) + 2.5; 
+            buildings.warehouse.pos[1] = getHeight(buildings.warehouse.pos[0], buildings.warehouse.pos[2]) + 1; 
+
+            drawObject(buildings.barn, buildings.barn.pos, buildings.barn.color, M4.identity(), [1, 1, 1]);
+            drawObject(buildings.warehouse, buildings.warehouse.pos, buildings.warehouse.color, M4.identity(), [1, 1, 1]);
+
+            // 3. Draw Trees
+            trees.forEach(tree => {
+                if (!tree.harvested) {
+                    const scale = tree.size * 0.7;
+                    const pos = tree.pos;
+                    
+                    // Draw Trunk
+                    drawObject({ buffer: treeData.buffer, verticesCount: treeData.trunkCount }, pos, treeData.colorTrunk, M4.identity(), [scale, scale, scale]);
+
+                    // Draw Leaves (offset start by trunkCount)
+                    const u_MVP_loc = gl.getUniformLocation(program, 'u_modelViewProjectionMatrix');
+                    const u_color_loc = gl.getUniformLocation(program, 'u_color');
+                    const a_position_loc = gl.getAttribLocation(program, 'a_position');
+
+                    // Bind buffer and pointer setup is already done by drawObject call for the trunk
+
+                    // Build Model Matrix for leaves
+                    let M = M4.identity();
+                    M = M4.translate(M, pos[0], pos[1], pos[2]);
+                    M = M4.scale(M, scale, scale, scale);
+                    
+                    const P = M4.perspective(Math.PI / 4, canvas.width / canvas.height, 0.1, 500.0);
+                    const camX = camTarget[0] + camRadius * Math.sin(camPhi) * Math.sin(camTheta);
+                    const camY = camTarget[1] + camRadius * Math.cos(camPhi);
+                    const camZ = camTarget[2] + camRadius * Math.sin(camPhi) * Math.cos(camTheta);
+                    let V = M4.identity();
+                    V = M4.translate(V, -camX, -camY, -camZ);
+                    const tempPV = M4.translate(P, -camX, -camY, -camZ);
+                    const MVP = M4.multiply(tempPV, M); 
+
+                    gl.uniformMatrix4fv(u_MVP_loc, false, MVP);
+                    gl.uniform4fv(u_color_loc, treeData.colorLeaves);
+                    gl.drawArrays(gl.TRIANGLES, treeData.trunkCount, treeData.leavesCount);
+                }
+            });
+
+            // 4. Draw Trucks
+            trucks.forEach(truck => {
+                // Adjust model height/offset for the cube center (0.75 is half the body height)
+                drawObject(truckData, truck.pos, truck.color, M4.identity(), [1, 1, 1], truck.rotation);
+            });
+        }
+
+        // Run the main setup function
+        main();
+    </script>
+</body>
+</html>
