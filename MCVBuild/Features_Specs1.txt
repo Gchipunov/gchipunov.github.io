@@ -1,0 +1,48 @@
+notes:
+
+Solder1 
+  a.add ring selected
+  b. add selection rectangle feature
+
+Tank1 
+  a. add so tank can drive backwards 
+  (b?) add so tank can run over infantry
+
+
+Power Plant
+     a. add update to nuclear ( coal, gas, nuclear upgrade levels, 2 Placements, some can increase size)
+    b. explodes more if upgraded
+    (c?. ) enegry bar
+
+Barracks  
+     a. add so can train bears
+     b. add so can train rifle guys
+     c. add so can train rpg solders
+
+
+
+
+AI CPU
+    a. make AI CPU can that deploy MCV and build base also
+
+
+MCV Make 
+     a. crane move when building
+     b. provide a building grid
+     c. add cost to building
+
+UI Interface
+     a. when infacntry selected show selected unit on bottom
+     b. add radar
+
+Terrian
+     a. add grass terrian
+    b. add roads
+        i. bezier curve roads
+     c. add gravel dirt terrian
+
+Silo Building
+     a. provide a target area sprite mark
+     b. missle reload time timer in UI
+     c. missle launch button stack super power ability buttons
+
