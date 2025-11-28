@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>WebGL RTS: Miner Command (Mobile)</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none; /* Prevent text selection on touch */
+            -webkit-user-select: none;
+            touch-action: none; /* Prevent browser scrolling */
+        }
+        canvas { display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* Top Bar */
+        .top-row {
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        #stats-bar {
+            background: rgba(0, 0, 0, 0.7);
+            color: #4ff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            pointer-events: auto;
+            border: 1px solid #4ff;
+            box-shadow: 0 0 10px #000;
+        }
+
+        /* Message Log */
+        #messages {
+            position: absolute;
+            top: 15%;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            color: yellow;
+            font-size: 24px;
+            text-shadow: 2px 2px 0 #000;
+            opacity: 0;
+            transition: opacity 0.5s;
+            pointer-events: none;
+        }
+
+        /* Bottom Controls Container */
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            width: 100%;
+            padding-bottom: 20px;
+            pointer-events: none;
+        }
+
+        /* D-Pad Camera Controls */
+        #d-pad {
+            pointer-events: auto;
+            display: grid;
+            grid-template-columns: 60px 60px 60px;
+            grid-template-rows: 60px 60px;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+        .d-btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: manipulation;
+        }
+        .d-btn:active { background: rgba(0, 255, 255, 0.5); }
+        .d-up { grid-column: 2; grid-row: 1; }
+        .d-left { grid-column: 1; grid-row: 2; }
+        .d-down { grid-column: 2; grid-row: 2; }
+        .d-right { grid-column: 3; grid-row: 2; }
+
+        /* Build Menu */
+        #build-menu {
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .btn {
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            border: 1px solid #666;
+            padding: 15px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px; /* Larger for touch */
+            font-weight: bold;
+            text-transform: uppercase;
+            width: 160px;
+            text-align: center;
+            touch-action: manipulation;
+        }
+
+        .btn:active { background: #555; transform: scale(0.95); }
+        .btn.cancel { border-color: #ff4444; color: #ffaaaa; }
+        
+        #active-mode-display {
+            display: none;
+            background: rgba(0, 255, 0, 0.2);
+            padding: 10px;
+            border: 1px solid #0f0;
+            color: #0f0;
+            margin-bottom: 10px;
+            text-align: center;
+            font-weight: bold;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="top-row">
+            <div id="stats-bar">Credits: <span id="credits">1500</span></div>
+        </div>
+        
+        <div id="messages"></div>
+
+        <div class="controls-row">
+            
+            <div id="d-pad">
+                <div class="d-btn d-up" onpointerdown="startCam(0, -1)" onpointerup="stopCam()" onpointerleave="stopCam()">▲</div>
+                <div class="d-btn d-left" onpointerdown="startCam(-1, 0)" onpointerup="stopCam()" onpointerleave="stopCam()">◀</div>
+                <div class="d-btn d-down" onpointerdown="startCam(0, 1)" onpointerup="stopCam()" onpointerleave="stopCam()">▼</div>
+                <div class="d-btn d-right" onpointerdown="startCam(1, 0)" onpointerup="stopCam()" onpointerleave="stopCam()">▶</div>
+            </div>
+
+            <div id="build-menu">
+                <div id="active-mode-display">PLACEMENT MODE</div>
+                <button class="btn" onclick="setBuildMode('barracks', 150)">Barracks (150)</button>
+                <button class="btn" onclick="setBuildMode('refinery', 300)">Refinery (300)</button>
+                <button class="btn cancel" onclick="cancelBuild()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Game Configuration ---
+        const CONFIG = {
+            TRUCK_SPEED: 0.1,
+            TRUCK_COST: 50,
+            MINING_RATE: 20, 
+            MINE_TIME: 60,
+            CAMERA_SPEED: 0.5,
+            COLORS: {
+                GROUND: 0x2b2b2b,
+                BASE: 0x0044ff,
+                BARRACKS: 0xff2222,
+                REFINERY: 0x00ffff,
+                TRUCK: 0xffff00,
+                ORE: 0xffaa00,
+                GHOST_VALID: 0x00ff00,
+                GHOST_INVALID: 0xff0000
+            }
+        };
+
+        // --- Global State ---
+        let state = {
+            credits: 1500, // Increased credits
+            buildMode: null, 
+            buildCost: 0,
+            units: [],
+            buildings: [],
+            ores: [],
+            cameraVelocity: { x: 0, z: 0 }
+        };
+
+        // --- Three.js Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x151515);
+
+        const aspect = window.innerWidth / window.innerHeight;
+        const d = 25; // Zoom out slightly for mobile
+        const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+        camera.position.set(20, 20, 20);
+        camera.lookAt(scene.position);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.setPixelRatio(window.devicePixelRatio); // Sharpness for mobile
+        document.body.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Ground
+        const planeGeometry = new THREE.PlaneGeometry(100, 100);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.GROUND });
+        const ground = new THREE.Mesh(planeGeometry, planeMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        ground.name = "ground";
+        scene.add(ground);
+
+        // Grid Helper
+        const gridHelper = new THREE.GridHelper(100, 50, 0x444444, 0x333333);
+        scene.add(gridHelper);
+
+        // Ghost Building
+        const ghostGeo = new THREE.BoxGeometry(2, 2, 2);
+        const ghostMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+        const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
+        ghostMesh.visible = false;
+        scene.add(ghostMesh);
+
+        // Raycaster
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+
+        // --- Classes ---
+
+        class Building {
+            constructor(type, x, z) {
+                this.type = type;
+                this.mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(2, 2, 2),
+                    new THREE.MeshStandardMaterial({ color: this.getColor(type) })
+                );
+                this.mesh.position.set(x, 1, z);
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = true;
+                
+                if(type === 'base') {
+                    const flag = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 0.5), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                    flag.position.y = 1;
+                    this.mesh.add(flag);
+                }
+
+                this.mesh.userData = { type: type, entity: this };
+                scene.add(this.mesh);
+                state.buildings.push(this);
+            }
+            getColor(type) {
+                if (type === 'base') return CONFIG.COLORS.BASE;
+                if (type === 'barracks') return CONFIG.COLORS.BARRACKS;
+                if (type === 'refinery') return CONFIG.COLORS.REFINERY;
+                return 0xffffff;
+            }
+        }
+
+        class Ore {
+            constructor(x, z) {
+                this.amount = 500;
+                this.mesh = new THREE.Mesh(
+                    new THREE.DodecahedronGeometry(0.8),
+                    new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.ORE })
+                );
+                this.mesh.position.set(x, 0.5, z);
+                this.mesh.castShadow = true;
+                scene.add(this.mesh);
+                state.ores.push(this);
+            }
+        }
+
+        class Truck {
+            constructor(x, z) {
+                this.mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.8, 0.8, 1.2),
+                    new THREE.MeshStandardMaterial({ color: CONFIG.COLORS.TRUCK })
+                );
+                this.mesh.position.set(x, 0.4, z);
+                this.mesh.castShadow = true;
+                scene.add(this.mesh);
+                this.state = 'IDLE'; 
+                this.target = null;
+                this.cargo = 0;
+                this.timer = 0;
+                state.units.push(this);
+            }
+
+            update() {
+                if (this.state === 'IDLE') {
+                    this.target = this.findNearest(state.ores);
+                    if (this.target) this.state = 'MOVE_TO_ORE';
+                } 
+                else if (this.state === 'MOVE_TO_ORE') {
+                    if (!this.target || this.target.amount <= 0) { this.state = 'IDLE'; return; }
+                    if (this.moveTowards(this.target.mesh.position)) {
+                        this.state = 'MINING';
+                        this.timer = CONFIG.MINE_TIME;
+                    }
+                } 
+                else if (this.state === 'MINING') {
+                    this.mesh.rotation.z = Math.sin(Date.now() * 0.02) * 0.1;
+                    this.timer--;
+                    if (this.timer <= 0) {
+                        this.cargo = CONFIG.MINING_RATE;
+                        this.mesh.rotation.z = 0;
+                        const dropoffs = state.buildings.filter(b => b.type === 'base' || b.type === 'refinery');
+                        this.target = this.findNearest(dropoffs);
+                        this.state = 'MOVE_TO_BASE';
+                    }
+                } 
+                else if (this.state === 'MOVE_TO_BASE') {
+                    if (this.moveTowards(this.target.mesh.position)) {
+                        addCredits(this.cargo);
+                        showMessage(`+${this.cargo} Credits`);
+                        this.cargo = 0;
+                        this.state = 'IDLE';
+                    }
+                }
+            }
+
+            moveTowards(targetPos) {
+                const speed = CONFIG.TRUCK_SPEED;
+                const dx = targetPos.x - this.mesh.position.x;
+                const dz = targetPos.z - this.mesh.position.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                this.mesh.lookAt(targetPos.x, this.mesh.position.y, targetPos.z);
+                if (dist < 1.5) return true; 
+                this.mesh.position.x += (dx / dist) * speed;
+                this.mesh.position.z += (dz / dist) * speed;
+                return false;
+            }
+
+            findNearest(list) {
+                let nearest = null;
+                let minDst = Infinity;
+                list.forEach(obj => {
+                    const dist = this.mesh.position.distanceTo(obj.mesh.position);
+                    if (dist < minDst) { minDst = dist; nearest = obj; }
+                });
+                return nearest;
+            }
+        }
+
+        // --- Logic & Events ---
+
+        function initLevel() {
+            new Building('base', 0, 0);
+            for(let i=0; i<10; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 10 + Math.random() * 20;
+                new Ore(Math.cos(angle)*radius, Math.sin(angle)*radius);
+            }
+        }
+
+        function addCredits(amount) {
+            state.credits += amount;
+            document.getElementById('credits').innerText = state.credits;
+        }
+
+        function showMessage(text) {
+            const el = document.getElementById('messages');
+            el.innerText = text;
+            el.style.opacity = 1;
+            setTimeout(() => el.style.opacity = 0, 1500);
+        }
+
+        // --- UNIFIED INPUT HANDLING (Mouse + Touch) ---
+
+        // Helper to get normalized coordinates from event
+        function updatePointer(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            // Handle both Mouse and Touch events
+            const clientX = event.clientX;
+            const clientY = event.clientY;
+            
+            pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+            pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        }
+
+        // Handle Movement (Dragging Ghost)
+        window.addEventListener('pointermove', (event) => {
+            if(!event.isPrimary) return;
+            updatePointer(event);
+
+            if (state.buildMode) {
+                raycaster.setFromCamera(pointer, camera);
+                const intersects = raycaster.intersectObject(ground);
+                if (intersects.length > 0) {
+                    ghostMesh.visible = true;
+                    ghostMesh.position.copy(intersects[0].point);
+                    ghostMesh.position.y = 1;
+                    // Snap to grid
+                    ghostMesh.position.x = Math.round(ghostMesh.position.x);
+                    ghostMesh.position.z = Math.round(ghostMesh.position.z);
+                    
+                    const canAfford = state.credits >= state.buildCost;
+                    ghostMesh.material.color.setHex(canAfford ? CONFIG.COLORS.GHOST_VALID : CONFIG.COLORS.GHOST_INVALID);
+                }
+            }
+        });
+
+        // Handle Clicks / Taps
+        renderer.domElement.addEventListener('pointerdown', (event) => {
+            if(!event.isPrimary) return;
+            updatePointer(event);
+            raycaster.setFromCamera(pointer, camera);
+
+            // 1. Placement Logic
+            if (state.buildMode) {
+                const intersects = raycaster.intersectObject(ground);
+                if (intersects.length > 0) {
+                    // Update ghost position to exactly where we tapped before building
+                    const p = intersects[0].point;
+                    const bx = Math.round(p.x);
+                    const bz = Math.round(p.z);
+
+                    if (state.credits >= state.buildCost) {
+                        new Building(state.buildMode, bx, bz);
+                        addCredits(-state.buildCost);
+                        showMessage("Construction Complete");
+                        state.buildMode = null; // Exit build mode
+                        ghostMesh.visible = false;
+                        document.getElementById('active-mode-display').style.display = 'none';
+                    } else {
+                        showMessage("Insufficient Funds!");
+                    }
+                }
+                return;
+            }
+
+            // 2. Base Interaction (Buy Truck)
+            const intersects = raycaster.intersectObjects(scene.children);
+            for (let i = 0; i < intersects.length; i++) {
+                const obj = intersects[i].object;
+                if (obj.userData && obj.userData.type === 'base') {
+                    if (state.credits >= CONFIG.TRUCK_COST) {
+                        addCredits(-CONFIG.TRUCK_COST);
+                        const offsetX = (Math.random() - 0.5) * 4;
+                        const offsetZ = (Math.random() - 0.5) * 4;
+                        new Truck(obj.position.x + offsetX, obj.position.z + offsetZ);
+                        showMessage("Truck Deployed");
+                    } else {
+                        showMessage("Need " + CONFIG.TRUCK_COST + " cr");
+                    }
+                    break;
+                }
+            }
+        });
+
+        // --- UI & Camera Functions ---
+
+        // Exposed functions for HTML buttons
+        window.setBuildMode = (type, cost) => {
+            state.buildMode = type;
+            state.buildCost = cost;
+            ghostMesh.visible = true;
+            document.getElementById('active-mode-display').innerText = `PLACING: ${type.toUpperCase()}`;
+            document.getElementById('active-mode-display').style.display = 'block';
+        };
+
+        window.cancelBuild = () => {
+            state.buildMode = null;
+            ghostMesh.visible = false;
+            document.getElementById('active-mode-display').style.display = 'none';
+        };
+
+        // Camera Controls
+        window.startCam = (x, z) => { state.cameraVelocity = { x, z }; };
+        window.stopCam = () => { state.cameraVelocity = { x: 0, z: 0 }; };
+
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Main Loop ---
+        initLevel();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Unit Logic
+            state.units.forEach(u => u.update());
+
+            // Camera Movement
+            if (state.cameraVelocity.x !== 0 || state.cameraVelocity.z !== 0) {
+                camera.position.x += state.cameraVelocity.x * CONFIG.CAMERA_SPEED;
+                camera.position.z += state.cameraVelocity.z * CONFIG.CAMERA_SPEED;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
