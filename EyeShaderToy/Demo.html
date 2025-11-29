@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Procedural WebGL Eye Shader</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+
+<div id="instructions">Move your mouse to look around</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script type="x-shader/x-vertex" id="vertexShader">
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+
+    void main() {
+        vUv = uv;
+        vNormal = normalize(normalMatrix * normal);
+        vPosition = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+</script>
+
+<script type="x-shader/x-fragment" id="fragmentShader">
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+
+    uniform float uTime;
+    uniform vec3 uColor;
+
+    // --- Noise Functions for Iris Detail ---
+    vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+    vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+    float snoise(vec2 v) {
+        const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                 -0.577350269189626, 0.024390243902439);
+        vec2 i  = floor(v + dot(v, C.yy) );
+        vec2 x0 = v -   i + dot(i, C.xx);
+        vec2 i1;
+        i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        vec4 x12 = x0.xyxy + C.xxzz;
+        x12.xy -= i1;
+        i = mod289(i);
+        vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+        + i.x + vec3(0.0, i1.x, 1.0 ));
+        vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+        m = m*m ;
+        m = m*m ;
+        vec3 x = 2.0 * fract(p * C.www) - 1.0;
+        vec3 h = abs(x) - 0.5;
+        vec3 ox = floor(x + 0.5);
+        vec3 a0 = x - ox;
+        m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+        vec3 g;
+        g.x  = a0.x  * x0.x  + h.x  * x0.y;
+        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+        return 130.0 * dot(m, g);
+    }
+
+    void main() {
+        // Define the direction the eye is looking (Object space forward is Z)
+        vec3 viewDir = vec3(0.0, 0.0, 1.0);
+        
+        // Calculate dot product to determine rings (Pupil, Iris, Sclera)
+        // Since we are mapping to a sphere, the dot product of Normal and ViewDir
+        // creates concentric rings from the "front" of the sphere.
+        float dotProd = dot(vNormal, viewDir);
+        
+        // --- Configuration ---
+        float pupilSize = 0.98;
+        float irisSize = 0.90;
+        float pupilEdgeSoftness = 0.005;
+        float irisEdgeSoftness = 0.01;
+        
+        // --- Colors ---
+        vec3 colorPupil = vec3(0.05, 0.0, 0.05); // Almost black
+        vec3 colorSclera = vec3(0.95, 0.95, 0.98); // Whiteish
+        vec3 colorIrisBase = uColor; 
+
+        // --- Iris Noise/Fibers ---
+        // Convert position to polar coordinates for radial noise
+        vec2 centeredPos = vPosition.xy;
+        float angle = atan(centeredPos.y, centeredPos.x);
+        float radius = length(centeredPos);
+        
+        // Create noise based on angle and radius
+        float noiseVal = snoise(vec2(angle * 2.0, radius * 10.0));
+        float detailNoise = snoise(vec2(angle * 10.0, radius * 20.0));
+        
+        // Mix noise into iris color
+        vec3 colorIris = mix(colorIrisBase, colorIrisBase * 0.5, noiseVal * 0.5 + 0.5);
+        colorIris += detailNoise * 0.1;
+        
+        // Darken the outer edge of the iris (limbal ring)
+        float limbalRing = smoothstep(irisSize, irisSize + 0.05, dotProd);
+        colorIris = mix(colorIris * 0.5, colorIris, limbalRing);
+
+        // --- Veins in Sclera ---
+        float veins = snoise(vPosition.xy * 3.0 + vec2(uTime * 0.1));
+        vec3 veinColor = vec3(0.9, 0.7, 0.7);
+        colorSclera = mix(colorSclera, veinColor, smoothstep(0.6, 0.9, veins) * 0.2);
+
+        // --- Mixing Layers ---
+        vec3 finalColor;
+
+        // Smoothstep for anti-aliased edges between zones
+        float pupilMix = smoothstep(pupilSize - pupilEdgeSoftness, pupilSize, dotProd);
+        float irisMix = smoothstep(irisSize - irisEdgeSoftness, irisSize, dotProd);
+
+        if (dotProd > pupilSize) {
+             finalColor = colorPupil;
+        } else if (dotProd > irisSize) {
+             finalColor = colorIris;
+        } else {
+             finalColor = colorSclera;
+        }
+
+        // Add a fake specular highlight (wetness reflection)
+        // We reflect a light source vector off the normal
+        vec3 lightDir = normalize(vec3(1.0, 1.0, 2.0));
+        vec3 reflectDir = reflect(-lightDir, vNormal);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 30.0);
+        finalColor += spec * 0.8;
+
+        gl_FragColor = vec4(finalColor, 1.0);
+    }
+</script>
+
+<script>
+    // 1. Setup Scene
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 5;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // 2. Create Shader Material
+    const uniforms = {
+        uTime: { value: 0.0 },
+        uColor: { value: new THREE.Color(0x3498db) } // Default Blue
+    };
+
+    const materialLeft = new THREE.ShaderMaterial({
+        vertexShader: document.getElementById('vertexShader').textContent,
+        fragmentShader: document.getElementById('fragmentShader').textContent,
+        uniforms: { 
+            uTime: { value: 0.0 },
+            uColor: { value: new THREE.Color(0x4488ff) } // Blue eye
+        }
+    });
+
+    const materialRight = new THREE.ShaderMaterial({
+        vertexShader: document.getElementById('vertexShader').textContent,
+        fragmentShader: document.getElementById('fragmentShader').textContent,
+        uniforms: { 
+            uTime: { value: 0.0 },
+            uColor: { value: new THREE.Color(0x44ff88) } // Green eye
+        }
+    });
+
+    // 3. Create Meshes (Spheres)
+    const geometry = new THREE.SphereGeometry(1, 64, 64);
+    
+    const eyeLeft = new THREE.Mesh(geometry, materialLeft);
+    eyeLeft.position.x = -1.2;
+    scene.add(eyeLeft);
+
+    const eyeRight = new THREE.Mesh(geometry, materialRight);
+    eyeRight.position.x = 1.2;
+    scene.add(eyeRight);
+
+    // 4. Mouse Tracking Variables
+    const mouse = new THREE.Vector2();
+    const windowHalfX = window.innerWidth / 2;
+    const windowHalfY = window.innerHeight / 2;
+
+    document.addEventListener('mousemove', (event) => {
+        mouse.x = (event.clientX - windowHalfX) / 100;
+        mouse.y = (event.clientY - windowHalfY) / 100;
+    });
+
+    // 5. Animation Loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const elapsedTime = clock.getElapsedTime();
+
+        // Update Uniforms
+        materialLeft.uniforms.uTime.value = elapsedTime;
+        materialRight.uniforms.uTime.value = elapsedTime;
+
+        // Eye Movement Logic
+        // We limit the rotation so the eyes don't roll back into the head
+        const targetX = Math.max(Math.min(mouse.y * 0.5, 1.0), -1.0);
+        const targetY = Math.max(Math.min(mouse.x * 0.5, 1.0), -1.0);
+
+        eyeLeft.rotation.x += (targetX - eyeLeft.rotation.x) * 0.1;
+        eyeLeft.rotation.y += (targetY - eyeLeft.rotation.y) * 0.1;
+
+        eyeRight.rotation.x += (targetX - eyeRight.rotation.x) * 0.1;
+        eyeRight.rotation.y += (targetY - eyeRight.rotation.y) * 0.1;
+
+        renderer.render(scene, camera);
+    }
+
+    // Handle Window Resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+</script>
+
+</body>
+</html>
