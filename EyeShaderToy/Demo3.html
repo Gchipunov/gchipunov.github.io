@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Advanced WebGL Eye Shader Editor</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        
+        /* Overlay UI */
+        #instructions {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.6);
+            pointer-events: none;
+            z-index: 1;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        /* Shader Editor Container */
+        #editor-container {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 450px;
+            height: 100vh;
+            background: #1e1e1e;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid #333;
+            z-index: 10;
+            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transform: translateX(0); /* Default visible */
+            box-shadow: -5px 0 15px rgba(0,0,0,0.5);
+        }
+
+        /* The minimized state class */
+        #editor-container.collapsed {
+            transform: translateX(450px);
+        }
+
+        /* Toggle Button (The little tab sticking out) */
+        #toggle-btn {
+            position: absolute;
+            left: -30px;
+            top: 50%;
+            width: 30px;
+            height: 60px;
+            background: #2ecc71;
+            border: none;
+            border-radius: 4px 0 0 4px;
+            cursor: pointer;
+            color: white;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+        }
+        #toggle-btn:hover { background: #27ae60; }
+
+        /* Tabs Header */
+        #tabs {
+            display: flex;
+            background: #252526;
+        }
+        .tab {
+            flex: 1;
+            padding: 12px;
+            background: #252526;
+            color: #888;
+            border: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-size: 12px;
+            font-weight: 600;
+            transition: background 0.2s, color 0.2s;
+        }
+        .tab:hover { background: #2d2d2d; color: #ddd; }
+        .tab.active {
+            color: #dcdcdc;
+            background: #1e1e1e;
+            border-bottom: 2px solid #2ecc71;
+        }
+
+        /* Code Area */
+        #codeEditor {
+            flex-grow: 1;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            border: none;
+            padding: 15px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+            white-space: pre;
+            overflow: auto;
+            border-top: 1px solid #333;
+            border-bottom: 1px solid #333;
+        }
+        
+        /* Custom Scrollbar for editor */
+        #codeEditor::-webkit-scrollbar { width: 10px; height: 10px; }
+        #codeEditor::-webkit-scrollbar-track { background: #1e1e1e; }
+        #codeEditor::-webkit-scrollbar-thumb { background: #444; border-radius: 5px; }
+        #codeEditor::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        /* Footer Controls */
+        #controls {
+            padding: 15px;
+            background: #252526;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #compileBtn {
+            background: #2ecc71;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 4px;
+            width: 100%;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+        #compileBtn:hover { background: #27ae60; }
+        
+        #status {
+            color: #ff6b6b;
+            font-size: 11px;
+            font-family: monospace;
+            min-height: 15px;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+
+<div id="instructions">Move mouse to look • Click arrow to toggle Editor</div>
+
+<div id="editor-container">
+    <button id="toggle-btn" title="Toggle Editor">
+        <span id="toggle-icon">&gt;</span>
+    </button>
+    
+    <div id="tabs">
+        <button class="tab active" id="tabFrag">FRAGMENT SHADER</button>
+        <button class="tab" id="tabVert">VERTEX SHADER</button>
+    </div>
+
+    <textarea id="codeEditor" spellcheck="false"></textarea>
+    
+    <div id="controls">
+        <button id="compileBtn">Update & Compile</button>
+        <div id="status"></div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script type="x-shader/x-vertex" id="vertexShader">
+varying vec2 vUv;
+varying vec3 vNormal;
+varying vec3 vPosition;
+
+// Example: You can deform the eye here
+void main() {
+    vUv = uv;
+    vNormal = normalize(normalMatrix * normal);
+    vPosition = position;
+    
+    // Standard position
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fragmentShader">
+varying vec2 vUv;
+varying vec3 vNormal;
+varying vec3 vPosition;
+
+uniform float uTime;
+uniform vec3 uColor;
+
+// --- Noise Functions ---
+vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+             -0.577350269189626, 0.024390243902439);
+    vec2 i  = floor(v + dot(v, C.yy) );
+    vec2 x0 = v -   i + dot(i, C.xx);
+    vec2 i1;
+    i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+    i = mod289(i);
+    vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+    + i.x + vec3(0.0, i1.x, 1.0 ));
+    vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+    m = m*m ;
+    m = m*m ;
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+    m *= 1.79284291400159 - 0.85373472095314 * ( a0*a0 + h*h );
+    vec3 g;
+    g.x  = a0.x  * x0.x  + h.x  * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+}
+
+void main() {
+    vec3 viewDir = vec3(0.0, 0.0, 1.0);
+    float dotProd = dot(vNormal, viewDir);
+    
+    // Config
+    float pupilSize = 0.98;
+    float irisSize = 0.90;
+    
+    // Colors
+    vec3 colorPupil = vec3(0.02);
+    vec3 colorSclera = vec3(0.95, 0.95, 0.98);
+    vec3 colorIris = uColor; 
+
+    // Iris Detail
+    vec2 centeredPos = vPosition.xy;
+    float angle = atan(centeredPos.y, centeredPos.x);
+    float radius = length(centeredPos);
+    
+    float noiseVal = snoise(vec2(angle * 2.5, radius * 12.0));
+    colorIris = mix(colorIris, colorIris * 0.4, noiseVal * 0.5 + 0.5);
+    
+    // Limbal Ring
+    float limbal = smoothstep(irisSize, irisSize + 0.04, dotProd);
+    colorIris = mix(colorIris * 0.2, colorIris, limbal);
+
+    // Veins
+    float veins = snoise(vPosition.xy * 3.5 + vec2(uTime * 0.05));
+    colorSclera = mix(colorSclera, vec3(0.9,0.7,0.7), smoothstep(0.5, 0.8, veins) * 0.15);
+
+    // Mixing Layers
+    vec3 finalColor;
+    if (dotProd > pupilSize) finalColor = colorPupil;
+    else if (dotProd > irisSize) finalColor = colorIris;
+    else finalColor = colorSclera;
+
+    // Specular Reflection (Wetness)
+    vec3 lightDir = normalize(vec3(1.0, 1.0, 2.0));
+    vec3 reflectDir = reflect(-lightDir, vNormal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 40.0);
+    finalColor += spec * 0.9;
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}
+</script>
+
+<script>
+    // --- 1. Scene Setup ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 5;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // --- 2. Shader State Management ---
+    let activeTab = 'fragment'; // 'fragment' or 'vertex'
+    
+    // Store current code state
+    let codeState = {
+        fragment: document.getElementById('fragmentShader').textContent.trim(),
+        vertex: document.getElementById('vertexShader').textContent.trim()
+    };
+
+    // --- 3. UI Element References ---
+    const editor = document.getElementById('codeEditor');
+    const tabFrag = document.getElementById('tabFrag');
+    const tabVert = document.getElementById('tabVert');
+    const compileBtn = document.getElementById('compileBtn');
+    const statusDiv = document.getElementById('status');
+    const editorContainer = document.getElementById('editor-container');
+    const toggleBtn = document.getElementById('toggle-btn');
+    const toggleIcon = document.getElementById('toggle-icon');
+
+    // Initialize Editor
+    editor.value = codeState.fragment;
+
+    // --- 4. Material Setup ---
+    function createEyeMaterial(colorHex) {
+        return new THREE.ShaderMaterial({
+            vertexShader: codeState.vertex,
+            fragmentShader: codeState.fragment,
+            uniforms: { 
+                uTime: { value: 0.0 },
+                uColor: { value: new THREE.Color(colorHex) }
+            }
+        });
+    }
+
+    const materialLeft = createEyeMaterial(0x4488ff);
+    const materialRight = createEyeMaterial(0x44ff88);
+
+    const geometry = new THREE.SphereGeometry(1, 64, 64);
+    
+    const eyeLeft = new THREE.Mesh(geometry, materialLeft);
+    eyeLeft.position.x = -1.2;
+    scene.add(eyeLeft);
+
+    const eyeRight = new THREE.Mesh(geometry, materialRight);
+    eyeRight.position.x = 1.2;
+    scene.add(eyeRight);
+
+    // --- 5. UI Logic ---
+
+    // Toggle Collapse
+    toggleBtn.addEventListener('click', () => {
+        editorContainer.classList.toggle('collapsed');
+        if(editorContainer.classList.contains('collapsed')) {
+            toggleIcon.innerHTML = "&lt;"; // Arrow pointing left
+        } else {
+            toggleIcon.innerHTML = "&gt;"; // Arrow pointing right
+        }
+    });
+
+    // Tab Switching Logic
+    function switchTab(targetTab) {
+        if(activeTab === targetTab) return;
+
+        // Save current editor content to state
+        codeState[activeTab] = editor.value;
+
+        // Switch State
+        activeTab = targetTab;
+
+        // Update UI
+        if(activeTab === 'fragment') {
+            tabFrag.classList.add('active');
+            tabVert.classList.remove('active');
+            editor.value = codeState.fragment;
+        } else {
+            tabVert.classList.add('active');
+            tabFrag.classList.remove('active');
+            editor.value = codeState.vertex;
+        }
+    }
+
+    tabFrag.addEventListener('click', () => switchTab('fragment'));
+    tabVert.addEventListener('click', () => switchTab('vertex'));
+
+    // Compile Logic
+    compileBtn.addEventListener('click', () => {
+        // 1. Save whatever is currently in the editor to the state
+        codeState[activeTab] = editor.value;
+        
+        statusDiv.innerText = '';
+
+        try {
+            // 2. Update both materials with NEW state
+            materialLeft.vertexShader = codeState.vertex;
+            materialLeft.fragmentShader = codeState.fragment;
+            materialLeft.needsUpdate = true;
+            
+            materialRight.vertexShader = codeState.vertex;
+            materialRight.fragmentShader = codeState.fragment;
+            materialRight.needsUpdate = true;
+
+            console.log("Shaders updated.");
+        } catch (e) {
+            statusDiv.innerText = "JS Error: " + e.message;
+        }
+    });
+
+    // --- 6. Interaction Logic ---
+    const mouse = new THREE.Vector2();
+
+    document.addEventListener('mousemove', (event) => {
+        // Prevent eye movement when interacting with the editor to avoid dizziness/distraction
+        const isHoveringEditor = editorContainer.contains(event.target) && !editorContainer.classList.contains('collapsed');
+        
+        if(!isHoveringEditor) {
+            mouse.x = (event.clientX - window.innerWidth / 2) / 100;
+            mouse.y = (event.clientY - window.innerHeight / 2) / 100;
+        }
+    });
+
+    // Handle Window Resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- 7. Animation Loop ---
+    const clock = new THREE.Clock();
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const elapsedTime = clock.getElapsedTime();
+
+        // Update Uniforms
+        materialLeft.uniforms.uTime.value = elapsedTime;
+        materialRight.uniforms.uTime.value = elapsedTime;
+
+        // Eye Rotation Math
+        const targetX = Math.max(Math.min(mouse.y * 0.5, 1.0), -1.0);
+        const targetY = Math.max(Math.min(mouse.x * 0.5, 1.0), -1.0);
+
+        eyeLeft.rotation.x += (targetX - eyeLeft.rotation.x) * 0.1;
+        eyeLeft.rotation.y += (targetY - eyeLeft.rotation.y) * 0.1;
+
+        eyeRight.rotation.x += (targetX - eyeRight.rotation.x) * 0.1;
+        eyeRight.rotation.y += (targetY - eyeRight.rotation.y) * 0.1;
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+</script>
+
+</body>
+</html>
