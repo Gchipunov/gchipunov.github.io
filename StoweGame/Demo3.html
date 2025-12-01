@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Warehouse Stowing Sim - Directed Stow</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a1a; touch-action: none; }
+        canvas { display: block; }
+        
+        /* HUD overlay */
+        #ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        h1 { margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 2px; color: #4facfe; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+        
+        #stats {
+            margin-top: 10px;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            width: 240px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+        }
+
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; align-items: center; }
+        .highlight { color: #f093fb; font-weight: bold; }
+        .rate-box { color: #00e5ff; font-weight: bold; font-family: monospace; font-size: 1.1em; }
+
+        /* Target Location Box */
+        #target-box {
+            margin-top: 10px;
+            padding: 8px;
+            background: rgba(255, 0, 100, 0.2);
+            border: 1px solid #ff0066;
+            border-radius: 4px;
+            color: #ff99bb;
+            text-align: center;
+            font-weight: bold;
+            animation: pulse-border 1s infinite alternate;
+        }
+
+        @keyframes pulse-border { from { border-color: #ff0066; } to { border-color: #ffffff; } }
+
+        /* Time Off Task Styles */
+        #tot-container { border-top: 1px solid #555; padding-top: 8px; margin-top: 5px; }
+        #tot-val { font-weight: bold; color: #00ff00; transition: color 0.3s; }
+        .tot-warn { color: #ffaa00 !important; }
+        .tot-crit { color: #ff0000 !important; animation: blink 1s infinite; }
+
+        @keyframes blink { 50% { opacity: 0.5; } }
+        
+        #cursor-info {
+            position: absolute;
+            top: 60px; /* Moved down slightly */
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            color: #ffd700;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 16px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 10;
+        }
+
+        /* --- MOBILE CONTROLS --- */
+        .control-group { position: absolute; bottom: 20px; z-index: 20; display: flex; gap: 10px; }
+        #d-pad { left: 20px; display: grid; grid-template-columns: 50px 50px 50px; grid-template-rows: 50px 50px; gap: 5px; }
+        #zoom-pad { right: 20px; flex-direction: column; }
+        .btn {
+            background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); color: white;
+            border-radius: 8px; font-size: 20px; cursor: pointer; backdrop-filter: blur(4px);
+            touch-action: manipulation; user-select: none; display: flex; align-items: center; justify-content: center;
+        }
+        .btn:active { background: rgba(79, 172, 254, 0.5); border-color: #4facfe; }
+        #btn-up { grid-column: 2; grid-row: 1; }
+        #btn-left { grid-column: 1; grid-row: 2; }
+        #btn-down { grid-column: 2; grid-row: 2; }
+        #btn-right { grid-column: 3; grid-row: 2; }
+        #zoom-in, #zoom-out { width: 50px; height: 50px; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Stow Master 3D</h1>
+        <div id="stats">
+            <div class="stat-row"><span>Stow Rate:</span> <span id="rate-val" class="rate-box">0 UPH</span></div>
+            <div class="stat-row"><span>Score:</span> <span id="score-val">0</span></div>
+            
+            <div id="target-box">
+                TARGET: <span id="target-loc">Scanning...</span>
+            </div>
+
+            <div id="tot-container" class="stat-row">
+                <span>Time Off Task:</span> 
+                <span id="tot-val">0s</span>
+            </div>
+
+            <div class="stat-row" style="font-size: 0.75em; color: #aaa; margin-top:5px;">
+                Find the BLINKING bin.<br>Tap to stow.
+            </div>
+        </div>
+    </div>
+
+    <div id="cursor-info">Aisle A - Line 1 - Floor 4</div>
+
+    <div id="d-pad" class="control-group">
+        <div class="btn" id="btn-up">▲</div>
+        <div class="btn" id="btn-left">◀</div>
+        <div class="btn" id="btn-down">▼</div>
+        <div class="btn" id="btn-right">▶</div>
+    </div>
+
+    <div id="zoom-pad" class="control-group">
+        <div class="btn" id="zoom-in">+</div>
+        <div class="btn" id="zoom-out">−</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIGURATION ---
+        const CONFIG = {
+            aisles: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            lines: 2,
+            floors: 4,
+            binSize: { w: 2, h: 1.5, d: 2 },
+            aisleGap: 8,
+            lineGap: 0.2
+        };
+
+        let score = 0;
+        let stowedCount = 0;
+        let startTime = Date.now();
+        
+        let totSeconds = 0;
+        let totInterval;
+        
+        let bins = []; 
+        let currentTargetBin = null; // The bin currently blinking
+        
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        scene.fog = new THREE.FogExp2(0x222222, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(20, 15, 20);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.setPixelRatio(window.devicePixelRatio); 
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // --- CONTROLS ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2; 
+
+        // --- BUILD WAREHOUSE ---
+        const geometryBox = new THREE.BoxGeometry(CONFIG.binSize.w, CONFIG.binSize.h, CONFIG.binSize.d);
+        const edgesGeometry = new THREE.EdgesGeometry(geometryBox);
+        
+        // Materials
+        const materialEmpty = new THREE.MeshStandardMaterial({ 
+            color: 0x444444, 
+            transparent: true, 
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        
+        // The Blinking Light Material
+        const materialTarget = new THREE.MeshStandardMaterial({
+            color: 0xff0066,
+            emissive: 0xff0066,
+            emissiveIntensity: 1,
+            transparent: true,
+            opacity: 0.6
+        });
+
+        const materialHover = new THREE.MeshStandardMaterial({ color: 0xffff00, opacity: 0.5, transparent: true });
+        const materialFilled = new THREE.MeshStandardMaterial({ color: 0x4facfe });
+        const materialLine = new THREE.LineBasicMaterial({ color: 0x666666 });
+
+        const gridHelper = new THREE.GridHelper(100, 50, 0x444444, 0x111111);
+        scene.add(gridHelper);
+
+        // Generate Grid
+        CONFIG.aisles.forEach((aisleName, aisleIndex) => {
+            const xPos = (aisleIndex * CONFIG.aisleGap) - ((CONFIG.aisles.length * CONFIG.aisleGap) / 2);
+
+            for(let line = 1; line <= CONFIG.lines; line++) {
+                const zOffset = (line === 1) ? - (CONFIG.binSize.d/2 + CONFIG.lineGap) : (CONFIG.binSize.d/2 + CONFIG.lineGap);
+
+                for(let floor = 1; floor <= CONFIG.floors; floor++) {
+                    const yPos = (floor * CONFIG.binSize.h) - (CONFIG.binSize.h / 2);
+
+                    const binMesh = new THREE.Mesh(geometryBox, materialEmpty.clone());
+                    binMesh.position.set(xPos, yPos, zOffset);
+                    binMesh.castShadow = true;
+                    binMesh.receiveShadow = true;
+
+                    const wireframe = new THREE.LineSegments(edgesGeometry, materialLine);
+                    binMesh.add(wireframe);
+
+                    binMesh.userData = {
+                        isBin: true,
+                        aisle: aisleName,
+                        line: line,
+                        floor: floor,
+                        filled: false,
+                        originalMat: materialEmpty
+                    };
+
+                    scene.add(binMesh);
+                    bins.push(binMesh);
+                }
+            }
+        });
+
+        // --- TOT & GAME LOGIC ---
+        const scoreVal = document.getElementById('score-val');
+        const totVal = document.getElementById('tot-val');
+        const rateVal = document.getElementById('rate-val');
+        const targetLocTxt = document.getElementById('target-loc');
+        
+        function startTOT() {
+            totInterval = setInterval(() => {
+                totSeconds++;
+                totVal.innerText = totSeconds + 's';
+                
+                if(totSeconds < 10) totVal.className = '';
+                else if (totSeconds >= 10 && totSeconds < 20) totVal.className = 'tot-warn';
+                else totVal.className = 'tot-crit';
+
+                // Update Rate every second
+                updateRate();
+
+            }, 1000);
+        }
+
+        function resetTOT() {
+            totSeconds = 0;
+            totVal.innerText = '0s';
+            totVal.className = '';
+        }
+
+        function updateRate() {
+            const now = Date.now();
+            const hoursElapsed = (now - startTime) / 1000 / 3600;
+            if (hoursElapsed > 0) {
+                const uph = Math.floor(stowedCount / hoursElapsed);
+                rateVal.innerText = uph + " UPH";
+            }
+        }
+
+        // --- TARGET SYSTEM ---
+        function pickNewTarget() {
+            // Filter only empty bins
+            const emptyBins = bins.filter(b => !b.userData.filled);
+            
+            if (emptyBins.length === 0) {
+                alert("Warehouse Full! Good Job!");
+                return;
+            }
+
+            // Pick random
+            const randomIndex = Math.floor(Math.random() * emptyBins.length);
+            currentTargetBin = emptyBins[randomIndex];
+            
+            // Apply Target Material
+            currentTargetBin.material = materialTarget.clone(); // Clone so we can pulse it individually if needed
+            
+            // Update UI
+            targetLocTxt.innerText = `${currentTargetBin.userData.aisle}-${currentTargetBin.userData.line}-${currentTargetBin.userData.floor}`;
+        }
+
+        startTOT();
+        pickNewTarget(); // Start the game
+
+        // --- INTERACTION LOGIC ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hoveredBin = null;
+        const cursorInfo = document.getElementById('cursor-info');
+
+        function onMouseMove(event) {
+            event.preventDefault();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function onTouchStart(event) {
+            const touch = event.touches[0];
+            mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+            checkIntersection(true);
+        }
+
+        function onClick(event) {
+            checkIntersection(true);
+        }
+
+        function stowPackage(bin) {
+            // RULE: Can only stow in the Target Bin
+            if (bin !== currentTargetBin) {
+                // Optional: Play error sound or visual shake
+                return; 
+            }
+
+            if(bin.userData.filled) return;
+
+            resetTOT();
+
+            // 1. Fill the bin visually
+            bin.material = materialFilled;
+            bin.userData.filled = true;
+            
+            const boxGeo = new THREE.BoxGeometry(CONFIG.binSize.w * 0.8, CONFIG.binSize.h * 0.8, CONFIG.binSize.d * 0.8);
+            const boxMat = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            bin.add(box);
+
+            // 2. Animate Box
+            box.scale.set(0,0,0);
+            let s = 0;
+            const animateBox = () => {
+                s += 0.1;
+                box.scale.set(s,s,s);
+                if(s < 1) requestAnimationFrame(animateBox);
+            };
+            animateBox();
+
+            // 3. Stats
+            score += 10;
+            stowedCount++;
+            scoreVal.innerText = score;
+            updateRate();
+
+            // 4. Next Target
+            pickNewTarget();
+        }
+
+        function checkIntersection(isClick = false) {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(bins);
+
+            // Reset Hover visuals (Only if it's not the target or filled)
+            if (hoveredBin && hoveredBin !== currentTargetBin && !hoveredBin.userData.filled) {
+                hoveredBin.material = materialEmpty;
+            }
+            hoveredBin = null;
+            cursorInfo.style.opacity = 0;
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if (object.userData.isBin) {
+                    hoveredBin = object;
+                    
+                    cursorInfo.innerText = `Aisle ${object.userData.aisle} - Line ${object.userData.line} - Floor ${object.userData.floor}`;
+                    cursorInfo.style.opacity = 1;
+
+                    if (!object.userData.filled) {
+                        // Hover Logic: Don't override target material completely
+                        if (object !== currentTargetBin) {
+                            object.material = materialHover;
+                        }
+                        
+                        document.body.style.cursor = 'pointer';
+                        if(isClick) stowPackage(object);
+                    } else {
+                        document.body.style.cursor = 'not-allowed';
+                    }
+                }
+            } else {
+                document.body.style.cursor = 'default';
+            }
+        }
+
+        window.addEventListener('mousemove', onMouseMove, false);
+        window.addEventListener('mousedown', onClick, false);
+        window.addEventListener('touchstart', onTouchStart, { passive: false });
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- CONTROLS ---
+        const moveStep = 2;
+        document.getElementById('btn-up').onclick = () => { controls.target.z -= moveStep; camera.position.z -= moveStep; };
+        document.getElementById('btn-down').onclick = () => { controls.target.z += moveStep; camera.position.z += moveStep; };
+        document.getElementById('btn-left').onclick = () => { controls.target.x -= moveStep; camera.position.x -= moveStep; };
+        document.getElementById('btn-right').onclick = () => { controls.target.x += moveStep; camera.position.x += moveStep; };
+        document.getElementById('zoom-in').onclick = () => { camera.translateZ(-moveStep); };
+        document.getElementById('zoom-out').onclick = () => { camera.translateZ(moveStep); };
+
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            
+            // Blinking Logic
+            if (currentTargetBin && !currentTargetBin.userData.filled) {
+                const time = Date.now() * 0.005; // speed
+                // Pulse the emissive intensity
+                const pulse = 0.5 + Math.sin(time) * 0.5; 
+                currentTargetBin.material.emissiveIntensity = pulse * 2; 
+            }
+
+            if(window.matchMedia("(pointer: fine)").matches) {
+                checkIntersection(false);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
