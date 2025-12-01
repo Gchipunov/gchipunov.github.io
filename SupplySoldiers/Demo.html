@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL RTS Command</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #000;
+            user-select: none; /* Prevent text selection */
+        }
+        #game-ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Let clicks pass through to canvas */
+        }
+        #top-bar {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 10px 20px;
+            border-radius: 8px;
+            color: #fff;
+            display: flex;
+            gap: 20px;
+            pointer-events: auto;
+            border: 1px solid #444;
+            backdrop-filter: blur(5px);
+        }
+        .resource-display {
+            display: flex;
+            align-items: center;
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffd700;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            pointer-events: auto;
+        }
+        .btn {
+            background: linear-gradient(to bottom, #4a5568, #2d3748);
+            border: 2px solid #718096;
+            color: white;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            text-shadow: 1px 1px 2px black;
+        }
+        .btn:hover {
+            background: linear-gradient(to bottom, #718096, #4a5568);
+            transform: translateY(-2px);
+        }
+        .btn:active {
+            transform: translateY(0);
+        }
+        .btn:disabled {
+            background: #2d3748;
+            color: #718096;
+            cursor: not-allowed;
+            border-color: #4a5568;
+            transform: none;
+        }
+        #message-area {
+            position: absolute;
+            top: 20%;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px black;
+            opacity: 0;
+            transition: opacity 0.5s;
+            pointer-events: none;
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: rgba(255,255,255,0.7);
+            text-align: right;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Game Logic & Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- UI Overlay -->
+    <div id="game-ui">
+        <div id="top-bar">
+            <div class="resource-display">
+                <span>⚡ Supplies: </span>
+                <span id="supply-count" style="margin-left: 8px;">0</span>
+            </div>
+            <div class="resource-display" style="color: #4fd1c5;">
+                <span>🤖 Units: </span>
+                <span id="unit-count" style="margin-left: 8px;">3</span>
+            </div>
+        </div>
+
+        <div id="instructions">
+            Left Click: Select Unit<br>
+            Right Click: Move / Gather<br>
+            Scroll: Zoom
+        </div>
+
+        <div id="message-area">Insufficient Supplies!</div>
+
+        <div id="controls">
+            <button class="btn" id="btn-build-factory" onclick="startBuilding('factory')">
+                Build Factory (100⚡)
+            </button>
+            <button class="btn" id="btn-spawn-soldier" onclick="spawnSoldierCost()">
+                Recruit Soldier (50⚡)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Game State & Configuration ---
+        const GAME = {
+            resources: 150,
+            selectedUnit: null,
+            units: [],
+            buildings: [],
+            minerals: [],
+            ground: null,
+            mode: 'SELECT', // SELECT, BUILD
+            buildingType: null,
+            ghostBuilding: null,
+            raycaster: new THREE.Raycaster(),
+            mouse: new THREE.Vector2(),
+            clock: new THREE.Clock()
+        };
+
+        const CONFIG = {
+            colors: {
+                ground: 0x1a202c,
+                highlight: 0x3182ce,
+                soldier: 0x4299e1,
+                soldierSelected: 0x63b3ed,
+                enemy: 0xf56565,
+                resource: 0xf6e05e,
+                base: 0xe53e3e,
+                factory: 0x48bb78,
+                ghostValid: 0x48bb78,
+                ghostInvalid: 0xe53e3e
+            },
+            costs: {
+                factory: 100,
+                soldier: 50
+            },
+            speeds: {
+                soldier: 8,
+                rotation: 10
+            }
+        };
+
+        // --- Three.js Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111);
+        scene.fog = new THREE.Fog(0x111111, 50, 200);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+        camera.position.set(-60, 60, 60);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(-50, 100, -50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 500;
+        dirLight.shadow.camera.left = -100;
+        dirLight.shadow.camera.right = 100;
+        dirLight.shadow.camera.top = 100;
+        dirLight.shadow.camera.bottom = -100;
+        scene.add(dirLight);
+
+        // --- Environment ---
+        
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(200, 200);
+        const groundMat = new THREE.MeshStandardMaterial({ 
+            color: CONFIG.colors.ground,
+            roughness: 0.8 
+        });
+        GAME.ground = new THREE.Mesh(groundGeo, groundMat);
+        GAME.ground.rotation.x = -Math.PI / 2;
+        GAME.ground.receiveShadow = true;
+        scene.add(GAME.ground);
+
+        // Grid Helper
+        const gridHelper = new THREE.GridHelper(200, 50, 0x2d3748, 0x2d3748);
+        scene.add(gridHelper);
+
+        // --- Classes ---
+
+        class Unit {
+            constructor(x, z) {
+                // Mesh Group
+                this.mesh = new THREE.Group();
+                this.mesh.position.set(x, 1, z);
+
+                // Body
+                const bodyGeo = new THREE.CylinderGeometry(0.8, 0.8, 2, 8);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.soldier });
+                this.body = new THREE.Mesh(bodyGeo, bodyMat);
+                this.body.castShadow = true;
+                this.body.position.y = 1;
+                this.mesh.add(this.body);
+
+                // Head
+                const headGeo = new THREE.BoxGeometry(0.6, 0.6, 0.8);
+                const headMat = new THREE.MeshStandardMaterial({ color: 0x2c5282 });
+                this.head = new THREE.Mesh(headGeo, headMat);
+                this.head.position.set(0, 2.2, 0.3); // Slight offset to show facing
+                this.mesh.add(this.head);
+
+                // Selection Ring
+                const ringGeo = new THREE.RingGeometry(1.2, 1.4, 32);
+                const ringMat = new THREE.MeshBasicMaterial({ color: 0x63b3ed, transparent: true, opacity: 0, side: THREE.DoubleSide });
+                this.ring = new THREE.Mesh(ringGeo, ringMat);
+                this.ring.rotation.x = -Math.PI / 2;
+                this.ring.position.y = 0.1;
+                this.mesh.add(this.ring);
+
+                // Backpack (Resource Indicator)
+                const packGeo = new THREE.BoxGeometry(1, 0.8, 0.8);
+                const packMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.resource });
+                this.backpack = new THREE.Mesh(packGeo, packMat);
+                this.backpack.position.set(0, 1.5, -0.6);
+                this.backpack.visible = false;
+                this.mesh.add(this.backpack);
+
+                scene.add(this.mesh);
+                GAME.units.push(this);
+
+                // State
+                this.state = 'IDLE'; // IDLE, MOVE, GATHER_MOVE, GATHER_MINE, RETURN
+                this.targetPos = null;
+                this.targetEntity = null; // The resource node or building
+                this.carrying = false;
+                this.miningTimer = 0;
+            }
+
+            select() {
+                this.ring.material.opacity = 0.8;
+                this.body.material.emissive.setHex(0x222222);
+            }
+
+            deselect() {
+                this.ring.material.opacity = 0;
+                this.body.material.emissive.setHex(0x000000);
+            }
+
+            update(dt) {
+                if (this.state === 'IDLE') return;
+
+                // Movement Logic
+                if (this.targetPos) {
+                    const direction = new THREE.Vector3().subVectors(this.targetPos, this.mesh.position);
+                    direction.y = 0;
+                    const distance = direction.length();
+
+                    // Rotation
+                    if (distance > 0.1) {
+                        const targetRotation = Math.atan2(direction.x, direction.z);
+                        // Simple lerp rotation
+                        let rotDiff = targetRotation - this.mesh.rotation.y;
+                        while (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+                        while (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+                        this.mesh.rotation.y += rotDiff * CONFIG.speeds.rotation * dt;
+                    }
+
+                    // Move
+                    if (distance > 0.5) {
+                        direction.normalize();
+                        this.mesh.position.add(direction.multiplyScalar(CONFIG.speeds.soldier * dt));
+                    } else {
+                        // Arrived
+                        this.handleArrival();
+                    }
+                }
+
+                // Mining Animation
+                if (this.state === 'GATHER_MINE') {
+                    this.miningTimer += dt;
+                    this.mesh.rotation.y += dt * 5; // Spin while mining
+                    if (this.miningTimer > 1.5) {
+                        this.collectResource();
+                    }
+                }
+            }
+
+            handleArrival() {
+                this.targetPos = null;
+
+                if (this.state === 'MOVE') {
+                    this.state = 'IDLE';
+                } else if (this.state === 'GATHER_MOVE') {
+                    // Check if resource still exists
+                    if (this.targetEntity && this.targetEntity.amount > 0) {
+                        this.state = 'GATHER_MINE';
+                        this.miningTimer = 0;
+                    } else {
+                        this.state = 'IDLE';
+                    }
+                } else if (this.state === 'RETURN') {
+                    // Drop off resources
+                    addResources(10);
+                    this.carrying = false;
+                    this.backpack.visible = false;
+                    
+                    // Go back to mining if source still exists
+                    if (this.targetEntity && this.targetEntity.amount > 0) {
+                        this.gather(this.targetEntity);
+                    } else {
+                        this.state = 'IDLE';
+                    }
+                }
+            }
+
+            collectResource() {
+                if (!this.targetEntity || this.targetEntity.amount <= 0) {
+                    this.state = 'IDLE';
+                    return;
+                }
+
+                this.targetEntity.deplete();
+                this.carrying = true;
+                this.backpack.visible = true;
+                this.returnToBase();
+            }
+
+            gather(resourceNode) {
+                this.state = 'GATHER_MOVE';
+                this.targetEntity = resourceNode;
+                this.targetPos = resourceNode.mesh.position.clone();
+            }
+
+            returnToBase() {
+                // Find nearest dropoff (Base or Factory)
+                let nearest = null;
+                let minDist = Infinity;
+
+                GAME.buildings.forEach(b => {
+                    const d = this.mesh.position.distanceTo(b.mesh.position);
+                    if (d < minDist) {
+                        minDist = d;
+                        nearest = b;
+                    }
+                });
+
+                if (nearest) {
+                    this.state = 'RETURN';
+                    this.targetPos = nearest.mesh.position.clone();
+                } else {
+                    this.state = 'IDLE'; // No base left?
+                }
+            }
+
+            move(point) {
+                this.state = 'MOVE';
+                this.targetPos = point;
+                this.targetEntity = null;
+                this.carrying = false;
+                this.backpack.visible = false;
+            }
+        }
+
+        class Building {
+            constructor(x, z, type) {
+                this.type = type;
+                this.mesh = new THREE.Group();
+                this.mesh.position.set(x, 0, z);
+
+                let geo, mat, color;
+
+                if (type === 'BASE') {
+                    geo = new THREE.BoxGeometry(6, 4, 6);
+                    color = CONFIG.colors.base;
+                } else {
+                    geo = new THREE.BoxGeometry(4, 3, 4);
+                    color = CONFIG.colors.factory;
+                }
+
+                mat = new THREE.MeshStandardMaterial({ color: color });
+                const mainMesh = new THREE.Mesh(geo, mat);
+                mainMesh.position.y = (type === 'BASE' ? 2 : 1.5);
+                mainMesh.castShadow = true;
+                mainMesh.receiveShadow = true;
+                this.mesh.add(mainMesh);
+
+                // Details
+                const doorGeo = new THREE.BoxGeometry(2, 2, 0.5);
+                const doorMat = new THREE.MeshStandardMaterial({ color: 0x1a202c });
+                const door = new THREE.Mesh(doorGeo, doorMat);
+                door.position.set(0, 1, type === 'BASE' ? 3 : 2);
+                this.mesh.add(door);
+
+                scene.add(this.mesh);
+                GAME.buildings.push(this);
+                
+                // Spawn effect
+                createExplosion(x, 0, z, color);
+            }
+        }
+
+        class Mineral {
+            constructor(x, z) {
+                this.amount = 100;
+                
+                const geo = new THREE.IcosahedronGeometry(1.5, 0);
+                const mat = new THREE.MeshStandardMaterial({ 
+                    color: CONFIG.colors.resource,
+                    roughness: 0.2,
+                    metalness: 0.8
+                });
+                
+                this.mesh = new THREE.Mesh(geo, mat);
+                this.mesh.position.set(x, 0.5, z);
+                this.mesh.castShadow = true;
+                this.mesh.userData = { isMineral: true, owner: this }; // Link mesh to object
+                
+                scene.add(this.mesh);
+                GAME.minerals.push(this);
+            }
+
+            deplete() {
+                this.amount -= 10;
+                const scale = 0.2 + (this.amount / 100) * 0.8;
+                this.mesh.scale.setScalar(scale);
+                
+                if (this.amount <= 0) {
+                    scene.remove(this.mesh);
+                    GAME.minerals = GAME.minerals.filter(m => m !== this);
+                }
+            }
+        }
+
+        // --- Setup World ---
+        
+        // Initial Buildings
+        new Building(0, 0, 'BASE');
+
+        // Initial Units
+        new Unit(5, 5);
+        new Unit(5, -5);
+        new Unit(-5, 5);
+
+        // Initial Minerals (Procedural)
+        for(let i=0; i<8; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 20 + Math.random() * 20;
+            new Mineral(Math.cos(angle) * dist, Math.sin(angle) * dist);
+        }
+
+        // --- Logic Functions ---
+
+        function updateUI() {
+            document.getElementById('supply-count').innerText = GAME.resources;
+            document.getElementById('unit-count').innerText = GAME.units.length;
+            
+            const btnBuild = document.getElementById('btn-build-factory');
+            btnBuild.disabled = GAME.resources < CONFIG.costs.factory;
+            
+            const btnSoldier = document.getElementById('btn-spawn-soldier');
+            btnSoldier.disabled = GAME.resources < CONFIG.costs.soldier;
+        }
+
+        function addResources(amount) {
+            GAME.resources += amount;
+            updateUI();
+        }
+
+        function showMessage(msg) {
+            const el = document.getElementById('message-area');
+            el.innerText = msg;
+            el.style.opacity = 1;
+            setTimeout(() => { el.style.opacity = 0; }, 2000);
+        }
+
+        function createExplosion(x, y, z, color) {
+            // Simple particle burst
+            const geom = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+            
+            for(let i=0; i<8; i++) {
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.position.set(x, y + 1, z);
+                
+                const destX = x + (Math.random() - 0.5) * 5;
+                const destZ = z + (Math.random() - 0.5) * 5;
+                const destY = y + 2 + Math.random() * 2;
+
+                scene.add(mesh);
+                
+                // Simple animation helper
+                const speed = 0.05;
+                const animate = () => {
+                    mesh.position.x += (destX - mesh.position.x) * speed;
+                    mesh.position.y += (destY - mesh.position.y) * speed;
+                    mesh.position.z += (destZ - mesh.position.z) * speed;
+                    mesh.rotation.x += 0.1;
+                    mesh.scale.multiplyScalar(0.95);
+                    
+                    if (mesh.scale.x < 0.01) {
+                        scene.remove(mesh);
+                    } else {
+                        requestAnimationFrame(animate);
+                    }
+                };
+                animate();
+            }
+        }
+
+        function spawnSoldierCost() {
+            if (GAME.resources >= CONFIG.costs.soldier) {
+                GAME.resources -= CONFIG.costs.soldier;
+                spawnSoldier();
+                updateUI();
+            } else {
+                showMessage("Not enough supplies!");
+            }
+        }
+
+        function spawnSoldier() {
+            // Find Base
+            const base = GAME.buildings.find(b => b.type === 'BASE') || GAME.buildings[0];
+            if (base) {
+                const angle = Math.random() * Math.PI * 2;
+                const x = base.mesh.position.x + Math.cos(angle) * 6;
+                const z = base.mesh.position.z + Math.sin(angle) * 6;
+                new Unit(x, z);
+            }
+        }
+
+        function startBuilding(type) {
+            if (GAME.resources < CONFIG.costs.factory) {
+                showMessage("Not enough supplies!");
+                return;
+            }
+            GAME.mode = 'BUILD';
+            GAME.buildingType = type;
+
+            // Ghost visual
+            const geo = new THREE.BoxGeometry(4, 3, 4);
+            const mat = new THREE.MeshBasicMaterial({ color: 0x48bb78, transparent: true, opacity: 0.5, wireframe: true });
+            GAME.ghostBuilding = new THREE.Mesh(geo, mat);
+            scene.add(GAME.ghostBuilding);
+        }
+
+        // --- Interaction ---
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            GAME.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            GAME.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            if (GAME.mode === 'BUILD' && GAME.ghostBuilding) {
+                GAME.raycaster.setFromCamera(GAME.mouse, camera);
+                const intersects = GAME.raycaster.intersectObject(GAME.ground);
+                if (intersects.length > 0) {
+                    const pt = intersects[0].point;
+                    // Snap to grid
+                    const snap = 2;
+                    GAME.ghostBuilding.position.set(
+                        Math.round(pt.x / snap) * snap,
+                        1.5,
+                        Math.round(pt.z / snap) * snap
+                    );
+                }
+            }
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.btn')) return; // Ignore UI clicks
+
+            GAME.raycaster.setFromCamera(GAME.mouse, camera);
+
+            // Right Click (Command)
+            if (e.button === 2) {
+                if (GAME.mode === 'BUILD') {
+                    // Cancel build
+                    GAME.mode = 'SELECT';
+                    if (GAME.ghostBuilding) {
+                        scene.remove(GAME.ghostBuilding);
+                        GAME.ghostBuilding = null;
+                    }
+                    return;
+                }
+
+                if (GAME.selectedUnit) {
+                    // Check for Minerals
+                    const mineralMeshes = GAME.minerals.map(m => m.mesh);
+                    const mineralHit = GAME.raycaster.intersectObjects(mineralMeshes);
+
+                    if (mineralHit.length > 0) {
+                        // Harvest
+                        GAME.selectedUnit.gather(mineralHit[0].object.userData.owner);
+                        createExplosion(mineralHit[0].point.x, 0.5, mineralHit[0].point.z, CONFIG.colors.resource);
+                    } else {
+                        // Move
+                        const groundHit = GAME.raycaster.intersectObject(GAME.ground);
+                        if (groundHit.length > 0) {
+                            GAME.selectedUnit.move(groundHit[0].point);
+                            
+                            // Visual Marker
+                            const marker = new THREE.Mesh(
+                                new THREE.RingGeometry(0.2, 0.3, 16),
+                                new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+                            );
+                            marker.rotation.x = -Math.PI/2;
+                            marker.position.copy(groundHit[0].point);
+                            marker.position.y = 0.1;
+                            scene.add(marker);
+                            setTimeout(() => scene.remove(marker), 500);
+                        }
+                    }
+                }
+            }
+            
+            // Left Click (Select / Build)
+            if (e.button === 0) {
+                if (GAME.mode === 'BUILD') {
+                    // Place building
+                    if (GAME.ghostBuilding) {
+                        const pos = GAME.ghostBuilding.position;
+                        new Building(pos.x, pos.z, 'FACTORY');
+                        GAME.resources -= CONFIG.costs.factory;
+                        updateUI();
+                        
+                        // Cleanup
+                        scene.remove(GAME.ghostBuilding);
+                        GAME.ghostBuilding = null;
+                        GAME.mode = 'SELECT';
+                    }
+                } else {
+                    // Select Unit
+                    // Get all unit meshes specifically (the body part usually good target, or group)
+                    // We map unit objects to their meshes to check intersection
+                    const unitMeshes = [];
+                    GAME.units.forEach(u => {
+                        unitMeshes.push(u.body);
+                        unitMeshes.push(u.head);
+                    });
+
+                    const intersects = GAME.raycaster.intersectObjects(unitMeshes);
+                    
+                    if (GAME.selectedUnit) GAME.selectedUnit.deselect();
+                    GAME.selectedUnit = null;
+
+                    if (intersects.length > 0) {
+                        // Find the unit object that owns this mesh
+                        const hitMesh = intersects[0].object;
+                        const unit = GAME.units.find(u => u.body === hitMesh || u.head === hitMesh);
+                        if (unit) {
+                            GAME.selectedUnit = unit;
+                            unit.select();
+                        }
+                    }
+                }
+            }
+        });
+
+        // Prevent context menu
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        // --- Game Loop ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = GAME.clock.getDelta();
+
+            // Update Units
+            GAME.units.forEach(unit => unit.update(dt));
+
+            // Floating minerals
+            const time = Date.now() * 0.001;
+            GAME.minerals.forEach((min, idx) => {
+                min.mesh.rotation.y = time * 0.5 + idx;
+                min.mesh.position.y = 0.5 + Math.sin(time * 2 + idx) * 0.2;
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        updateUI();
+        animate();
+
+    </script>
+</body>
+</html>
