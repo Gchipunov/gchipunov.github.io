@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pixel Sand Digger</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            color: white;
+            font-family: monospace;
+        }
+        canvas {
+            border: 4px solid #444;
+            image-rendering: pixelated; /* Keeps the pixels sharp */
+            width: 800px; /* Display size */
+            height: 600px;
+        }
+        .controls { margin-top: 10px; text-align: center; }
+        kbd { background: #333; padding: 2px 5px; border-radius: 4px; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    <div class="controls">
+        <h3>CONTROLS</h3>
+        <p><kbd>Arrow Keys</kbd> Move & Jump & Dig | <kbd>Space</kbd> Fart (Jetpack)</p>
+        <p>Tip: Farting creates gas that pushes you up!</p>
+    </div>
+
+<script>
+    // --- CONFIGURATION ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    // We simulate at a low resolution for performance and "retro" look
+    const GAME_WIDTH = 200;
+    const GAME_HEIGHT = 150;
+    
+    canvas.width = GAME_WIDTH;
+    canvas.height = GAME_HEIGHT;
+
+    // --- MATERIAL TYPES ---
+    const EMPTY = 0;
+    const WALL = 1;  // Indestructible border
+    const DIRT = 2;  // Diggable static ground
+    const SAND = 3;  // Falling physics
+    const GAS = 4;   // Rising physics (Farts)
+
+    // Colors (R, G, B)
+    const COLORS = [
+        [26, 26, 26],    // 0: EMPTY (Background)
+        [100, 100, 100], // 1: WALL (Grey)
+        [101, 67, 33],   // 2: DIRT (Brown)
+        [235, 200, 50],  // 3: SAND (Yellow)
+        [50, 255, 50]    // 4: GAS (Neon Green)
+    ];
+
+    // THE GRID: Stores the material ID for every pixel
+    let grid = new Uint8Array(GAME_WIDTH * GAME_HEIGHT);
+    
+    // IMAGE DATA: The buffer we write directly to screen
+    let imgData = ctx.createImageData(GAME_WIDTH, GAME_HEIGHT);
+    let buf32 = new Uint32Array(imgData.data.buffer);
+
+    // --- PLAYER OBJECT ---
+    const player = {
+        x: 100,
+        y: 20,
+        width: 4,
+        height: 6,
+        vx: 0,
+        vy: 0,
+        color: 0xFF0000FF, // Red (ABGR format for 32-bit write)
+        onGround: false
+    };
+
+    // --- INPUT HANDLING ---
+    const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, Space: false };
+    
+    window.addEventListener('keydown', e => {
+        if(e.code === 'Space') keys.Space = true;
+        if(keys.hasOwnProperty(e.code)) keys[e.code] = true;
+    });
+    window.addEventListener('keyup', e => {
+        if(e.code === 'Space') keys.Space = false;
+        if(keys.hasOwnProperty(e.code)) keys[e.code] = false;
+    });
+
+    // --- INITIALIZATION ---
+    function init() {
+        // Create borders
+        for (let x = 0; x < GAME_WIDTH; x++) {
+            for (let y = 0; y < GAME_HEIGHT; y++) {
+                let idx = y * GAME_WIDTH + x;
+                
+                // Walls on edges
+                if (x === 0 || x === GAME_WIDTH - 1 || y === GAME_HEIGHT - 1) {
+                    grid[idx] = WALL;
+                } 
+                // Fill bottom half with dirt
+                else if (y > GAME_HEIGHT / 2) {
+                    // Random pockets of empty space or sand
+                    if(Math.random() > 0.9) grid[idx] = SAND;
+                    else if(Math.random() > 0.1) grid[idx] = DIRT;
+                    else grid[idx] = EMPTY;
+                } else {
+                    grid[idx] = EMPTY;
+                }
+            }
+        }
+    }
+
+    // --- CELLULAR AUTOMATA ENGINE (SAND PHYSICS) ---
+    function updateGrid() {
+        // We iterate specifically to handle falling (bottom-up) and rising (top-down)
+        // To prevent particles teleporting, we use a slightly chaotic update order or just direction bias.
+        // For simplicity: Downward loop for Sand, Upward loop for Gas.
+        
+        // 1. Handle SAND (Falls Down) - Iterate Bottom to Top
+        for (let y = GAME_HEIGHT - 2; y >= 0; y--) {
+            // Randomize X direction to prevent bias
+            let startX = Math.random() > 0.5 ? 0 : GAME_WIDTH - 1;
+            let step = startX === 0 ? 1 : -1;
+
+            for (let i = 0; i < GAME_WIDTH; i++) {
+                let x = startX + (i * step);
+                let idx = y * GAME_WIDTH + x;
+
+                if (grid[idx] === SAND) {
+                    let below = idx + GAME_WIDTH;
+                    let belowLeft = below - 1;
+                    let belowRight = below + 1;
+
+                    // Fall straight down
+                    if (grid[below] === EMPTY || grid[below] === GAS) {
+                        grid[below] = SAND;
+                        grid[idx] = EMPTY;
+                    } 
+                    // Slide Down-Left
+                    else if (x > 0 && (grid[belowLeft] === EMPTY || grid[belowLeft] === GAS)) {
+                        grid[belowLeft] = SAND;
+                        grid[idx] = EMPTY;
+                    } 
+                    // Slide Down-Right
+                    else if (x < GAME_WIDTH - 1 && (grid[belowRight] === EMPTY || grid[belowRight] === GAS)) {
+                        grid[belowRight] = SAND;
+                        grid[idx] = EMPTY;
+                    }
+                }
+            }
+        }
+
+        // 2. Handle GAS (Floats Up) - Iterate Top to Bottom
+        for (let y = 1; y < GAME_HEIGHT; y++) {
+            let startX = Math.random() > 0.5 ? 0 : GAME_WIDTH - 1;
+            let step = startX === 0 ? 1 : -1;
+
+            for (let i = 0; i < GAME_WIDTH; i++) {
+                let x = startX + (i * step);
+                let idx = y * GAME_WIDTH + x;
+
+                if (grid[idx] === GAS) {
+                    // Gas dissipates randomly at top
+                    if (y < 5 && Math.random() > 0.9) {
+                        grid[idx] = EMPTY;
+                        continue;
+                    }
+
+                    let above = idx - GAME_WIDTH;
+                    let aboveLeft = above - 1;
+                    let aboveRight = above + 1;
+
+                    // Float up
+                    if (grid[above] === EMPTY) {
+                        grid[above] = GAS;
+                        grid[idx] = EMPTY;
+                    } 
+                    // Slide Up-Left
+                    else if (x > 0 && grid[aboveLeft] === EMPTY) {
+                        grid[aboveLeft] = GAS;
+                        grid[idx] = EMPTY;
+                    } 
+                    // Slide Up-Right
+                    else if (x < GAME_WIDTH - 1 && grid[aboveRight] === EMPTY) {
+                        grid[aboveRight] = GAS;
+                        grid[idx] = EMPTY;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- PLAYER LOGIC ---
+    function updatePlayer() {
+        // 1. Input Forces
+        if (keys.ArrowLeft) player.vx -= 0.5;
+        if (keys.ArrowRight) player.vx += 0.5;
+        
+        // Jump
+        if (keys.ArrowUp && player.onGround) {
+            player.vy = -3.5;
+            player.onGround = false;
+        }
+
+        // FART MECHANIC
+        if (keys.Space) {
+            // Push player up slightly
+            player.vy -= 0.15;
+            
+            // Spawn Gas Particles at player's bum
+            let bumX = Math.floor(player.x + player.width / 2);
+            let bumY = Math.floor(player.y + player.height);
+            
+            // Spawn a cluster
+            for(let i=0; i<3; i++) {
+                let offsetX = Math.floor(Math.random() * 4) - 2;
+                let offsetY = Math.floor(Math.random() * 3);
+                let pIdx = (bumY + offsetY) * GAME_WIDTH + (bumX + offsetX);
+                
+                if (pIdx >= 0 && pIdx < grid.length && grid[pIdx] === EMPTY) {
+                    grid[pIdx] = GAS;
+                }
+            }
+        }
+
+        // Gravity
+        player.vy += 0.2;
+
+        // Friction
+        player.vx *= 0.8;
+
+        // Max Speed Caps
+        if(player.vy > 4) player.vy = 4;
+        if(player.vx > 2) player.vx = 2;
+        if(player.vx < -2) player.vx = -2;
+
+        // 2. Collision & Movement
+        // We do X and Y separately to handle sliding
+        
+        // --- X AXIS ---
+        player.x += player.vx;
+        handleCollision(true);
+
+        // --- Y AXIS ---
+        player.y += player.vy;
+        player.onGround = false; // Assume in air until collision proves otherwise
+        handleCollision(false);
+
+        // Keep in bounds
+        if(player.x < 0) player.x = 0;
+        if(player.x > GAME_WIDTH - player.width) player.x = GAME_WIDTH - player.width;
+    }
+
+    function handleCollision(isXAxis) {
+        // Check all pixels inside the player's bounding box
+        let startX = Math.floor(player.x);
+        let endX = Math.ceil(player.x + player.width);
+        let startY = Math.floor(player.y);
+        let endY = Math.ceil(player.y + player.height);
+
+        for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+                let idx = y * GAME_WIDTH + x;
+                let cell = grid[idx];
+
+                if (cell === WALL || cell === SAND) {
+                    // HARD COLLISION (Wall or Piled Sand)
+                    if (isXAxis) {
+                        if (player.vx > 0) player.x = x - player.width;
+                        else if (player.vx < 0) player.x = x + 1;
+                        player.vx = 0;
+                    } else {
+                        if (player.vy > 0) { // Falling
+                            player.y = y - player.height;
+                            player.onGround = true;
+                            player.vy = 0;
+                        } else if (player.vy < 0) { // Hitting head
+                            player.y = y + 1;
+                            player.vy = 0;
+                        }
+                    }
+                    return; // Stop checking this axis
+                } 
+                else if (cell === DIRT) {
+                    // DIGGING MECHANIC: Moving into dirt destroys it
+                    grid[idx] = EMPTY;
+                    
+                    // Create a little sand debris when digging
+                    if(Math.random() > 0.7) {
+                        let debrisIdx = (y-1) * GAME_WIDTH + x;
+                        if(grid[debrisIdx] === EMPTY) grid[debrisIdx] = SAND;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- RENDERING ---
+    function draw() {
+        // 1. Draw Grid to Buffer
+        // We iterate the grid and fill the 32-bit image buffer
+        // This is much faster than ctx.fillRect
+        for (let i = 0; i < grid.length; i++) {
+            let type = grid[i];
+            let col = COLORS[type];
+            // ABGR format: Alpha(255) << 24 | B << 16 | G << 8 | R
+            buf32[i] = (255 << 24) | (col[2] << 16) | (col[1] << 8) | col[0];
+        }
+
+        // 2. Draw Player (Manually into buffer)
+        let px = Math.floor(player.x);
+        let py = Math.floor(player.y);
+        for(let y = 0; y < player.height; y++) {
+            for(let x = 0; x < player.width; x++) {
+                let idx = (py + y) * GAME_WIDTH + (px + x);
+                if (idx >= 0 && idx < grid.length) {
+                    buf32[idx] = player.color;
+                }
+            }
+        }
+
+        // 3. Put data onto canvas
+        ctx.putImageData(imgData, 0, 0);
+    }
+
+    // --- MAIN LOOP ---
+    function loop() {
+        updatePlayer();
+        updateGrid();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    // Start
+    init();
+    loop();
+
+</script>
+</body>
+</html>
