@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Stowing Sim</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a1a; }
+        canvas { display: block; }
+        
+        /* HUD overlay */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none; /* Let clicks pass through to 3D canvas */
+        }
+        
+        h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; color: #4facfe; }
+        
+        #stats {
+            margin-top: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            width: 250px;
+        }
+
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .highlight { color: #f093fb; font-weight: bold; }
+        
+        #cursor-info {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            color: #ffd700;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 18px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Stow Master 3D</h1>
+        <div id="stats">
+            <div class="stat-row"><span>Next Package:</span> <span id="pkg-type" class="highlight">Electronics</span></div>
+            <div class="stat-row"><span>Score:</span> <span id="score-val">0</span></div>
+            <div class="stat-row" style="font-size: 0.8em; color: #aaa; margin-top:10px;">
+                Find an empty bin.<br>Click to stow.
+            </div>
+        </div>
+    </div>
+
+    <div id="cursor-info">Aisle A - Line 1 - Floor 4</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONFIGURATION ---
+        const CONFIG = {
+            aisles: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            lines: 2,
+            floors: 4,
+            binSize: { w: 2, h: 1.5, d: 2 },
+            aisleGap: 8,
+            lineGap: 0.2 // Gap between back-to-back racks
+        };
+
+        let score = 0;
+        let bins = []; // Array to store bin data
+        
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        
+        // Fog for depth
+        scene.fog = new THREE.FogExp2(0x222222, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(20, 15, 20);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // --- CONTROLS ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // --- BUILD WAREHOUSE ---
+        const geometryBox = new THREE.BoxGeometry(CONFIG.binSize.w, CONFIG.binSize.h, CONFIG.binSize.d);
+        const edgesGeometry = new THREE.EdgesGeometry(geometryBox);
+        
+        // Materials
+        const materialEmpty = new THREE.MeshStandardMaterial({ 
+            color: 0x444444, 
+            transparent: true, 
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        const materialHover = new THREE.MeshStandardMaterial({ color: 0xffff00, opacity: 0.5, transparent: true });
+        const materialFilled = new THREE.MeshStandardMaterial({ color: 0x4facfe });
+        const materialLine = new THREE.LineBasicMaterial({ color: 0x666666 });
+
+        // Floor Grid
+        const gridHelper = new THREE.GridHelper(100, 50, 0x444444, 0x111111);
+        scene.add(gridHelper);
+
+        // Generate Racks
+        CONFIG.aisles.forEach((aisleName, aisleIndex) => {
+            // Calculate X position based on Aisle Index
+            const xPos = (aisleIndex * CONFIG.aisleGap) - ((CONFIG.aisles.length * CONFIG.aisleGap) / 2);
+
+            for(let line = 1; line <= CONFIG.lines; line++) {
+                // Calculate Z position. Line 1 is front, Line 2 is back (relative to aisle center)
+                const zOffset = (line === 1) ? - (CONFIG.binSize.d/2 + CONFIG.lineGap) : (CONFIG.binSize.d/2 + CONFIG.lineGap);
+
+                for(let floor = 1; floor <= CONFIG.floors; floor++) {
+                    const yPos = (floor * CONFIG.binSize.h) - (CONFIG.binSize.h / 2);
+
+                    // Create the Hit Box (The Bin)
+                    const binMesh = new THREE.Mesh(geometryBox, materialEmpty.clone());
+                    binMesh.position.set(xPos, yPos, zOffset);
+                    binMesh.castShadow = true;
+                    binMesh.receiveShadow = true;
+
+                    // Wireframe outline for "rack" look
+                    const wireframe = new THREE.LineSegments(edgesGeometry, materialLine);
+                    binMesh.add(wireframe);
+
+                    // Store Metadata
+                    binMesh.userData = {
+                        isBin: true,
+                        aisle: aisleName,
+                        line: line,
+                        floor: floor,
+                        filled: false
+                    };
+
+                    scene.add(binMesh);
+                    bins.push(binMesh);
+                }
+            }
+
+            // Add Text Label for Aisle (Simple mesh representation)
+            // Note: In pure WebGL without loading fonts, we usually use sprites or HTML. 
+            // We will rely on the UI Cursor Info for identification.
+        });
+
+        // --- INTERACTION LOGIC ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hoveredBin = null;
+        const cursorInfo = document.getElementById('cursor-info');
+        const scoreVal = document.getElementById('score-val');
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        function onMouseDown(event) {
+            if(hoveredBin && !hoveredBin.userData.filled) {
+                stowPackage(hoveredBin);
+            }
+        }
+
+        function stowPackage(bin) {
+            // Visual change
+            bin.material = materialFilled;
+            bin.userData.filled = true;
+            
+            // Add a "Package" geometry inside
+            const boxGeo = new THREE.BoxGeometry(CONFIG.binSize.w * 0.8, CONFIG.binSize.h * 0.8, CONFIG.binSize.d * 0.8);
+            const boxMat = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            bin.add(box);
+
+            // Logic
+            score += 10;
+            scoreVal.innerText = score;
+            
+            // Trigger animation (scale up)
+            box.scale.set(0,0,0);
+            let s = 0;
+            const animateBox = () => {
+                s += 0.1;
+                box.scale.set(s,s,s);
+                if(s < 1) requestAnimationFrame(animateBox);
+            };
+            animateBox();
+        }
+
+        window.addEventListener('mousemove', onMouseMove, false);
+        window.addEventListener('mousedown', onMouseDown, false);
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Raycasting
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(bins);
+
+            // Reset previous hover
+            if (hoveredBin && !hoveredBin.userData.filled) {
+                hoveredBin.material = materialEmpty;
+            }
+            hoveredBin = null;
+            cursorInfo.style.opacity = 0;
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if (object.userData.isBin) {
+                    hoveredBin = object;
+                    
+                    // Show Info
+                    cursorInfo.innerText = `Aisle ${object.userData.aisle} - Line ${object.userData.line} - Floor ${object.userData.floor}`;
+                    cursorInfo.style.opacity = 1;
+
+                    // Highlight if empty
+                    if (!object.userData.filled) {
+                        object.material = materialHover;
+                        document.body.style.cursor = 'pointer';
+                    } else {
+                        document.body.style.cursor = 'not-allowed';
+                    }
+                }
+            } else {
+                document.body.style.cursor = 'default';
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
