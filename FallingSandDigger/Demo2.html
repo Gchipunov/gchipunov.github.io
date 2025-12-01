@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pixel Sand Digger vs Fireballs</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            color: white;
+            font-family: monospace;
+        }
+        canvas {
+            border: 4px solid #444;
+            image-rendering: pixelated;
+            width: 800px;
+            height: 600px;
+            background-color: #000;
+        }
+        .controls { margin-top: 10px; text-align: center; }
+        .instructions { font-size: 0.9em; color: #aaa; margin-top: 5px; }
+        kbd { background: #333; padding: 2px 5px; border-radius: 4px; border: 1px solid #555; color: #fff; }
+        span.danger { color: #ff4444; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+    <div class="controls">
+        <h3>CONTROLS</h3>
+        <p>
+            <kbd>Arrows</kbd> Move/Jump | 
+            <kbd>D</kbd> Dig (Hold) | 
+            <kbd>Space</kbd> Mega Fart (Jetpack)
+        </p>
+        <p class="instructions">
+            <span class="danger">WARNING:</span> Enemies shoot fireballs that destroy the ground!
+        </p>
+    </div>
+
+<script>
+    // --- CONFIGURATION ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    const GAME_WIDTH = 200;
+    const GAME_HEIGHT = 150;
+    
+    canvas.width = GAME_WIDTH;
+    canvas.height = GAME_HEIGHT;
+
+    // --- MATERIAL TYPES ---
+    const EMPTY = 0;
+    const WALL = 1;  
+    const DIRT = 2;  
+    const SAND = 3;  
+    const GAS = 4;   
+
+    // Colors (R, G, B)
+    const COLORS = [
+        [26, 26, 26],    // 0: EMPTY 
+        [100, 100, 100], // 1: WALL 
+        [101, 67, 33],   // 2: DIRT 
+        [235, 200, 50],  // 3: SAND 
+        [50, 255, 50]    // 4: GAS 
+    ];
+
+    // THE GRID
+    let grid = new Uint8Array(GAME_WIDTH * GAME_HEIGHT);
+    
+    // IMAGE BUFFER
+    let imgData = ctx.createImageData(GAME_WIDTH, GAME_HEIGHT);
+    let buf32 = new Uint32Array(imgData.data.buffer);
+
+    // --- GAME ENTITIES ---
+    const player = {
+        x: 10, y: 100, width: 4, height: 6,
+        vx: 0, vy: 0,
+        color: 0xFF0000FF, // Red
+        onGround: false,
+        hp: 100
+    };
+
+    let enemies = [];
+    let projectiles = [];
+
+    // --- INPUT HANDLING ---
+    const keys = { 
+        ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, 
+        Space: false, KeyD: false 
+    };
+    
+    window.addEventListener('keydown', e => {
+        if(keys.hasOwnProperty(e.code)) keys[e.code] = true;
+    });
+    window.addEventListener('keyup', e => {
+        if(keys.hasOwnProperty(e.code)) keys[e.code] = false;
+    });
+
+    // --- INITIALIZATION ---
+    function init() {
+        enemies = [];
+        projectiles = [];
+        player.x = 20; player.y = GAME_HEIGHT - 30;
+        player.vx = 0; player.vy = 0;
+
+        // Generate World
+        for (let x = 0; x < GAME_WIDTH; x++) {
+            for (let y = 0; y < GAME_HEIGHT; y++) {
+                let idx = y * GAME_WIDTH + x;
+                
+                // Borders
+                if (x === 0 || x === GAME_WIDTH - 1 || y === GAME_HEIGHT - 1 || y === 0) {
+                    grid[idx] = WALL;
+                } 
+                // Ground Level
+                else if (y > GAME_HEIGHT - 20) {
+                    grid[idx] = Math.random() > 0.8 ? SAND : DIRT;
+                } 
+                else {
+                    grid[idx] = EMPTY;
+                }
+            }
+        }
+
+        // Create Floating Platforms & Enemies
+        let platformCount = 4;
+        for(let i=0; i<platformCount; i++) {
+            let pw = 20 + Math.random() * 20;
+            let px = Math.random() * (GAME_WIDTH - pw - 20) + 10;
+            let py = 30 + (i * 25); 
+
+            // Draw Platform
+            for(let xx = px; xx < px + pw; xx++) {
+                let idx = Math.floor(py) * GAME_WIDTH + Math.floor(xx);
+                grid[idx] = WALL;
+            }
+
+            // Spawn Enemy on top
+            enemies.push({
+                x: px + pw/2,
+                y: py - 6,
+                width: 4, height: 5,
+                cooldown: Math.random() * 100
+            });
+        }
+    }
+
+    // --- LOGIC UPDATES ---
+    function updateEntities() {
+        // 1. Enemies
+        for(let en of enemies) {
+            // Simple AI: Look at player
+            let dx = (player.x + player.width/2) - en.x;
+            let dy = (player.y + player.height/2) - en.y;
+            
+            en.cooldown--;
+            if(en.cooldown <= 0) {
+                // FIRE!
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                projectiles.push({
+                    x: en.x, y: en.y,
+                    vx: (dx/dist) * 2, // Speed 2
+                    vy: (dy/dist) * 2,
+                    life: 200
+                });
+                en.cooldown = 100 + Math.random() * 50;
+            }
+        }
+
+        // 2. Projectiles
+        for (let i = projectiles.length - 1; i >= 0; i--) {
+            let p = projectiles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life--;
+
+            // Bounds check
+            if(p.x < 0 || p.x > GAME_WIDTH || p.y < 0 || p.y > GAME_HEIGHT || p.life <= 0) {
+                projectiles.splice(i, 1);
+                continue;
+            }
+
+            // Grid Collision check
+            let idx = Math.floor(p.y) * GAME_WIDTH + Math.floor(p.x);
+            if(grid[idx] !== EMPTY && grid[idx] !== GAS) {
+                // EXPLOSION: Destroy radius
+                let radius = 5;
+                let cx = Math.floor(p.x);
+                let cy = Math.floor(p.y);
+
+                for(let dy = -radius; dy <= radius; dy++) {
+                    for(let dx = -radius; dx <= radius; dx++) {
+                        if(dx*dx + dy*dy <= radius*radius) {
+                            let tx = cx + dx;
+                            let ty = cy + dy;
+                            if(tx>0 && tx<GAME_WIDTH && ty>0 && ty<GAME_HEIGHT) {
+                                let tidx = ty * GAME_WIDTH + tx;
+                                // Don't destroy border walls
+                                if(grid[tidx] !== WALL) {
+                                    grid[tidx] = EMPTY;
+                                }
+                            }
+                        }
+                    }
+                }
+                projectiles.splice(i, 1);
+            }
+        }
+    }
+
+    function updatePlayer() {
+        // Input
+        if (keys.ArrowLeft) player.vx -= 0.5;
+        if (keys.ArrowRight) player.vx += 0.5;
+        
+        // Jump
+        if (keys.ArrowUp && player.onGround) {
+            player.vy = -3.5;
+            player.onGround = false;
+        }
+
+        // MEGA FART
+        if (keys.Space) {
+            player.vy -= 0.2; // Stronger thrust
+            
+            // Spawn HUGE Random Sphere of Gas
+            let centerX = Math.floor(player.x + player.width / 2);
+            let centerY = Math.floor(player.y + player.height + 2);
+            let radius = 6; // Big sphere
+
+            for(let y = -radius; y <= radius; y++) {
+                for(let x = -radius; x <= radius; x++) {
+                    // Check if inside circle + randomness for scattering effect
+                    if(x*x + y*y < radius*radius && Math.random() > 0.3) {
+                        let targetX = centerX + x;
+                        let targetY = centerY + y;
+                        let idx = targetY * GAME_WIDTH + targetX;
+
+                        // Only replace Empty space or Fire, don't delete walls/dirt
+                        if (targetX > 0 && targetX < GAME_WIDTH && targetY > 0 && targetY < GAME_HEIGHT) {
+                            if (grid[idx] === EMPTY) {
+                                grid[idx] = GAS;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Physics
+        player.vy += 0.2; // Gravity
+        player.vx *= 0.8; // Friction
+        
+        // Clamp speed
+        player.vy = Math.min(Math.max(player.vy, -5), 5);
+        player.vx = Math.min(Math.max(player.vx, -2), 2);
+
+        // Movement with Collision
+        player.x += player.vx;
+        handleCollision(true);
+
+        player.y += player.vy;
+        player.onGround = false;
+        handleCollision(false);
+
+        // Screen wrap/clamp
+        if(player.x < 0) player.x = 0;
+        if(player.x > GAME_WIDTH - player.width) player.x = GAME_WIDTH - player.width;
+        if(player.y > GAME_HEIGHT) init(); // Reset if fall out
+    }
+
+    function handleCollision(isXAxis) {
+        let startX = Math.floor(player.x);
+        let endX = Math.ceil(player.x + player.width);
+        let startY = Math.floor(player.y);
+        let endY = Math.ceil(player.y + player.height);
+
+        for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+                let idx = y * GAME_WIDTH + x;
+                let cell = grid[idx];
+
+                // Solids
+                if (cell === WALL || cell === SAND || cell === DIRT) {
+                    
+                    // HANDLE DIGGING
+                    // If it is Dirt, and we are pressing 'D', destroy it and don't collide
+                    if (cell === DIRT && keys.KeyD) {
+                        grid[idx] = EMPTY;
+                        // Chance to spawn debris
+                        if(Math.random() > 0.5) {
+                            let upIdx = (y-1)*GAME_WIDTH+x;
+                            if(grid[upIdx]===EMPTY) grid[upIdx] = SAND;
+                        }
+                        continue; // Skip collision response
+                    }
+
+                    // STANDARD COLLISION RESPONSE
+                    if (isXAxis) {
+                        if (player.vx > 0) player.x = x - player.width;
+                        else if (player.vx < 0) player.x = x + 1;
+                        player.vx = 0;
+                    } else {
+                        if (player.vy > 0) { // Landing
+                            player.y = y - player.height;
+                            player.onGround = true;
+                            player.vy = 0;
+                        } else if (player.vy < 0) { // Bonk head
+                            player.y = y + 1;
+                            player.vy = 0;
+                        }
+                    }
+                    return; 
+                } 
+            }
+        }
+    }
+
+    // --- CELLULAR AUTOMATA (Physics Engine) ---
+    function updateGrid() {
+        // 1. SAND (Bottom -> Up)
+        for (let y = GAME_HEIGHT - 2; y >= 0; y--) {
+            let startX = Math.random() > 0.5 ? 0 : GAME_WIDTH - 1;
+            let step = startX === 0 ? 1 : -1;
+            for (let i = 0; i < GAME_WIDTH; i++) {
+                let x = startX + (i * step);
+                let idx = y * GAME_WIDTH + x;
+
+                if (grid[idx] === SAND) {
+                    let below = idx + GAME_WIDTH;
+                    let bl = below - 1; let br = below + 1;
+                    
+                    // Fall straight
+                    if (grid[below] === EMPTY || grid[below] === GAS) {
+                        grid[below] = SAND; grid[idx] = EMPTY;
+                    } 
+                    // Slide
+                    else if (x > 0 && (grid[bl] === EMPTY || grid[bl] === GAS)) {
+                        grid[bl] = SAND; grid[idx] = EMPTY;
+                    } 
+                    else if (x < GAME_WIDTH-1 && (grid[br] === EMPTY || grid[br] === GAS)) {
+                        grid[br] = SAND; grid[idx] = EMPTY;
+                    }
+                }
+            }
+        }
+
+        // 2. GAS (Top -> Down) - Spreads out aggressively
+        for (let y = 1; y < GAME_HEIGHT; y++) {
+            let startX = Math.random() > 0.5 ? 0 : GAME_WIDTH - 1;
+            let step = startX === 0 ? 1 : -1;
+            for (let i = 0; i < GAME_WIDTH; i++) {
+                let x = startX + (i * step);
+                let idx = y * GAME_WIDTH + x;
+
+                if (grid[idx] === GAS) {
+                    if (y < 5 && Math.random() > 0.8) { grid[idx] = EMPTY; continue; } // Dissipate at top
+
+                    let above = idx - GAME_WIDTH;
+                    let al = above - 1; let ar = above + 1;
+                    let left = idx - 1; let right = idx + 1;
+
+                    // Rise
+                    if (grid[above] === EMPTY) {
+                        grid[above] = GAS; grid[idx] = EMPTY;
+                    } 
+                    // Spread Diagonally
+                    else if (x > 0 && grid[al] === EMPTY) {
+                        grid[al] = GAS; grid[idx] = EMPTY;
+                    } 
+                    else if (x < GAME_WIDTH-1 && grid[ar] === EMPTY) {
+                        grid[ar] = GAS; grid[idx] = EMPTY;
+                    }
+                    // Spread Horizontally (Expansion behavior)
+                    else if (x > 0 && grid[left] === EMPTY && Math.random() > 0.2) {
+                        grid[left] = GAS; grid[idx] = EMPTY;
+                    }
+                    else if (x < GAME_WIDTH-1 && grid[right] === EMPTY && Math.random() > 0.2) {
+                        grid[right] = GAS; grid[idx] = EMPTY;
+                    }
+                }
+            }
+        }
+    }
+
+    // --- DRAWING ---
+    function draw() {
+        // 1. Draw Grid
+        for (let i = 0; i < grid.length; i++) {
+            let col = COLORS[grid[i]];
+            buf32[i] = (255 << 24) | (col[2] << 16) | (col[1] << 8) | col[0];
+        }
+
+        // 2. Apply Buffer
+        ctx.putImageData(imgData, 0, 0);
+
+        // 3. Draw Sprites (Entities are easier to draw with standard Canvas API)
+        
+        // Draw Player
+        ctx.fillStyle = '#f00';
+        ctx.fillRect(Math.floor(player.x), Math.floor(player.y), player.width, player.height);
+
+        // Draw Enemies
+        ctx.fillStyle = '#a0a'; // Purple Enemies
+        for(let en of enemies) {
+            ctx.fillRect(Math.floor(en.x), Math.floor(en.y), en.width, en.height);
+            // Eye
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(Math.floor(en.x)+1, Math.floor(en.y)+1, 1, 1);
+            ctx.fillStyle = '#a0a';
+        }
+
+        // Draw Projectiles
+        ctx.fillStyle = '#fa0'; // Orange Fireballs
+        for(let p of projectiles) {
+            ctx.fillRect(Math.floor(p.x), Math.floor(p.y), 2, 2);
+        }
+    }
+
+    // --- LOOP ---
+    function loop() {
+        updateEntities();
+        updatePlayer();
+        updateGrid();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    init();
+    loop();
+
+</script>
+</body>
+</html>
