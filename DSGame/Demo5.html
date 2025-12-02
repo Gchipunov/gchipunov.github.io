@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Delivery Station RTS - Warehouse Flow</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
+        canvas { display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+            z-index: 10;
+        }
+        h1 { margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 2px; }
+        
+        .stat-box { font-size: 16px; margin-top: 5px; }
+        #stock-display { color: #88ff88; font-weight: bold; }
+        #order-display { color: #ff5555; font-weight: bold; }
+        #warning-msg { color: #ff5555; display: none; font-weight: bold; animation: flash 1s infinite; }
+
+        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.2; } 100% { opacity: 1; } }
+        
+        #controls-info { 
+            position: absolute; 
+            bottom: 20px; 
+            left: 20px; 
+            color: #ccc; 
+            font-size: 12px; 
+            pointer-events: none;
+            max-width: 200px;
+        }
+
+        /* Mobile Controls */
+        #mobile-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: grid;
+            grid-template-columns: 60px 60px 60px;
+            grid-template-rows: 60px 60px;
+            gap: 10px;
+            pointer-events: auto;
+            z-index: 20;
+            user-select: none;
+        }
+
+        .btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.3); }
+
+        #btn-up { grid-column: 2; grid-row: 1; }
+        #btn-left { grid-column: 1; grid-row: 2; }
+        #btn-down { grid-column: 2; grid-row: 2; }
+        #btn-right { grid-column: 3; grid-row: 2; }
+        #btn-zoom-in { grid-column: 1; grid-row: 1; font-size: 30px; background: rgba(0,0,255,0.3); }
+        #btn-zoom-out { grid-column: 3; grid-row: 1; font-size: 30px; background: rgba(0,0,255,0.3); }
+
+        .status-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 30px;
+            color: white;
+            font-weight: bold;
+            display: none;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 30;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Logistic Center RTS</h1>
+        <div class="stat-box">Station Stock: <span id="stock-display">10</span></div>
+        <div class="stat-box">Active Orders: <span id="order-display">0</span></div>
+        <div class="stat-box">Delivered: <span id="score">0</span></div>
+        <div class="stat-box" id="warning-msg">OUT OF STOCK! WAIT FOR SEMI!</div>
+        <div class="stat-box" id="active-van" style="margin-top:10px; font-size: 14px; color:#ccc;">Selected: None</div>
+    </div>
+
+    <div id="controls-info">
+        <p>1. Tap Yellow Van (Back) to select.</p>
+        <p>2. Tap Red House to deliver.</p>
+        <p>3. Vans must pass THROUGH warehouse.</p>
+    </div>
+
+    <div id="mobile-controls">
+        <div class="btn" id="btn-zoom-in">+</div>
+        <div class="btn" id="btn-up">▲</div>
+        <div class="btn" id="btn-zoom-out">-</div>
+        <div class="btn" id="btn-left">◀</div>
+        <div class="btn" id="btn-down">▼</div>
+        <div class="btn" id="btn-right">▶</div>
+    </div>
+
+    <div id="game-over" class="status-msg">Mission Complete!</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- GAME CONFIGURATION ---
+        const CONFIG = {
+            groundSize: 200,
+            houseCount: 25,
+            vanCount: 5,
+            vanSpeed: 0.4,
+            truckSpeed: 0.15,
+            camSpeed: 1.5,
+            initialStock: 5,
+            truckRestockAmount: 10,
+            truckUnloadTime: 120, 
+            orderSpawnRate: 2000, 
+            collisionRadius: 7, 
+            avoidanceForce: 0.9,
+            colors: {
+                ground: 0x3a9d23,
+                station: 0x0044ff,
+                houseActive: 0xff3333, 
+                houseInactive: 0x999999,
+                van: 0xffcc00,
+                vanSelected: 0xffffff,
+                semi: 0x8855FF, 
+                road: 0x333333
+            }
+        };
+
+        // --- GLOBAL VARIABLES ---
+        let scene, camera, renderer, raycaster, mouse;
+        let score = 0;
+        let activeOrders = 0;
+        let stationStock = CONFIG.initialStock;
+        let lastOrderTime = 0;
+        
+        let houses = [];
+        let vans = [];
+        let semis = []; 
+        let selectedVan = null;
+        
+        let camInput = { x: 0, z: 0, zoom: 0 };
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); 
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(60, 60, 60); // Angled view
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 50, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            createGround();
+            createStation(); // Now creates a tunnel
+            createHouses();
+            createVans();
+            spawnSemi();
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            
+            window.addEventListener('resize', onWindowResize, false);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown, false);
+            setupMobileControls();
+            updateUI();
+        }
+
+        function setupMobileControls() {
+            const addBtn = (id, actionStart, actionEnd) => {
+                const el = document.getElementById(id);
+                el.addEventListener('mousedown', actionStart);
+                el.addEventListener('mouseup', actionEnd);
+                el.addEventListener('mouseleave', actionEnd);
+                el.addEventListener('touchstart', (e) => { e.preventDefault(); actionStart(); }, {passive: false});
+                el.addEventListener('touchend', (e) => { e.preventDefault(); actionEnd(); }, {passive: false});
+            };
+            addBtn('btn-up', () => camInput.z = -1, () => camInput.z = 0);
+            addBtn('btn-down', () => camInput.z = 1, () => camInput.z = 0);
+            addBtn('btn-left', () => camInput.x = -1, () => camInput.x = 0);
+            addBtn('btn-right', () => camInput.x = 1, () => camInput.x = 0);
+            addBtn('btn-zoom-in', () => camInput.zoom = -1, () => camInput.zoom = 0);
+            addBtn('btn-zoom-out', () => camInput.zoom = 1, () => camInput.zoom = 0);
+        }
+
+        function createGround() {
+            const geometry = new THREE.PlaneGeometry(CONFIG.groundSize, CONFIG.groundSize);
+            const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.ground });
+            const ground = new THREE.Mesh(geometry, material);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+            
+            // Truck Road (Back)
+            const roadGeo = new THREE.PlaneGeometry(20, 100);
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            const road = new THREE.Mesh(roadGeo, roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.set(0, 0.1, -50); 
+            scene.add(road);
+
+            // Warehouse Floor
+            const wareFloor = new THREE.Mesh(new THREE.PlaneGeometry(16, 30), new THREE.MeshStandardMaterial({color: 0x555555}));
+            wareFloor.rotation.x = -Math.PI / 2;
+            wareFloor.position.set(0, 0.15, 0);
+            scene.add(wareFloor);
+        }
+
+        function createStation() {
+            const stationGroup = new THREE.Group();
+            const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.station });
+
+            // Left Wall
+            const left = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 20), material);
+            left.position.set(-6, 5, 0);
+            left.castShadow = true; left.receiveShadow = true;
+            stationGroup.add(left);
+
+            // Right Wall
+            const right = new THREE.Mesh(new THREE.BoxGeometry(4, 10, 20), material);
+            right.position.set(6, 5, 0);
+            right.castShadow = true; right.receiveShadow = true;
+            stationGroup.add(right);
+
+            // Roof
+            const roof = new THREE.Mesh(new THREE.BoxGeometry(20, 2, 22), material);
+            roof.position.set(0, 11, 0);
+            roof.castShadow = true; roof.receiveShadow = true;
+            stationGroup.add(roof);
+
+            scene.add(stationGroup);
+        }
+
+        function createHouses() {
+            const geometry = new THREE.BoxGeometry(4, 4, 4);
+            for (let i = 0; i < CONFIG.houseCount; i++) {
+                const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.houseInactive });
+                const house = new THREE.Mesh(geometry, material);
+                let x, z;
+                // Houses mostly in front (positive Z)
+                do {
+                    x = (Math.random() - 0.5) * (CONFIG.groundSize - 20);
+                    z = (Math.random() * 60) + 15; 
+                } while (Math.abs(x) < 15 && Math.abs(z) < 15);
+
+                house.position.set(x, 2, z);
+                house.castShadow = true;
+                house.receiveShadow = true;
+                house.userData = { type: 'house', needsPackage: false, id: i };
+                houses.push(house);
+                scene.add(house);
+            }
+        }
+
+        function createVans() {
+            const geometry = new THREE.BoxGeometry(3, 3, 6);
+            for (let i = 0; i < CONFIG.vanCount; i++) {
+                const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.van });
+                const van = new THREE.Mesh(geometry, material);
+                
+                // SPAWN AT BACK (Loading Dock)
+                // Use i to spread them out slightly so they don't spawn fused
+                const offsetX = (i % 3) * 4 - 4;
+                const offsetZ = -18 - (Math.floor(i/3) * 8);
+
+                van.position.set(offsetX, 1.5, offsetZ); 
+                van.castShadow = true;
+                van.userData = {
+                    type: 'van',
+                    id: i,
+                    state: 'IDLE', // IDLE means Waiting at Dock
+                    homePos: new THREE.Vector3(offsetX, 1.5, offsetZ),
+                    targetPos: null,
+                    targetHouse: null
+                };
+                vans.push(van);
+                scene.add(van);
+            }
+        }
+
+        function spawnSemi() {
+            const geometry = new THREE.BoxGeometry(4, 5, 12);
+            const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.semi });
+            const semi = new THREE.Mesh(geometry, material);
+            semi.position.set(0, 2.5, -90);
+            semi.castShadow = true;
+            semi.userData = { type: 'semi', state: 'APPROACHING', timer: 0 };
+            semis.push(semi);
+            scene.add(semi);
+        }
+
+        function onPointerDown(event) {
+            event.preventDefault();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if (object.userData.type === 'van') {
+                    selectVan(object);
+                }
+                else if (object.userData.type === 'house' && selectedVan) {
+                    if (object.userData.needsPackage) orderDelivery(selectedVan, object);
+                }
+                else if (selectedVan && intersects[0].object.geometry.type === "PlaneGeometry") {
+                    deselectVan();
+                }
+            }
+        }
+
+        function selectVan(van) {
+            if (selectedVan) selectedVan.material.color.setHex(CONFIG.colors.van);
+            selectedVan = van;
+            selectedVan.material.color.setHex(CONFIG.colors.vanSelected);
+            document.getElementById('active-van').innerText = `Selected: Van ${van.userData.id + 1}`;
+        }
+
+        function deselectVan() {
+            if (selectedVan) selectedVan.material.color.setHex(CONFIG.colors.van);
+            selectedVan = null;
+            document.getElementById('active-van').innerText = `Selected: None`;
+        }
+
+        function orderDelivery(van, house) {
+            if (stationStock <= 0) {
+                const warning = document.getElementById('warning-msg');
+                warning.style.display = 'block';
+                setTimeout(() => warning.style.display = 'none', 2000);
+                return;
+            }
+
+            if (van.userData.state === 'IDLE') {
+                stationStock--;
+                updateUI();
+                
+                // 1. Move THROUGH the warehouse (Front Exit)
+                van.userData.state = 'EXITING_STATION';
+                van.userData.targetHouse = house;
+                // Target Front of Station, keeping current lane (X) roughly
+                van.userData.targetPos = new THREE.Vector3(van.position.x * 0.5, 1.5, 25); 
+            }
+        }
+
+        function updateGameLogic() {
+            const now = Date.now();
+            if (now - lastOrderTime > CONFIG.orderSpawnRate) {
+                const inactiveHouses = houses.filter(h => !h.userData.needsPackage);
+                if (inactiveHouses.length > 0 && Math.random() < 0.4) {
+                    const house = inactiveHouses[Math.floor(Math.random() * inactiveHouses.length)];
+                    house.userData.needsPackage = true;
+                    house.material.color.setHex(CONFIG.colors.houseActive);
+                    activeOrders++;
+                    updateUI();
+                }
+                lastOrderTime = now;
+            }
+        }
+
+        function updateVans() {
+            vans.forEach(van => {
+                // --- BOIDS COLLISION AVOIDANCE ---
+                let separation = new THREE.Vector3();
+                let count = 0;
+                vans.forEach(other => {
+                    if (van !== other) {
+                        const dist = van.position.distanceTo(other.position);
+                        if (dist < CONFIG.collisionRadius) {
+                            let push = new THREE.Vector3().subVectors(van.position, other.position);
+                            push.normalize().divideScalar(dist);
+                            separation.add(push);
+                            count++;
+                        }
+                    }
+                });
+                if (count > 0) separation.divideScalar(count).multiplyScalar(CONFIG.avoidanceForce);
+
+                if (van.userData.state === 'IDLE') {
+                    // Slight push while parking to avoid overlaps
+                    if(separation.length() > 0) van.position.add(separation.multiplyScalar(0.1));
+                    return; 
+                }
+
+                const target = van.userData.targetPos;
+                const dist = van.position.distanceTo(target);
+
+                // --- MOVEMENT ---
+                if (dist > 1.0) {
+                    const desired = new THREE.Vector3().subVectors(target, van.position).normalize();
+                    // Apply Separation force to steering
+                    const steer = new THREE.Vector3().addVectors(desired, separation);
+                    steer.normalize(); 
+
+                    van.position.add(steer.multiplyScalar(CONFIG.vanSpeed));
+                    
+                    const lookTarget = van.position.clone().add(steer);
+                    van.lookAt(lookTarget);
+                } else {
+                    handleVanArrival(van);
+                }
+            });
+        }
+
+        function handleVanArrival(van) {
+            if (van.userData.state === 'EXITING_STATION') {
+                // 2. Exited Warehouse -> Go to House
+                van.userData.state = 'MOVING_TO_HOUSE';
+                van.userData.targetPos = van.userData.targetHouse.position.clone();
+
+            } else if (van.userData.state === 'MOVING_TO_HOUSE') {
+                // 3. Delivered -> Return to Dock
+                const house = van.userData.targetHouse;
+                if(house.userData.needsPackage) {
+                    house.userData.needsPackage = false;
+                    house.material.color.setHex(CONFIG.colors.houseInactive);
+                    activeOrders--;
+                    updateScore();
+                }
+                
+                van.userData.state = 'RETURNING';
+                // Go directly back to home dock
+                van.userData.targetPos = van.userData.homePos.clone();
+
+            } else if (van.userData.state === 'RETURNING') {
+                // 4. Arrived at Dock -> Park
+                van.userData.state = 'IDLE';
+                van.rotation.set(0, 0, 0); 
+            }
+        }
+
+        function updateSemis() {
+            for (let i = semis.length - 1; i >= 0; i--) {
+                const semi = semis[i];
+                if (semi.userData.state === 'APPROACHING') {
+                    // Stop further back (-35) to leave room for vans
+                    const target = new THREE.Vector3(0, 2.5, -35);
+                    if (semi.position.distanceTo(target) > 0.5) semi.position.z += CONFIG.truckSpeed;
+                    else { semi.userData.state = 'UNLOADING'; semi.userData.timer = CONFIG.truckUnloadTime; }
+                } 
+                else if (semi.userData.state === 'UNLOADING') {
+                    semi.userData.timer--;
+                    semi.rotation.z = Math.sin(Date.now() * 0.02) * 0.05;
+                    if (semi.userData.timer <= 0) {
+                        stationStock += CONFIG.truckRestockAmount;
+                        updateUI();
+                        semi.rotation.z = 0;
+                        semi.userData.state = 'LEAVING';
+                    }
+                } 
+                else if (semi.userData.state === 'LEAVING') {
+                    semi.position.z -= CONFIG.truckSpeed;
+                    if (semi.position.z < -100) {
+                        scene.remove(semi);
+                        semis.splice(i, 1);
+                        setTimeout(spawnSemi, Math.random() * 5000 + 5000);
+                    }
+                }
+            }
+            if (semis.length === 0 && stationStock === 0 && Math.random() < 0.01) spawnSemi();
+        }
+
+        function updateCamera() {
+            if (camInput.x !== 0 || camInput.z !== 0 || camInput.zoom !== 0) {
+                camera.position.x += camInput.x * CONFIG.camSpeed;
+                camera.position.z += camInput.z * CONFIG.camSpeed;
+                camera.position.y += camInput.zoom * CONFIG.camSpeed;
+                if(camera.position.y < 20) camera.position.y = 20;
+                if(camera.position.y > 100) camera.position.y = 100;
+            }
+        }
+
+        function updateScore() {
+            score++;
+            document.getElementById('score').innerText = score;
+            updateUI();
+        }
+        
+        function updateUI() {
+            const elStock = document.getElementById('stock-display');
+            elStock.innerText = stationStock;
+            elStock.style.color = stationStock === 0 ? 'red' : '#88ff88';
+            document.getElementById('order-display').innerText = activeOrders;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateGameLogic();
+            updateVans();
+            updateSemis();
+            updateCamera();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
