@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Station RTS</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            text-shadow: 1px 1px 2px black;
+        }
+        h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }
+        #score-board { font-size: 18px; margin-top: 10px; }
+        #controls { 
+            position: absolute; 
+            bottom: 20px; 
+            left: 20px; 
+            color: #ccc; 
+            font-size: 14px; 
+            pointer-events: none;
+        }
+        .status-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 30px;
+            color: white;
+            font-weight: bold;
+            display: none;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Neighborhood Delivery RTS</h1>
+        <div id="score-board">Packages Delivered: <span id="score">0</span></div>
+        <div id="active-van">Selected: None</div>
+    </div>
+
+    <div id="controls">
+        <p>1. Click a Yellow Van to select it.</p>
+        <p>2. Click a Red House to deliver.</p>
+        <p>Vans return to the Blue Station automatically.</p>
+    </div>
+
+    <div id="game-over" class="status-msg">All Packages Delivered!</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- GAME CONFIGURATION ---
+        const CONFIG = {
+            groundSize: 200,
+            houseCount: 15,
+            vanCount: 3,
+            vanSpeed: 0.3,
+            colors: {
+                ground: 0x3a9d23,
+                station: 0x0044ff,
+                house: 0xff3333,
+                houseDone: 0x555555,
+                van: 0xffcc00,
+                vanSelected: 0xffffff,
+                road: 0x333333
+            }
+        };
+
+        // --- GLOBAL VARIABLES ---
+        let scene, camera, renderer, raycaster, mouse;
+        let score = 0;
+        let houses = [];
+        let vans = [];
+        let station;
+        let selectedVan = null;
+        let animationId;
+
+        // Initialize the game
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
+
+            // 2. Setup Camera (Isometric-ish view)
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 60, 80);
+            camera.lookAt(0, 0, 0);
+
+            // 3. Setup Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 4. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 50, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 5. Create World
+            createGround();
+            createStation();
+            createHouses();
+            createVans();
+
+            // 6. Interaction Setup
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('mousedown', onMouseDown, false);
+        }
+
+        // --- WORLD GENERATION ---
+
+        function createGround() {
+            const geometry = new THREE.PlaneGeometry(CONFIG.groundSize, CONFIG.groundSize);
+            const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.ground });
+            const ground = new THREE.Mesh(geometry, material);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+        }
+
+        function createStation() {
+            // The central hub
+            const geometry = new THREE.BoxGeometry(10, 6, 10);
+            const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.station });
+            station = new THREE.Mesh(geometry, material);
+            station.position.set(0, 3, 0);
+            station.castShadow = true;
+            station.receiveShadow = true;
+            scene.add(station);
+
+            // Add a label logic here conceptually, but we use simple geometry
+        }
+
+        function createHouses() {
+            const geometry = new THREE.BoxGeometry(4, 4, 4);
+            
+            for (let i = 0; i < CONFIG.houseCount; i++) {
+                const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.house });
+                const house = new THREE.Mesh(geometry, material);
+                
+                // Random position excluding the center (station area)
+                let x, z;
+                do {
+                    x = (Math.random() - 0.5) * (CONFIG.groundSize - 20);
+                    z = (Math.random() - 0.5) * (CONFIG.groundSize - 20);
+                } while (Math.abs(x) < 15 && Math.abs(z) < 15); // Keep away from station
+
+                house.position.set(x, 2, z);
+                house.castShadow = true;
+                house.receiveShadow = true;
+                
+                // Add custom properties for game logic
+                house.userData = { 
+                    type: 'house', 
+                    needsPackage: true,
+                    id: i 
+                };
+                
+                houses.push(house);
+                scene.add(house);
+            }
+        }
+
+        function createVans() {
+            const geometry = new THREE.BoxGeometry(3, 3, 6);
+            
+            for (let i = 0; i < CONFIG.vanCount; i++) {
+                const material = new THREE.MeshStandardMaterial({ color: CONFIG.colors.van });
+                const van = new THREE.Mesh(geometry, material);
+                
+                // Start near station
+                van.position.set(-8 + (i * 8), 1.5, 10);
+                van.castShadow = true;
+                
+                // Van State
+                van.userData = {
+                    type: 'van',
+                    id: i,
+                    state: 'IDLE', // IDLE, MOVING_TO_HOUSE, RETURNING
+                    targetPos: null,
+                    targetHouse: null
+                };
+
+                vans.push(van);
+                scene.add(van);
+            }
+        }
+
+        // --- GAME LOGIC ---
+
+        function onMouseDown(event) {
+            // Normalize mouse coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Get intersected objects
+            const intersects = raycaster.intersectObjects(scene.children);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                
+                // Logic: Select Van
+                if (object.userData.type === 'van') {
+                    selectVan(object);
+                }
+                // Logic: Move Van to House
+                else if (object.userData.type === 'house' && selectedVan) {
+                    if (object.userData.needsPackage) {
+                        orderDelivery(selectedVan, object);
+                    }
+                }
+                // Logic: Deselect if clicking ground
+                else if (selectedVan && intersects[0].object.geometry.type === "PlaneGeometry") {
+                    deselectVan();
+                }
+            }
+        }
+
+        function selectVan(van) {
+            if (selectedVan) {
+                selectedVan.material.color.setHex(CONFIG.colors.van); // Reset old
+            }
+            selectedVan = van;
+            selectedVan.material.color.setHex(CONFIG.colors.vanSelected); // Highlight new
+            document.getElementById('active-van').innerText = `Selected: Van ${van.userData.id + 1}`;
+        }
+
+        function deselectVan() {
+            if (selectedVan) {
+                selectedVan.material.color.setHex(CONFIG.colors.van);
+            }
+            selectedVan = null;
+            document.getElementById('active-van').innerText = `Selected: None`;
+        }
+
+        function orderDelivery(van, house) {
+            if (van.userData.state === 'IDLE') {
+                van.userData.state = 'MOVING_TO_HOUSE';
+                van.userData.targetHouse = house;
+                van.userData.targetPos = house.position.clone();
+                
+                // Simple visual feedback
+                van.lookAt(house.position);
+            }
+        }
+
+        // --- MAIN LOOP ---
+
+        function updateVans() {
+            vans.forEach(van => {
+                if (van.userData.state === 'IDLE') return;
+
+                const target = van.userData.targetPos;
+                const current = van.position;
+                
+                // Calculate direction
+                const direction = new THREE.Vector3().subVectors(target, current);
+                const distance = direction.length();
+
+                // Move logic
+                if (distance > 0.5) {
+                    direction.normalize();
+                    van.position.add(direction.multiplyScalar(CONFIG.vanSpeed));
+                    van.lookAt(target); // Make van face direction
+                } else {
+                    // Arrived at destination
+                    handleArrival(van);
+                }
+            });
+        }
+
+        function handleArrival(van) {
+            if (van.userData.state === 'MOVING_TO_HOUSE') {
+                // Drop off package
+                const house = van.userData.targetHouse;
+                
+                if(house.userData.needsPackage) {
+                    house.userData.needsPackage = false;
+                    house.material.color.setHex(CONFIG.colors.houseDone); // Turn house grey
+                    updateScore();
+                }
+
+                // Return to station
+                van.userData.state = 'RETURNING';
+                van.userData.targetPos = new THREE.Vector3(0, 1.5, 10); // Station coordinates
+            
+            } else if (van.userData.state === 'RETURNING') {
+                // Arrived back at station
+                van.userData.state = 'IDLE';
+                // Rotate back to default alignment
+                van.rotation.set(0, 0, 0); 
+                
+                // If this was the selected van, keep it selected, otherwise leave it
+            }
+        }
+
+        function updateScore() {
+            score++;
+            document.getElementById('score').innerText = score;
+            if(score === CONFIG.houseCount) {
+                document.getElementById('game-over').style.display = 'block';
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateVans();
+            renderer.render(scene, camera);
+        }
+
+    </script>
+</body>
+</html>
