@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Water Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #controls {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <strong>Controls:</strong><br>
+    Arrows / WASD: Move<br>
+    Space: Jump / Swim Up<br>
+    Down: Duck / Dive
+</div>
+<canvas id="glCanvas"></canvas>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    attribute vec4 a_color;
+    
+    uniform vec2 u_resolution;
+    
+    varying vec4 v_color;
+    
+    void main() {
+        // Convert from pixels to 0.0->1.0
+        vec2 zeroToOne = a_position / u_resolution;
+        // Convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        // Convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+        
+        // Flip Y axis so 0 is top
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        v_color = a_color;
+    }
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    varying vec4 v_color;
+    void main() {
+        gl_FragColor = v_color;
+    }
+</script>
+
+<script>
+/**
+ * WATER PHYSICS ENGINE
+ * Uses Hooke's Law for spring physics + Neighbor propagation
+ */
+class Water {
+    constructor(x, y, width, height, segments) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height; // visual depth
+        this.baseHeight = y;
+        this.springs = [];
+        this.spacing = width / segments;
+        
+        // Physics constants
+        this.k = 0.025; // Tension
+        this.dampening = 0.025;
+        this.spread = 0.25;
+
+        for (let i = 0; i <= segments; i++) {
+            this.springs.push({
+                p: 0, // position (displacement from baseline)
+                v: 0  // velocity
+            });
+        }
+    }
+
+    update() {
+        // 1. Hooke's Law (Individual spring physics)
+        for (let i = 0; i < this.springs.length; i++) {
+            const spring = this.springs[i];
+            const x = spring.p; // displacement
+            const a = -this.k * x - this.dampening * spring.v;
+            spring.v += a;
+            spring.p += spring.v;
+        }
+
+        // 2. Wave Propagation (Pull neighbors)
+        const leftDeltas = new Array(this.springs.length).fill(0);
+        const rightDeltas = new Array(this.springs.length).fill(0);
+
+        // Do multiple passes for smoother spread
+        for (let j = 0; j < 8; j++) {
+            for (let i = 0; i < this.springs.length; i++) {
+                if (i > 0) {
+                    leftDeltas[i] = this.spread * (this.springs[i].p - this.springs[i - 1].p);
+                    this.springs[i - 1].v += leftDeltas[i];
+                }
+                if (i < this.springs.length - 1) {
+                    rightDeltas[i] = this.spread * (this.springs[i].p - this.springs[i + 1].p);
+                    this.springs[i + 1].v += rightDeltas[i];
+                }
+            }
+
+            for (let i = 0; i < this.springs.length; i++) {
+                if (i > 0) this.springs[i - 1].p += leftDeltas[i];
+                if (i < this.springs.length - 1) this.springs[i + 1].p += rightDeltas[i];
+            }
+        }
+    }
+
+    splash(xPos, speed) {
+        // Find which spring corresponds to xPos
+        let index = Math.floor((xPos - this.x) / this.spacing);
+        if (index >= 0 && index < this.springs.length) {
+            this.springs[index].v = speed;
+        }
+    }
+}
+
+/**
+ * GAME ENGINE & RENDERER
+ */
+const canvas = document.getElementById("glCanvas");
+const gl = canvas.getContext("webgl");
+
+// --- Shader Boilerplate ---
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vsSource = document.getElementById("vertex-shader").text;
+const fsSource = document.getElementById("fragment-shader").text;
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Locations
+const positionLoc = gl.getAttribLocation(program, "a_position");
+const colorLoc = gl.getAttribLocation(program, "a_color");
+const resolutionLoc = gl.getUniformLocation(program, "u_resolution");
+
+// Buffers
+const positionBuffer = gl.createBuffer();
+const colorBuffer = gl.createBuffer();
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Game State ---
+const gravity = 0.5;
+const waterDrag = 0.85;
+const waterBuoyancy = 0.8;
+
+const water = new Water(200, 400, 600, 300, 80); // x, y, w, h, segments
+
+const platforms = [
+    {x: 50, y: 300, w: 150, h: 20},
+    {x: 800, y: 250, w: 150, h: 20},
+    {x: 400, y: 150, w: 100, h: 20},
+    {x: 0, y: 500, w: 200, h: 50}, // Left edge
+    {x: 800, y: 500, w: 200, h: 50} // Right edge
+];
+
+const player = {
+    x: 100, y: 100,
+    w: 30, h: 50,
+    vx: 0, vy: 0,
+    speed: 5, jump: -12,
+    grounded: false,
+    inWater: false,
+    ducking: false,
+    color: [1, 0.2, 0.2, 1] // Red
+};
+
+const keys = {};
+window.addEventListener("keydown", e => keys[e.code] = true);
+window.addEventListener("keyup", e => keys[e.code] = false);
+
+// --- Drawing Helpers ---
+// We will batch vertices manually for simplicity in this example
+let positions = [];
+let colors = [];
+
+function drawRect(x, y, w, h, r, g, b, a) {
+    // 2 triangles forming a quad
+    positions.push(
+        x, y, 
+        x + w, y, 
+        x, y + h,
+        x, y + h, 
+        x + w, y, 
+        x + w, y + h
+    );
+    for(let i=0; i<6; i++) colors.push(r, g, b, a);
+}
+
+function drawWater(wObj) {
+    // Draw water surface as triangle strip mesh
+    // Top vertices move with springs, bottom vertices are fixed
+    for (let i = 0; i < wObj.springs.length - 1; i++) {
+        let x1 = wObj.x + i * wObj.spacing;
+        let y1 = wObj.baseHeight + wObj.springs[i].p;
+        let x2 = wObj.x + (i + 1) * wObj.spacing;
+        let y2 = wObj.baseHeight + wObj.springs[i + 1].p;
+        
+        let yBottom = wObj.baseHeight + wObj.height;
+
+        // Quad for this segment
+        positions.push(
+            x1, y1,
+            x2, y2,
+            x1, yBottom,
+            
+            x1, yBottom,
+            x2, y2,
+            x2, yBottom
+        );
+        
+        // Gradient color: lighter top, darker bottom
+        const topColor = [0.2, 0.6, 0.9, 0.8];
+        const botColor = [0.1, 0.3, 0.6, 0.9];
+        
+        colors.push(...topColor, ...topColor, ...botColor, ...botColor, ...topColor, ...botColor);
+    }
+}
+
+function AABB(r1, r2) {
+    return r1.x < r2.x + r2.w &&
+           r1.x + r1.w > r2.x &&
+           r1.y < r2.y + r2.h &&
+           r1.y + r1.h > r2.y;
+}
+
+// --- Main Loop ---
+function update() {
+    // 1. Inputs
+    player.vx = 0;
+    if (keys['ArrowLeft'] || keys['KeyA']) player.vx = -player.speed;
+    if (keys['ArrowRight'] || keys['KeyD']) player.vx = player.speed;
+    
+    // Ducking mechanics
+    if ((keys['ArrowDown'] || keys['KeyS']) && !player.inWater) {
+        player.h = 25;
+        player.y += 25; // Snap down visual correction
+        player.ducking = true;
+    } else if (player.ducking) {
+        player.h = 50;
+        player.y -= 25;
+        player.ducking = false;
+    }
+
+    // 2. Physics & collision
+    
+    // Check Water Entry/Exit
+    const playerRect = {x: player.x, y: player.y, w: player.w, h: player.h};
+    const waterRect = {x: water.x, y: water.y + 20, w: water.width, h: water.height}; // +20 buffer
+    
+    const wasInWater = player.inWater;
+    player.inWater = AABB(playerRect, waterRect);
+
+    // Splash logic
+    if (player.inWater !== wasInWater) {
+        // Player entered or left water, trigger splash at center of player X
+        water.splash(player.x + player.w/2, player.vy * 3);
+    }
+
+    if (player.inWater) {
+        // Swimming Physics
+        player.vy += 0.2; // Reduced gravity
+        if (player.vy > 2) player.vy = 2; // Terminal velocity in water
+        
+        // Apply Buoyancy if submerged
+        if(player.y > water.y + 20) {
+             player.vy -= waterBuoyancy;
+        }
+
+        // Swim Movement
+        if (keys['Space'] || keys['ArrowUp'] || keys['KeyW']) {
+            player.vy = -3;
+        }
+        if (keys['ArrowDown'] || keys['KeyS']) {
+            player.vy += 0.5;
+        }
+        
+        player.vx *= waterDrag;
+        player.vy *= waterDrag;
+
+    } else {
+        // Air/Ground Physics
+        player.vy += gravity;
+        
+        if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.grounded) {
+            player.vy = player.jump;
+            player.grounded = false;
+        }
+    }
+
+    // Move Y
+    player.y += player.vy;
+    
+    // Platform Collisions (Y-axis only for simplicity)
+    player.grounded = false;
+    for (let p of platforms) {
+        if (player.x < p.x + p.w && player.x + player.w > p.x &&
+            player.y + player.h > p.y && player.y + player.h < p.y + p.h + 20 && // Top collision
+            player.vy >= 0) {
+            
+            player.y = p.y - player.h;
+            player.vy = 0;
+            player.grounded = true;
+        }
+    }
+
+    // Move X
+    player.x += player.vx;
+    
+    // Screen bounds
+    if(player.x < 0) player.x = 0;
+    if(player.x > canvas.width - player.w) player.x = canvas.width - player.w;
+    if(player.y > canvas.height) { player.y = 0; player.vy = 0; } // Respawn if fall out
+
+    // Update Water Physics
+    water.update();
+}
+
+function render() {
+    // Clear
+    positions = [];
+    colors = [];
+    
+    // Draw Platforms
+    for (let p of platforms) {
+        drawRect(p.x, p.y, p.w, p.h, 0.4, 0.4, 0.4, 1);
+    }
+    
+    // Draw Player
+    drawRect(player.x, player.y, player.w, player.h, ...player.color);
+
+    // Draw Water
+    drawWater(water);
+
+    // Upload to GPU
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(positionLoc);
+    gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(colorLoc);
+    gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, 0, 0);
+
+    // Draw
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.drawArrays(gl.TRIANGLES, 0, positions.length / 2);
+}
+
+function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>
