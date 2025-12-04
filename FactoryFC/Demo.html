@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Package Factory</title>
+    <!-- Tailwind CSS for UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Set up the container for the 3D canvas */
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #0d1117; }
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+        }
+        /* Custom CSS for a cool 3D feeling UI */
+        .card-glass {
+            background-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <!-- 3D Canvas will be injected here -->
+    <div id="game-container"></div>
+
+    <!-- UI Overlay (Tailwind CSS) -->
+    <div id="ui-overlay" class="absolute inset-0 z-20 pointer-events-none p-4 md:p-8">
+        
+        <!-- Score and Stats -->
+        <div class="flex justify-between items-start">
+            <div class="card-glass text-white p-4 rounded-xl pointer-events-auto">
+                <div class="text-xs uppercase opacity-75">Shipped Packages</div>
+                <div id="score" class="text-4xl font-extrabold text-green-400">$0</div>
+            </div>
+            <div id="message-box" class="text-white text-lg font-semibold card-glass p-3 rounded-xl opacity-0 transition-opacity duration-300 pointer-events-none">
+                
+            </div>
+        </div>
+
+        <!-- Interactive Button Area (Bottom Center) -->
+        <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4 pointer-events-auto">
+            <button id="package-button" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-150 ease-in-out transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed">
+                📦 Package Item (Ready at Station)
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Global Variables and Constants ---
+        const GAME_SPEED = 0.005; // Base speed of the conveyor belt and materials
+        const STATION_X = 0; // X position of the packaging station
+        const FC_X = 10; // X position of the Fulfillment Center drop-off
+        const SPAWN_X = -10; // X position where materials spawn
+        const MATERIAL_Z = 0.5; // Z position (height) of the materials
+        const PACKAGE_VALUE = 100; // Value added to score per package
+        const REFRESH_RATE = 1000 / 60; // 60 FPS update rate
+
+        let scene, camera, renderer;
+        let conveyorMesh;
+        let materials = [];
+        let score = 0;
+        let lastSpawnTime = 0;
+        const spawnInterval = 3000; // Spawn a new raw material every 3 seconds
+        let isPackagingReady = false;
+
+        const uiScore = document.getElementById('score');
+        const uiButton = document.getElementById('package-button');
+        const uiMessage = document.getElementById('message-box');
+        
+        // Custom Material Class to manage state and mesh
+        class FactoryItem {
+            constructor(type = 'raw') {
+                this.type = type; // 'raw' or 'packaged'
+                this.isAtStation = false;
+                this.isShipped = false;
+                
+                let geometry, material;
+
+                if (type === 'raw') {
+                    // Raw Material (Brown Cube)
+                    geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+                    material = new THREE.MeshLambertMaterial({ color: 0x8B4513 }); // Saddle Brown
+                } else {
+                    // Packaged Item (White Cube with label/tape simulation)
+                    geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+                    material = new THREE.MeshLambertMaterial({ color: 0xffffff });
+                    
+                    // Add a simple tape texture/color for visual flair
+                    const tapeMaterial = new THREE.MeshLambertMaterial({ color: 0xffa500 }); // Orange tape
+                    const tapeGeometry = new THREE.BoxGeometry(1.0, 0.1, 0.8);
+                    const tapeMesh = new THREE.Mesh(tapeGeometry, tapeMaterial);
+                    tapeMesh.position.y = 0.51;
+                    
+                    this.tape = tapeMesh;
+                }
+                
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.position.set(SPAWN_X, MATERIAL_Z + (this.type === 'packaged' ? 0.1 : 0), 0);
+                
+                if (this.tape) {
+                    this.mesh.add(this.tape);
+                }
+            }
+
+            update(deltaTime) {
+                if (this.isShipped) return;
+
+                // Move the item along the positive X axis
+                this.mesh.position.x += GAME_SPEED * deltaTime;
+                
+                // Check if the item is approaching/at the Packaging Station
+                if (this.type === 'raw') {
+                    if (this.mesh.position.x >= STATION_X - 0.5 && this.mesh.position.x < STATION_X + 0.5) {
+                        this.isAtStation = true;
+                    } else {
+                        this.isAtStation = false;
+                    }
+                }
+
+                // Check for shipping (reaching the FC)
+                if (this.mesh.position.x >= FC_X) {
+                    this.isShipped = true;
+                    return true; // Signal that it was shipped
+                }
+                return false;
+            }
+        }
+
+
+        // --- Utility Functions ---
+
+        function showMessage(text, duration = 2000) {
+            uiMessage.textContent = text;
+            uiMessage.classList.remove('opacity-0');
+            uiMessage.classList.add('opacity-100');
+            clearTimeout(window.messageTimeout);
+            window.messageTimeout = setTimeout(() => {
+                uiMessage.classList.remove('opacity-100');
+                uiMessage.classList.add('opacity-0');
+            }, duration);
+        }
+
+        function updateScore(amount) {
+            score += amount;
+            uiScore.textContent = `$${score.toLocaleString()}`;
+        }
+
+        // --- Core Three.js Setup ---
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e); // Dark space/factory background
+
+            // Camera (Perspective)
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 8, 12);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('game-container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 2); // soft white light
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+            directionalLight.position.set(5, 10, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            // Create Factory Environment
+            createGround();
+            createConveyorBelt();
+            createPackagingStation();
+            createFulfillmentCenter();
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            uiButton.addEventListener('click', packageItem);
+            uiButton.disabled = true; // Start disabled
+            uiButton.textContent = "Waiting for Material...";
+
+            // Initial Material Spawn
+            spawnMaterial();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Factory Structure Creation ---
+
+        function createGround() {
+            const geometry = new THREE.PlaneGeometry(30, 15);
+            const material = new THREE.MeshStandardMaterial({ color: 0x2c3e50 });
+            const ground = new THREE.Mesh(geometry, material);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = 0;
+            scene.add(ground);
+        }
+
+        function createConveyorBelt() {
+            // Long, thin box representing the conveyor belt structure
+            const geometry = new THREE.BoxGeometry(25, 0.5, 1.5);
+            const material = new THREE.MeshLambertMaterial({ color: 0x5a6a7c });
+            conveyorMesh = new THREE.Mesh(geometry, material);
+            conveyorMesh.position.set(0, 0.25, 0); // Sits slightly above ground
+            scene.add(conveyorMesh);
+        }
+        
+        function createPackagingStation() {
+            // A simple machine structure at the center (X=0)
+            const geometry = new THREE.BoxGeometry(2, 3, 2);
+            const material = new THREE.MeshStandardMaterial({ color: 0xc0392b }); // Red machine
+            const station = new THREE.Mesh(geometry, material);
+            station.position.set(STATION_X, 1.5, 0);
+            scene.add(station);
+
+            const platform = new THREE.BoxGeometry(2.5, 0.2, 2.5);
+            const platformMat = new THREE.MeshStandardMaterial({ color: 0xbdc3c7 }); // Silver platform
+            const platMesh = new THREE.Mesh(platform, platformMat);
+            platMesh.position.set(STATION_X, 0.5, 0);
+            scene.add(platMesh);
+        }
+
+        function createFulfillmentCenter() {
+            // FC drop-off point on the right (X=10)
+            const geometry = new THREE.BoxGeometry(2, 3, 2);
+            const material = new THREE.MeshStandardMaterial({ color: 0x27ae60, transparent: true, opacity: 0.6 }); // Green zone
+            const fcZone = new THREE.Mesh(geometry, material);
+            fcZone.position.set(FC_X, 1.5, 0);
+            scene.add(fcZone);
+
+            // Label for the FC zone
+            const loader = new THREE.FontLoader();
+            // We use a simple 2D sprite since font loading is complex in a single file setup,
+            // or just use basic geometry as a placeholder label.
+            const labelGeo = new THREE.BoxGeometry(1.5, 0.1, 0.5);
+            const labelMat = new THREE.MeshBasicMaterial({ color: 0x2ecc71 });
+            const labelMesh = new THREE.Mesh(labelGeo, labelMat);
+            labelMesh.position.set(FC_X, 3.1, 0);
+            scene.add(labelMesh);
+        }
+        
+        // --- Game Logic Functions ---
+        
+        function spawnMaterial() {
+            const newItem = new FactoryItem('raw');
+            scene.add(newItem.mesh);
+            materials.push(newItem);
+        }
+        
+        function packageItem() {
+            if (!isPackagingReady) {
+                showMessage("No item is ready to be packaged!", 1500);
+                return;
+            }
+
+            const rawItem = materials.find(item => item.isAtStation && item.type === 'raw');
+            
+            if (rawItem) {
+                // Remove old raw mesh and create a new packaged item in its place
+                scene.remove(rawItem.mesh);
+                
+                const packagedItem = new FactoryItem('packaged');
+                packagedItem.mesh.position.copy(rawItem.mesh.position);
+                
+                // Replace the item in the array and scene
+                const index = materials.indexOf(rawItem);
+                if (index > -1) {
+                    materials[index] = packagedItem;
+                }
+                scene.add(packagedItem.mesh);
+                
+                // Update UI state
+                isPackagingReady = false;
+                uiButton.disabled = true;
+                uiButton.textContent = "Item Packaged! Conveyor Moving...";
+                showMessage("Package Complete!", 1500);
+            }
+        }
+        
+        let lastUpdateTime = performance.now();
+
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+
+            const deltaTime = currentTime - lastUpdateTime;
+            lastUpdateTime = currentTime;
+
+            // 1. Spawning Logic
+            if (currentTime - lastSpawnTime > spawnInterval) {
+                spawnMaterial();
+                lastSpawnTime = currentTime;
+            }
+
+            // 2. Movement and State Update
+            let readyAtStation = false;
+            let itemsToRemove = [];
+
+            materials.forEach(item => {
+                const shipped = item.update(deltaTime);
+                
+                if (item.type === 'raw' && item.isAtStation) {
+                    readyAtStation = true;
+                }
+                
+                if (shipped) {
+                    // Item reached the FC (Fulfillment Center)
+                    if (item.type === 'packaged') {
+                        updateScore(PACKAGE_VALUE);
+                        showMessage(`+ $${PACKAGE_VALUE} SHIPPED!`, 1000);
+                    } else {
+                        // Raw material reached the FC un-packaged (penalty)
+                        updateScore(-PACKAGE_VALUE / 2);
+                        showMessage("-$50 LOST! Unpackaged Item Shipped!", 1500);
+                    }
+                    itemsToRemove.push(item);
+                }
+            });
+
+            // 3. Cleanup Shipped Items
+            itemsToRemove.forEach(item => {
+                scene.remove(item.mesh);
+                materials = materials.filter(i => i !== item);
+            });
+            
+            // 4. UI Button State Management
+            if (readyAtStation && !isPackagingReady) {
+                isPackagingReady = true;
+                uiButton.disabled = false;
+                uiButton.textContent = "📦 PACKAGE ITEM NOW!";
+            } else if (!readyAtStation && isPackagingReady) {
+                // If the item moves past the station before packaging
+                isPackagingReady = false;
+                uiButton.disabled = true;
+                uiButton.textContent = "Waiting for Material...";
+            }
+            
+            // 5. Conveyor Animation (Simulated movement)
+            if (conveyorMesh) {
+                // Rotate the camera slightly for a cool dynamic view
+                camera.position.x = Math.sin(currentTime * 0.0001) * 2;
+                camera.position.z = 12 + Math.cos(currentTime * 0.0001) * 2;
+                camera.lookAt(0, 0, 0);
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // Start the game once the window is loaded
+        window.onload = function() {
+            init();
+            animate(performance.now()); // Start the animation loop
+            updateScore(0); // Initialize score display
+            showMessage("Factory Online! Await Raw Materials...", 3000);
+        };
+
+    </script>
+</body>
+</html>
