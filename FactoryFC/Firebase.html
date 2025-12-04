@@ -1,0 +1,486 @@
+import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, collection, query, onSnapshot, updateDoc, deleteDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+
+// --- Global Variable Initialization and Firebase Setup ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-task-manager-app';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Context for Firebase and Auth
+const FirebaseContext = createContext(null);
+
+const FirebaseProvider = ({ children }) => {
+  const [db, setDb] = useState(null);
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (Object.keys(firebaseConfig).length === 0) {
+      console.error("Firebase config is missing. Cannot initialize app.");
+      return;
+    }
+
+    try {
+      const app = initializeApp(firebaseConfig);
+      const firestore = getFirestore(app);
+      const firebaseAuth = getAuth(app);
+
+      setDb(firestore);
+      setAuth(firebaseAuth);
+
+      const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+        if (user) {
+          setUserId(user.uid);
+        } else {
+          // Attempt sign-in with custom token or anonymously
+          try {
+            if (initialAuthToken) {
+              await signInWithCustomToken(firebaseAuth, initialAuthToken);
+            } else {
+              await signInAnonymously(firebaseAuth);
+            }
+          } catch (e) {
+            console.error("Firebase Auth Error:", e);
+            setError("Authentication failed. Please check console for details.");
+          }
+        }
+        setIsAuthReady(true);
+      });
+
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Initialization Error:", e);
+      setError("Failed to initialize Firebase.");
+    }
+  }, []);
+
+  return (
+    <FirebaseContext.Provider value={{ db, auth, userId, isAuthReady, error }}>
+      {children}
+    </FirebaseContext.Provider>
+  );
+};
+
+// Hook to use Firebase context
+const useFirebase = () => useContext(FirebaseContext);
+
+
+// --- LLM API Integration Functions ---
+
+const callGeminiApi = async ({ userQuery, systemPrompt = "", useSearch = false, maxRetries = 3 }) => {
+    const apiKey = ""; // Canvas runtime provides the key if this is empty
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+    const payload = {
+        contents: [{ parts: [{ text: userQuery }] }],
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+    };
+
+    if (useSearch) {
+        payload.tools = [{ "google_search": {} }];
+    }
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                if (response.status === 429 && attempt < maxRetries - 1) {
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue; // Retry
+                }
+                throw new Error(`API error: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "Could not generate content.";
+            return text.trim();
+
+        } catch (error) {
+            console.error(`Attempt ${attempt + 1} failed:`, error);
+            if (attempt === maxRetries - 1) throw error;
+        }
+    }
+};
+
+// --- Helper Components & Styles ---
+
+const Button = ({ children, className = '', onClick, disabled }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`px-4 py-2 font-medium rounded-lg transition duration-200 ${
+      disabled
+        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2'
+    } ${className}`}
+  >
+    {children}
+  </button>
+);
+
+const LLMButton = ({ children, className = '', onClick, disabled }) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    className={`px-3 py-1 text-sm font-medium rounded-full transition duration-200 flex items-center justify-center space-x-1 ${
+      disabled
+        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+        : 'bg-pink-100 hover:bg-pink-200 text-pink-700 shadow-sm hover:shadow-md border border-pink-300'
+    } ${className}`}
+  >
+    <span className="text-lg">✨</span>
+    <span>{children}</span>
+  </button>
+);
+
+const Card = ({ children, className = '' }) => (
+  <div className={`bg-white p-6 rounded-xl shadow-lg border border-gray-100 ${className}`}>
+    {children}
+  </div>
+);
+
+// --- Task and Project Management Logic ---
+
+// Public collection path for cross-user data (using appId and userId)
+const getProjectCollectionRef = (db, userId) => {
+    if (!db || !userId) return null;
+    return collection(db, `artifacts/${appId}/public/data/projects`);
+}
+
+const getTaskCollectionRef = (db, projectId) => {
+    if (!db || !projectId) return null;
+    return collection(db, `artifacts/${appId}/public/data/projects/${projectId}/tasks`);
+}
+
+// --- Task Component ---
+const Task = ({ task, projectId }) => {
+  const { db, userId } = useFirebase();
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [description, setDescription] = useState(task.description || '');
+
+  const taskRef = doc(getTaskCollectionRef(db, projectId), task.id);
+
+  const toggleComplete = async () => {
+    if (!db) return;
+    try {
+      await updateDoc(taskRef, { completed: !task.completed });
+    } catch (e) {
+      console.error("Error toggling task complete status: ", e);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!db || !window.confirm('Are you sure you want to delete this task?')) return;
+    try {
+      await deleteDoc(taskRef);
+    } catch (e) {
+      console.error("Error deleting task: ", e);
+    }
+  };
+
+  const handleUpdateDescription = async () => {
+    if (!db || description === task.description) {
+        setIsUpdating(false);
+        return;
+    }
+    try {
+        await updateDoc(taskRef, { description: description });
+        setIsUpdating(false);
+    } catch (e) {
+        console.error("Error updating task description: ", e);
+    }
+  };
+
+  const handleDraftDescription = async () => {
+    setIsUpdating(true);
+    try {
+        const userQuery = `Draft a concise, professional task description or a short, polite email intro for a task titled "${task.title}". Focus on clarifying the goal and next steps. Return only the drafted text.`;
+        const systemPrompt = "You are an AI assistant specialized in drafting professional project management text. Your output must be concise and actionable.";
+
+        const draft = await callGeminiApi({ userQuery, systemPrompt });
+        setDescription(draft);
+    } catch (e) {
+        console.error("Gemini API error during drafting:", e);
+        setDescription('Failed to generate draft. Please try again.');
+    } finally {
+        setIsUpdating(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4 transition duration-300 ease-in-out hover:shadow-xl">
+      <div className="flex justify-between items-start mb-2">
+        <div className="flex items-center">
+          <input
+            type="checkbox"
+            checked={task.completed}
+            onChange={toggleComplete}
+            className="w-5 h-5 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500"
+          />
+          <span className={`ml-3 text-lg font-semibold ${task.completed ? 'line-through text-gray-500' : 'text-gray-900'}`}>
+            {task.title}
+          </span>
+        </div>
+        <div className="flex space-x-2">
+            <LLMButton onClick={handleDraftDescription} disabled={isUpdating}>
+                {isUpdating ? 'Drafting...' : 'AI Description Draft'}
+            </LLMButton>
+            <button
+              onClick={handleDelete}
+              className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition"
+              title="Delete Task"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            </button>
+        </div>
+      </div>
+
+      <div className="mt-2">
+        <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onBlur={handleUpdateDescription}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleUpdateDescription(); }}}
+            rows={Math.max(2, (description.split('\n').length || 1))}
+            placeholder="Add task details or use AI to draft one..."
+            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 text-sm resize-none transition duration-150 ease-in-out"
+            disabled={isUpdating}
+        />
+        {isUpdating && <p className="text-xs text-indigo-600 mt-1">Generating draft...</p>}
+      </div>
+    </Card>
+  );
+};
+
+// --- Project Component ---
+const Project = ({ project }) => {
+  const { db } = useFirebase();
+  const [tasks, setTasks] = useState([]);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [isBreakingDown, setIsBreakingDown] = useState(false);
+
+  // Real-time listener for tasks
+  useEffect(() => {
+    if (!db || !project.id) return;
+
+    const tasksRef = getTaskCollectionRef(db, project.id);
+    if (!tasksRef) return;
+
+    const q = query(tasksRef);
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const tasksData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0)); // Sort by creation time
+
+      setTasks(tasksData);
+    }, (error) => {
+        console.error("Error fetching tasks: ", error);
+    });
+
+    return () => unsubscribe();
+  }, [db, project.id]);
+
+  const handleAddTask = async (title) => {
+    if (!db || !title.trim()) return;
+
+    try {
+      await addDoc(getTaskCollectionRef(db, project.id), {
+        title: title.trim(),
+        description: '',
+        completed: false,
+        createdAt: serverTimestamp(),
+      });
+      setNewTaskTitle('');
+    } catch (e) {
+      console.error("Error adding task: ", e);
+    }
+  };
+
+  const handleAIBreakdown = async () => {
+    if (!db || isBreakingDown) return;
+
+    setIsBreakingDown(true);
+    try {
+        const userQuery = `Break down the project titled "${project.title}" with description "${project.description}" into 5 to 7 highly actionable, specific sub-tasks. Provide the output as a numbered list of tasks, without any introductory or concluding text.`;
+        const systemPrompt = "You are an expert project manager and AI assistant. Your sole output must be a clean, numbered list of short, actionable task titles. Do not include extra text, formatting, or bullet points.";
+
+        const result = await callGeminiApi({ userQuery, systemPrompt });
+
+        // Parse the result: split by newline and remove numbering/trim whitespace
+        const newTasks = result.split('\n')
+            .map(line => line.replace(/^\d+\.\s*/, '').trim())
+            .filter(line => line.length > 0);
+
+        // Add tasks to Firestore sequentially
+        for (const title of newTasks) {
+            await handleAddTask(title);
+        }
+
+    } catch (e) {
+        console.error("Gemini API error during task breakdown:", e);
+        alert('Failed to generate task breakdown. Check the console for details.');
+    } finally {
+        setIsBreakingDown(false);
+    }
+  };
+
+  return (
+    <Card className="mb-8">
+      <div className="flex justify-between items-start mb-4">
+        <h2 className="text-2xl font-extrabold text-indigo-800">{project.title}</h2>
+        <LLMButton onClick={handleAIBreakdown} disabled={isBreakingDown}>
+            {isBreakingDown ? 'Generating Breakdown...' : 'AI Task Breakdown'}
+        </LLMButton>
+      </div>
+
+      <p className="text-gray-600 mb-4 italic">{project.description}</p>
+
+      <div className="space-y-4">
+        {tasks.map(task => (
+          <Task key={task.id} task={task} projectId={project.id} />
+        ))}
+      </div>
+
+      <div className="flex mt-6 space-x-2">
+        <input
+          type="text"
+          value={newTaskTitle}
+          onChange={(e) => setNewTaskTitle(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAddTask(newTaskTitle)}
+          placeholder="New task title..."
+          className="flex-grow p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+        />
+        <Button onClick={() => handleAddTask(newTaskTitle)} className="flex-shrink-0">
+          Add Task
+        </Button>
+      </div>
+    </Card>
+  );
+};
+
+// --- Main App Component ---
+
+export default function App() {
+  return (
+    <FirebaseProvider>
+      <TaskDashboard />
+    </FirebaseProvider>
+  );
+}
+
+const TaskDashboard = () => {
+  const { db, userId, isAuthReady, error } = useFirebase();
+  const [projects, setProjects] = useState([]);
+  const [newProjectTitle, setNewProjectTitle] = useState('');
+  const [newProjectDesc, setNewProjectDesc] = useState('');
+
+  // Real-time listener for projects
+  useEffect(() => {
+    if (!db || !userId || !isAuthReady) return;
+
+    const projectsRef = getProjectCollectionRef(db, userId);
+    if (!projectsRef) return;
+
+    // We use a general query here, but in a real-world app, you might query where the project is owned by the user
+    const q = query(projectsRef);
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const projectsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0)); // Sort by creation time
+
+      setProjects(projectsData);
+    }, (e) => {
+        console.error("Error fetching projects: ", e);
+    });
+
+    return () => unsubscribe();
+  }, [db, userId, isAuthReady]);
+
+  const handleAddProject = async () => {
+    if (!db || !newProjectTitle.trim() || !newProjectDesc.trim()) return;
+
+    try {
+      // Note: We use the public collection path for simplicity, demonstrating cross-user access
+      await addDoc(getProjectCollectionRef(db, userId), {
+        title: newProjectTitle.trim(),
+        description: newProjectDesc.trim(),
+        ownerId: userId,
+        createdAt: serverTimestamp(),
+      });
+      setNewProjectTitle('');
+      setNewProjectDesc('');
+    } catch (e) {
+      console.error("Error adding project: ", e);
+    }
+  };
+
+  const statusText = isAuthReady
+    ? (userId ? `Authenticated User ID: ${userId}` : 'Authentication Pending...')
+    : 'Initializing Firebase...';
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl font-black text-indigo-900 mb-2">Project Planner Pro</h1>
+        <p className="text-sm text-gray-500 mb-6 flex justify-between items-center">
+          {statusText}
+          {error && <span className="text-red-500 font-bold ml-4">{error}</span>}
+        </p>
+
+        {/* New Project Form */}
+        <Card className="mb-8 p-4 sm:p-6">
+          <h2 className="text-xl font-bold text-gray-700 mb-4">Create New Project</h2>
+          <div className="space-y-3">
+            <input
+              type="text"
+              value={newProjectTitle}
+              onChange={(e) => setNewProjectTitle(e.target.value)}
+              placeholder="Project Title (e.g., Launch Marketing Campaign)"
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+              disabled={!isAuthReady}
+            />
+            <textarea
+              value={newProjectDesc}
+              onChange={(e) => setNewProjectDesc(e.target.value)}
+              placeholder="Project Description (e.g., Develop all assets, schedule ads, and monitor initial performance.)"
+              rows="2"
+              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+              disabled={!isAuthReady}
+            />
+            <Button onClick={handleAddProject} disabled={!newProjectTitle.trim() || !newProjectDesc.trim() || !isAuthReady}>
+              Add Project
+            </Button>
+          </div>
+        </Card>
+
+        {/* Projects List */}
+        {projects.length > 0 ? (
+          <div className="mt-8 space-y-8">
+            <h2 className="text-3xl font-extrabold text-indigo-900">Active Projects</h2>
+            {projects.map(project => (
+              <Project key={project.id} project={project} />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-8 text-center text-gray-500">No projects yet. Add one above!</p>
+        )}
+      </div>
+    </div>
+  );
+}
