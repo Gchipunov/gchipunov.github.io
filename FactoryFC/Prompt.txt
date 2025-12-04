@@ -1,0 +1,20 @@
+Code in webgl JavaScript full html page factory game where you make packages Thats go to a fc fullimemt center as a game
+I love this concept! Creating a 3D factory simulation using WebGL (via Three.js) is a great way to bring that factory experience to life.
+
+I've put together a single HTML file that uses Three.js for the 3D factory view and Tailwind CSS for the user interface. You'll manage the flow of materials on a conveyor belt and click to "Package" items before they are shipped to the Fulfillment Center (FC).
+
+Here are the files:
+3D Package Factory Simulator
+Dec 4 at 4:16 AM
+
+This single HTML file contains the full setup:
+
+Three.js (WebGL): Creates the 3D environment, including the ground, conveyor belt, packaging station (red machine), and the fulfillment center (green zone).
+
+Game Logic: Raw materials (brown cubes) spawn and move along the conveyor. When a raw cube is centered at the station, the button enables.
+
+Player Interaction: Clicking the "Package Item" button converts the brown cube into a white, labeled package, which then continues moving.
+
+Scoring: Successfully packaged items shipped to the green zone earn you $100. Unpackaged raw materials shipped result in a $50 penalty.
+
+UI: Uses Tailwind CSS for a modern, responsive, and translucent overlay showing your score and status messages
