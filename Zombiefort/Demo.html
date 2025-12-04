@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Zombie Defense</title>
+    <!-- Load Tailwind CSS for simple UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Load PointerLockControls for FPS-style movement -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none; /* Allows clicks to pass through to the canvas */
+            color: white;
+            z-index: 10;
+        }
+        #instructions {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: left;
+            pointer-events: auto; /* Re-enable pointer events for the box */
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            max-width: 90%;
+        }
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 1.25rem;
+            color: #fff;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            margin: -4px 0 0 -4px;
+            border-radius: 50%;
+            background: red;
+            border: 1px solid white;
+        }
+        .message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #2d3748;
+            padding: 20px 40px;
+            border-radius: 10px;
+            color: white;
+            font-size: 1.5rem;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+            z-index: 100;
+            pointer-events: auto;
+            display: none;
+        }
+        .message-box button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: #f56565;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .message-box button:hover {
+            background-color: #e53e3e;
+        }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <div id="instructions" class="rounded-xl shadow-2xl p-6 bg-gray-800 text-white max-w-lg">
+        <h1 class="text-3xl font-bold mb-4 text-red-400">3D Zombie Defense</h1>
+        <p class="text-lg mb-4">Click to lock the mouse and start playing!</p>
+        <ul class="list-disc list-inside space-y-1 text-sm">
+            <li><strong class="text-yellow-300">Movement:</strong> W A S D</li>
+            <li><strong class="text-yellow-300">Look:</strong> Mouse</li>
+            <li><strong class="text-red-300">Shoot:</strong> Left Mouse Button (Click)</li>
+            <li><strong class="text-green-300">Build Mode:</strong> Press <kbd>B</kbd> (Shows ghost fence)</li>
+            <li><strong class="text-green-300">Place Fence:</strong> Left Mouse Button (while in Build Mode)</li>
+            <li><strong class="text-red-300">Health:</strong> Don't let the zombies get you!</li>
+        </ul>
+        <div class="mt-6 text-center">
+            <button id="startButton" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition duration-200 shadow-lg">
+                Start Game
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="hud">
+    <div>Score: <span id="score">0</span></div>
+    <div>Health: <span id="health">100</span></div>
+    <div id="mode-display" class="mt-2 text-sm font-semibold text-gray-300">Mode: <span class="text-red-400">Shoot</span></div>
+</div>
+
+<div id="crosshair"></div>
+
+<div id="gameOverBox" class="message-box">
+    <h2 class="text-2xl font-bold text-red-500">GAME OVER</h2>
+    <p>You were overwhelmed by the horde.</p>
+    <p>Final Score: <span id="finalScore">0</span></p>
+    <button onclick="window.location.reload()">Restart</button>
+</div>
+
+<script>
+    // Global Firebase variables are provided by the Canvas environment, but are not used here as this is a single-player game.
+
+    // --- GAME CONSTANTS AND VARIABLES ---
+    let scene, camera, renderer;
+    let controls;
+    let ambientLight, directionalLight;
+
+    let moveForward = false;
+    let moveBackward = false;
+    let moveLeft = false;
+    let moveRight = false;
+    let canJump = false;
+
+    let prevTime = performance.now();
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+
+    const zombies = [];
+    let score = 0;
+    let playerHealth = 100;
+
+    let isBuildMode = false;
+    let ghostFence;
+    const fenceGeometry = new THREE.BoxGeometry(4, 3, 0.2);
+    const fenceMaterial = new THREE.MeshLambertMaterial({ color: 0x964b00 });
+    const builtFences = [];
+
+    const SPAWN_INTERVAL = 3000; // milliseconds
+    let lastSpawnTime = 0;
+    const ZOMBIE_SPEED = 0.5;
+    const FENCE_DISTANCE = 8; // How far the ghost fence is placed from the camera
+
+    // --- UTILITY FUNCTIONS ---
+
+    // Simple delay utility for API calls
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // --- INITIALIZATION ---
+
+    function init() {
+        // 1. Scene Setup
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+        scene.fog = new THREE.Fog(0x1a1a1a, 0, 150);
+
+        // 2. Camera Setup
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.y = 1.6; // Player eye level
+
+        // 3. Renderer Setup
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.domElement.id = 'gameCanvas';
+        document.body.appendChild(renderer.domElement);
+
+        // 4. Lighting
+        ambientLight = new THREE.AmbientLight(0x666666);
+        scene.add(ambientLight);
+
+        directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 50, 10);
+        scene.add(directionalLight);
+
+        // 5. Ground (The Arena)
+        const planeGeometry = new THREE.PlaneGeometry(200, 200);
+        const planeMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, side: THREE.DoubleSide });
+        const ground = new THREE.Mesh(planeGeometry, planeMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        scene.add(ground);
+
+        // 6. Controls (Pointer Lock)
+        controls = new THREE.PointerLockControls(camera, document.body);
+
+        const startButton = document.getElementById('startButton');
+        startButton.addEventListener('click', () => {
+            controls.lock();
+        });
+
+        controls.addEventListener('lock', function () {
+            document.getElementById('instructions').style.display = 'none';
+            document.getElementById('overlay').style.pointerEvents = 'none';
+            document.getElementById('crosshair').style.display = 'block';
+        });
+
+        controls.addEventListener('unlock', function () {
+            // Note: Instructions reappear on unlock for re-engagement
+            document.getElementById('instructions').style.display = 'flex';
+            document.getElementById('overlay').style.pointerEvents = 'auto';
+            document.getElementById('crosshair').style.display = 'none';
+        });
+
+        // 7. Input Handling
+        document.addEventListener('keydown', onKeyDown, false);
+        document.addEventListener('keyup', onKeyUp, false);
+        document.addEventListener('click', onDocumentClick, false);
+
+        // 8. Ghost Fence Setup (for building preview)
+        const ghostMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+        ghostFence = new THREE.Mesh(fenceGeometry, ghostMaterial);
+        ghostFence.visible = false;
+        scene.add(ghostFence);
+
+        // Initial render to show the scene before the loop starts
+        renderer.render(scene, camera);
+        
+        // Start the game loop on window load
+        animate();
+    }
+
+    // --- GAME LOGIC FUNCTIONS ---
+
+    function updateHUD() {
+        document.getElementById('score').textContent = score;
+        document.getElementById('health').textContent = Math.max(0, playerHealth);
+        const modeSpan = document.getElementById('mode-display').querySelector('span');
+        if (isBuildMode) {
+            modeSpan.textContent = 'BUILD';
+            modeSpan.className = 'text-green-400';
+        } else {
+            modeSpan.textContent = 'SHOOT';
+            modeSpan.className = 'text-red-400';
+        }
+    }
+
+    function spawnZombie() {
+        const zombieGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1.8, 16);
+        const zombieMaterial = new THREE.MeshPhongMaterial({ color: 0x008000 });
+        const zombie = new THREE.Mesh(zombieGeometry, zombieMaterial);
+        zombie.position.y = 0.9;
+        zombie.userData.health = 3;
+        zombie.userData.speed = ZOMBIE_SPEED;
+        zombie.userData.damage = 10;
+        zombie.userData.isZombie = true;
+
+        // Spawn far away from the center
+        const spawnRadius = 80;
+        const angle = Math.random() * Math.PI * 2;
+        zombie.position.x = Math.cos(angle) * spawnRadius;
+        zombie.position.z = Math.sin(angle) * spawnRadius;
+
+        scene.add(zombie);
+        zombies.push(zombie);
+    }
+
+    function placeFence() {
+        // Get the direction the camera is facing
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        cameraDirection.y = 0; // Keep placement flat on the ground
+        cameraDirection.normalize();
+
+        // Calculate the placement position (in front of the camera)
+        const placementPosition = new THREE.Vector3().copy(camera.position);
+        placementPosition.add(cameraDirection.multiplyScalar(FENCE_DISTANCE));
+
+        // Create the permanent fence
+        const permanentFence = new THREE.Mesh(fenceGeometry, fenceMaterial.clone());
+        permanentFence.position.copy(placementPosition);
+        permanentFence.position.y = 1.5; // Half of fence height
+        permanentFence.rotation.y = ghostFence.rotation.y; // Match the rotation of the ghost
+        permanentFence.userData.isFence = true;
+        scene.add(permanentFence);
+        builtFences.push(permanentFence);
+
+        // Simple feedback
+        permanentFence.material.color.set(0x8b4513); // Brown
+    }
+
+    function shoot() {
+        // Create raycaster from camera through the center of the viewport
+        const raycaster = new THREE.Raycaster();
+        const coords = new THREE.Vector2(0, 0); // Center of screen
+        raycaster.setFromCamera(coords, camera);
+
+        // Check for intersections with zombies
+        const intersects = raycaster.intersectObjects(zombies, false);
+
+        if (intersects.length > 0) {
+            const hitObject = intersects[0].object;
+            if (hitObject.userData.isZombie) {
+                hitObject.userData.health -= 1;
+                // Simple hit feedback (turn red briefly)
+                hitObject.material.color.set(0xff0000);
+                setTimeout(() => hitObject.material.color.set(0x008000), 100);
+
+                if (hitObject.userData.health <= 0) {
+                    // Zombie killed
+                    scene.remove(hitObject);
+                    zombies.splice(zombies.indexOf(hitObject), 1);
+                    score += 10;
+                }
+            }
+        }
+    }
+
+    function checkGameOver() {
+        if (playerHealth <= 0) {
+            controls.unlock();
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOverBox').style.display = 'block';
+            return true;
+        }
+        return false;
+    }
+
+    // --- EVENT HANDLERS ---
+
+    function onKeyDown(event) {
+        if (checkGameOver()) return;
+
+        switch (event.code) {
+            case 'KeyW': moveForward = true; break;
+            case 'KeyA': moveLeft = true; break;
+            case 'KeyS': moveBackward = true; break;
+            case 'KeyD': moveRight = true; break;
+            case 'Space': if (canJump) velocity.y += 30; canJump = false; break;
+            case 'KeyB':
+                isBuildMode = !isBuildMode;
+                ghostFence.visible = isBuildMode;
+                updateHUD();
+                break;
+        }
+    }
+
+    function onKeyUp(event) {
+        switch (event.code) {
+            case 'KeyW': moveForward = false; break;
+            case 'KeyA': moveLeft = false; break;
+            case 'KeyS': moveBackward = false; break;
+            case 'KeyD': moveRight = false; break;
+        }
+    }
+
+    function onDocumentClick() {
+        if (checkGameOver()) return;
+
+        if (controls.isLocked) {
+            if (isBuildMode) {
+                placeFence();
+            } else {
+                shoot();
+            }
+        }
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    window.addEventListener('resize', onWindowResize, false);
+
+
+    // --- MAIN ANIMATION LOOP ---
+
+    function animate(time) {
+        if (checkGameOver()) return;
+
+        requestAnimationFrame(animate);
+
+        const delta = (time - prevTime) / 1000;
+
+        if (controls.isLocked === true) {
+            // 1. Player Movement Update (using controls)
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            velocity.y -= 9.8 * 10.0 * delta; // Gravity
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize(); // Ensure constant speed in diagonal movement
+
+            const playerSpeed = 15.0;
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * playerSpeed * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * playerSpeed * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+
+            controls.getObject().position.y += (velocity.y * delta); // New behavior
+
+            if (controls.getObject().position.y < 1.6) {
+                velocity.y = 0;
+                controls.getObject().position.y = 1.6;
+                canJump = true;
+            }
+
+            // 2. Ghost Fence Update (if in Build Mode)
+            if (isBuildMode) {
+                // Get the direction the camera is facing
+                const cameraDirection = new THREE.Vector3();
+                camera.getWorldDirection(cameraDirection);
+                cameraDirection.y = 0; // Project onto the ground plane
+                cameraDirection.normalize();
+
+                // Calculate the position FENCE_DISTANCE units away
+                const targetPosition = new THREE.Vector3().copy(camera.position);
+                targetPosition.add(cameraDirection.multiplyScalar(FENCE_DISTANCE));
+
+                // Snap position to a grid for cleaner building
+                targetPosition.x = Math.round(targetPosition.x / 1) * 1;
+                targetPosition.z = Math.round(targetPosition.z / 1) * 1;
+
+                ghostFence.position.copy(targetPosition);
+                ghostFence.position.y = 1.5; // Half of fence height
+
+                // Rotate the ghost fence to align with the camera direction
+                ghostFence.rotation.y = Math.atan2(cameraDirection.x, cameraDirection.z);
+            }
+
+            // 3. Zombie Logic
+            const playerPos = controls.getObject().position;
+            const tempVector = new THREE.Vector3();
+            const zombieBounds = new THREE.Box3();
+            const playerBounds = new THREE.Box3();
+            playerBounds.setFromCenterAndSize(playerPos, new THREE.Vector3(1, 1.6, 1)); // Simplified player bounds
+
+            zombies.forEach((zombie) => {
+                // Direction towards player
+                tempVector.subVectors(playerPos, zombie.position).normalize();
+                tempVector.y = 0; // Keep movement flat
+
+                // Move the zombie
+                zombie.position.x += tempVector.x * zombie.userData.speed * delta;
+                zombie.position.z += tempVector.z * zombie.userData.speed * delta;
+                zombie.lookAt(playerPos.x, zombie.position.y, playerPos.z); // Simple turning
+
+                // Collision with player
+                zombieBounds.setFromObject(zombie);
+                if (zombieBounds.intersectsBox(playerBounds)) {
+                    // Simple damage over time
+                    playerHealth -= zombie.userData.damage * delta * 2;
+                    updateHUD();
+                }
+
+                // Collision with Fences
+                builtFences.forEach(fence => {
+                    const fenceBounds = new THREE.Box3().setFromObject(fence);
+                    if (zombieBounds.intersectsBox(fenceBounds)) {
+                        // Simple bounce/repel logic
+                        const repelVector = new THREE.Vector3().subVectors(zombie.position, fence.position).normalize();
+                        zombie.position.x += repelVector.x * zombie.userData.speed * delta * 2;
+                        zombie.position.z += repelVector.z * zombie.userData.speed * delta * 2;
+                    }
+                });
+            });
+
+            // 4. Zombie Spawning
+            if (time > lastSpawnTime + SPAWN_INTERVAL) {
+                spawnZombie();
+                lastSpawnTime = time;
+                // Decrease spawn interval over time for increasing difficulty
+                // SPAWN_INTERVAL = Math.max(1000, SPAWN_INTERVAL * 0.99);
+            }
+        }
+
+        prevTime = time;
+
+        renderer.render(scene, camera);
+    }
+
+    // Wait for the window to load before initializing the game
+    window.onload = init;
+
+</script>
+</body>
+</html>
