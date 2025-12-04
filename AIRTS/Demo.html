@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galactic Command: LLM AI RTS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #0d1117; }
+        canvas { display: block; }
+        #game-container { position: relative; width: 100vw; height: 100vh; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; /* Allows mouse events to pass through to the canvas */
+        }
+        .ui-panel { pointer-events: auto; background: rgba(17, 24, 39, 0.9); border: 2px solid #3b82f6; border-radius: 0.75rem; box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5); }
+        .btn-action {
+            padding: 8px 16px; font-weight: 600; border-radius: 0.5rem;
+            transition: all 0.2s; cursor: pointer;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .btn-primary { background-color: #3b82f6; color: white; }
+        .btn-primary:hover { background-color: #2563eb; transform: translateY(-1px); }
+        .btn-disabled { background-color: #4b5563; color: #9ca3af; cursor: not-allowed; }
+        .resource-text { font-family: monospace; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="overlay">
+        <!-- Top Resource Panel -->
+        <div id="resources" class="ui-panel text-white p-3 m-4 fixed top-0 left-0 flex space-x-6 text-sm">
+            <div class="flex items-center space-x-1">
+                <span class="text-yellow-400">⚡</span>
+                <span id="energy-player" class="resource-text">100</span>
+                <span class="text-gray-400">Energy</span>
+            </div>
+            <div class="flex items-center space-x-1">
+                <span class="text-amber-500">⛏️</span>
+                <span id="ore-player" class="resource-text">200</span>
+                <span class="text-gray-400">Ore</span>
+            </div>
+            <div class="flex items-center space-x-1">
+                <span class="text-green-400">🧍</span>
+                <span id="units-player" class="resource-text">0</span>
+                <span class="text-gray-400">Units</span>
+            </div>
+            <div class="flex items-center space-x-1 ml-10">
+                <span class="text-red-500">🤖</span>
+                <span id="units-ai" class="resource-text">0</span>
+                <span class="text-gray-400">AI Units</span>
+            </div>
+        </div>
+
+        <!-- Selection Panel (Bottom Center) -->
+        <div id="selection-panel" class="ui-panel text-white p-4 fixed bottom-4 left-1/2 transform -translate-x-1/2 flex space-x-4 hidden">
+            <!-- Content changes based on selection -->
+        </div>
+
+        <!-- System Message/Win/Lose Panel -->
+        <div id="message-box" class="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 p-6 ui-panel text-white text-lg font-bold z-50 transition-opacity duration-500 opacity-0 hidden">
+            <p id="message-text" class="text-center"></p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- Global Configuration ---
+    const GAME_CONFIG = {
+        // Costs
+        COST_REFINERY: { ore: 100, energy: 0 },
+        COST_BARRACKS: { ore: 150, energy: 50 },
+        COST_SOLDIER: { ore: 50, energy: 10 },
+
+        // Production Rates
+        REFINERY_RATE: 5, // Ore per second
+        AI_THINK_INTERVAL: 4000, // AI decision frequency in ms
+
+        // Game objects
+        BUILDING_Y: 0.5,
+        UNIT_SPEED: 0.05,
+        UNIT_RANGE: 10,
+        ATTACK_DAMAGE: 10,
+        MAX_HEALTH: 100,
+    };
+
+    // Global Firebase/API Variables (Canvas Provided)
+    const apiKey = ""; // API Key is set by the runtime environment
+    const GEMINI_MODEL = "gemini-2.5-flash-preview-09-2025";
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+    // --- Game State ---
+    const gameState = {
+        player: {
+            resources: { ore: 200, energy: 100 },
+            buildings: [],
+            units: [],
+            baseHealth: GAME_CONFIG.MAX_HEALTH,
+        },
+        ai: {
+            resources: { ore: 200, energy: 100 },
+            buildings: [],
+            units: [],
+            baseHealth: GAME_CONFIG.MAX_HEALTH,
+        },
+        selectedObject: null,
+        targetPosition: null, // For building placement
+    };
+
+    // --- THREE.js Setup ---
+    let scene, camera, renderer, clock;
+    const gameContainer = document.getElementById('game-container');
+    let raycaster = new THREE.Raycaster();
+    let mouse = new THREE.Vector2();
+
+    // Materials
+    const MAT_PLAYER_BASE = new THREE.MeshStandardMaterial({ color: 0x3b82f6, flatShading: true }); // Blue
+    const MAT_AI_BASE = new THREE.MeshStandardMaterial({ color: 0xfb923c, flatShading: true });   // Orange
+    const MAT_PLAYER_UNIT = new THREE.MeshStandardMaterial({ color: 0x34d399 }); // Green
+    const MAT_AI_UNIT = new THREE.MeshStandardMaterial({ color: 0xf87171 });   // Red
+    const MAT_REFINERY = new THREE.MeshStandardMaterial({ color: 0x5eead4 });  // Cyan
+    const MAT_BARRACKS = new THREE.MeshStandardMaterial({ color: 0xc4b5fd });  // Violet
+    const MAT_HIGHLIGHT = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
+    const MAT_ERROR = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 });
+
+    function initThreeJS() {
+        // Scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1e293b); // Dark blue background
+        clock = new THREE.Clock();
+
+        // Camera
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 50, 50);
+        camera.lookAt(0, 0, 0);
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        gameContainer.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 5); // soft white light
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
+        directionalLight.position.set(50, 100, 50);
+        scene.add(directionalLight);
+
+        // Terrain (A massive plane)
+        const planeGeometry = new THREE.PlaneGeometry(200, 200);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: 0x10b981 }); // Emerald green
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.name = 'terrain';
+        scene.add(plane);
+
+        // Initial Bases
+        createBase('player', -40, 0, 0);
+        createBase('ai', 40, 0, 0);
+
+        window.addEventListener('resize', onWindowResize);
+        renderer.domElement.addEventListener('click', onCanvasClick);
+    }
+
+    // --- Object Factories ---
+
+    function createBase(owner, x, y, z) {
+        const geometry = new THREE.BoxGeometry(4, 3, 4);
+        const material = owner === 'player' ? MAT_PLAYER_BASE : MAT_AI_BASE;
+        const base = new THREE.Mesh(geometry, material);
+        base.position.set(x, y + 1.5, z);
+        base.name = 'Base';
+        base.userData = { owner, type: 'Base', health: GAME_CONFIG.MAX_HEALTH };
+        scene.add(base);
+
+        gameState[owner].buildings.push(base.userData);
+        return base;
+    }
+
+    function createBuilding(owner, type, x, z) {
+        let geometry, material;
+        if (type === 'Refinery') {
+            geometry = new THREE.BoxGeometry(2, 1, 2);
+            material = MAT_REFINERY;
+        } else if (type === 'Barracks') {
+            geometry = new THREE.CylinderGeometry(1.5, 1.5, 3, 8);
+            material = MAT_BARRACKS;
+        }
+
+        const building = new THREE.Mesh(geometry, material);
+        building.position.set(x, GAME_CONFIG.BUILDING_Y + (geometry.parameters.height / 2), z);
+        building.name = type;
+        building.userData = { owner, type, health: GAME_CONFIG.MAX_HEALTH };
+        scene.add(building);
+
+        gameState[owner].buildings.push(building.userData);
+        return building;
+    }
+
+    function createUnit(owner, x, z) {
+        const geometry = new THREE.DodecahedronGeometry(0.7);
+        const material = owner === 'player' ? MAT_PLAYER_UNIT : MAT_AI_UNIT;
+        const unit = new THREE.Mesh(geometry, material);
+        unit.position.set(x, 0.7, z);
+        unit.name = 'Soldier';
+        unit.userData = {
+            owner, type: 'Soldier', health: GAME_CONFIG.MAX_HEALTH,
+            target: null, // Target position {x, y, z} or target object
+            mesh: unit
+        };
+        scene.add(unit);
+
+        gameState[owner].units.push(unit.userData);
+        return unit.userData;
+    }
+
+    // --- Game Logic ---
+
+    function checkCosts(owner, item) {
+        const state = gameState[owner];
+        const costs = GAME_CONFIG[`COST_${item.toUpperCase()}`];
+        return state.resources.ore >= costs.ore && state.resources.energy >= costs.energy;
+    }
+
+    function deductCosts(owner, item) {
+        const costs = GAME_CONFIG[`COST_${item.toUpperCase()}`];
+        gameState[owner].resources.ore -= costs.ore;
+        gameState[owner].resources.energy -= costs.energy;
+        updateUI();
+    }
+
+    function trainSoldier(owner, building) {
+        if (!checkCosts(owner, 'Soldier')) {
+            showTemporaryMessage(owner === 'player' ? 'Not enough resources to train Soldier!' : 'AI has insufficient resources.', 2000);
+            return;
+        }
+        deductCosts(owner, 'Soldier');
+        // Spawn unit slightly away from the building
+        const x = building.position.x + Math.random() * 4 - 2;
+        const z = building.position.z + Math.random() * 4 - 2;
+        createUnit(owner, x, z);
+    }
+
+    // --- Unit and Combat Loop ---
+
+    function moveUnit(unit, delta) {
+        if (!unit.target) return;
+
+        let targetPosition;
+
+        if (unit.target.isObject3D) { // Target is a THREE.Mesh (e.g., enemy base/unit)
+            targetPosition = unit.target.position;
+        } else { // Target is a vector {x, z} (e.g., move command)
+            targetPosition = unit.target;
+        }
+
+        const mesh = unit.mesh;
+        const direction = new THREE.Vector3().subVectors(targetPosition, mesh.position).setY(0).normalize();
+        const distance = mesh.position.distanceTo(targetPosition);
+
+        if (distance > 1) { // Stop just before reaching target to avoid clipping
+            mesh.position.x += direction.x * GAME_CONFIG.UNIT_SPEED * delta * 60;
+            mesh.position.z += direction.z * GAME_CONFIG.UNIT_SPEED * delta * 60;
+        } else if (!unit.target.isObject3D) {
+            // Reached movement destination, clear target
+            unit.target = null;
+        }
+    }
+
+    function fightUnit(unit) {
+        const opponent = unit.owner === 'player' ? gameState.ai : gameState.player;
+        let target = null;
+
+        // 1. Find the closest enemy unit or base within range
+        let closestDistance = Infinity;
+        
+        // Check for buildings (Bases only, for simplification)
+        const enemyBase = scene.children.find(c => c.name === 'Base' && c.userData.owner === opponent.owner);
+        if (enemyBase) {
+            const distanceToBase = unit.mesh.position.distanceTo(enemyBase.position);
+            if (distanceToBase < closestDistance) {
+                closestDistance = distanceToBase;
+                target = enemyBase;
+            }
+        }
+
+        // Check for units
+        opponent.units.forEach(u => {
+            const distanceToUnit = unit.mesh.position.distanceTo(u.mesh.position);
+            if (distanceToUnit < closestDistance) {
+                closestDistance = distanceToUnit;
+                target = u.mesh;
+            }
+        });
+
+        if (target && closestDistance < GAME_CONFIG.UNIT_RANGE) {
+            // Target found and in range: Attack
+            unit.target = target;
+            target.userData.health -= GAME_CONFIG.ATTACK_DAMAGE * (clock.getDelta() * 10); // Damage is per second (roughly)
+            target.userData.health = Math.max(0, target.userData.health);
+            
+            // Check for destruction
+            if (target.userData.health <= 0) {
+                handleDestruction(target);
+                unit.target = null; // Clear target after destruction
+            }
+            return true; // Is fighting
+        } else if (target) {
+            // Target found but out of range: Move towards target
+            unit.target = target;
+            return false; // Not fighting, just moving
+        }
+
+        // No targets found: if it was attacking, stop. If it had a move command, keep moving.
+        return false;
+    }
+
+    function handleDestruction(objectMesh) {
+        const owner = objectMesh.userData.owner;
+        const opponent = owner === 'player' ? 'ai' : 'player';
+
+        scene.remove(objectMesh);
+
+        // Remove from game state arrays
+        if (objectMesh.userData.type === 'Soldier') {
+            gameState[owner].units = gameState[owner].units.filter(u => u.mesh !== objectMesh);
+        } else if (objectMesh.userData.type === 'Base') {
+            // Base destroyed - Game Over
+            showTemporaryMessage(`${owner.toUpperCase()}'s Base Destroyed! ${opponent.toUpperCase()} WINS!`, 100000, true);
+        } else {
+            // Other building destroyed
+            gameState[owner].buildings = gameState[owner].buildings.filter(b => b !== objectMesh.userData);
+        }
+    }
+
+    // --- LLM AI Integration ---
+
+    let aiThinking = false;
+    let aiLastActionTime = 0;
+
+    const SYSTEM_PROMPT = `
+        You are the Strategic AI for a Real-Time Strategy game. Your goal is to defeat the opponent (Player).
+        The game state data is provided in the user prompt.
+        You must decide on ONE strategic action and return it as a JSON object that strictly adheres to the provided schema.
+
+        Your primary focus should be:
+        1. Increase Ore income by building Refineries (Cost: 100 Ore).
+        2. Increase unit production capacity by building Barracks (Cost: 150 Ore, 50 Energy).
+        3. Train Soldiers for defense and offense (Cost: 50 Ore, 10 Energy).
+        4. Attack the player's base if you have a significant unit advantage (more than 5 units).
+
+        Possible actions: BUILD_REFINERY, BUILD_BARRACKS, TRAIN_SOLDIER, ATTACK_PLAYER_BASE, WAIT.
+    `;
+
+    // Function to handle exponential backoff and retries
+    async function fetchWithRetry(url, options, maxRetries = 3) {
+        let lastError = null;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                lastError = error;
+                const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                // console.error(`Attempt ${attempt + 1} failed. Retrying in ${delay}ms...`, error);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        // console.error("API call failed after all retries.", lastError);
+        throw new Error("API call failed after all retries.");
+    }
+
+
+    async function getAIStrategy() {
+        if (aiThinking || clock.running === false) return;
+        aiThinking = true;
+
+        const aiState = gameState.ai;
+        const playerState = gameState.player;
+
+        const aiRefineries = aiState.buildings.filter(b => b.type === 'Refinery').length;
+        const aiBarracks = aiState.buildings.filter(b => b.type === 'Barracks').length;
+
+        const stateDescription = {
+            ai: {
+                ore: aiState.resources.ore,
+                energy: aiState.resources.energy,
+                unitCount: aiState.units.length,
+                refineries: aiRefineries,
+                barracks: aiBarracks,
+                baseHealth: aiState.baseHealth
+            },
+            player: {
+                unitCount: playerState.units.length,
+                baseHealth: playerState.baseHealth
+            }
+        };
+
+        const userQuery = `Current State: ${JSON.stringify(stateDescription)}. What is the next strategic action?`;
+
+        const payload = {
+            contents: [{ parts: [{ text: userQuery }] }],
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            generationConfig: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: "OBJECT",
+                    properties: {
+                        "action": { "type": "STRING", "description": "One of: BUILD_REFINERY, BUILD_BARRACKS, TRAIN_SOLDIER, ATTACK_PLAYER_BASE, WAIT" }
+                    },
+                    "propertyOrdering": ["action"]
+                }
+            }
+        };
+
+        try {
+            const result = await fetchWithRetry(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const actionJson = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (actionJson) {
+                const action = JSON.parse(actionJson).action;
+                executeAIAction(action);
+            } else {
+                // Default to wait if API response is malformed
+                executeAIAction("WAIT");
+            }
+        } catch (error) {
+            // console.error("Failed to fetch AI strategy:", error);
+            // Fallback to a simple heuristic if API fails
+            executeAIAction("TRAIN_SOLDIER");
+        } finally {
+            aiThinking = false;
+            aiLastActionTime = Date.now();
+        }
+    }
+
+    function executeAIAction(action) {
+        const state = gameState.ai;
+        const aiBase = scene.children.find(c => c.name === 'Base' && c.userData.owner === 'ai');
+
+        const aiRefineryCount = state.buildings.filter(b => b.type === 'Refinery').length;
+        const aiBarracksCount = state.buildings.filter(b => b.type === 'Barracks').length;
+
+        const availableBarracks = scene.children.filter(c => c.name === 'Barracks' && c.userData.owner === 'ai');
+
+        // Simple building placement logic: offset from base
+        const newBuildingOffset = 8 + (aiRefineryCount + aiBarracksCount) * 4;
+        const newBuildingX = aiBase.position.x - newBuildingOffset;
+        const newBuildingZ = aiBase.position.z + Math.random() * 4 - 2;
+
+        switch (action) {
+            case 'BUILD_REFINERY':
+                if (aiRefineryCount < 3 && checkCosts('ai', 'Refinery')) {
+                    deductCosts('ai', 'Refinery');
+                    createBuilding('ai', 'Refinery', newBuildingX, newBuildingZ);
+                    showTemporaryMessage('AI is building a Refinery!', 1500, false, '#5eead4');
+                } else if (aiBarracksCount === 0 && checkCosts('ai', 'Barracks')) {
+                     // If too many refineries, try barracks
+                     executeAIAction('BUILD_BARRACKS');
+                } else {
+                    executeAIAction('TRAIN_SOLDIER');
+                }
+                break;
+            case 'BUILD_BARRACKS':
+                if (aiBarracksCount < 2 && checkCosts('ai', 'Barracks')) {
+                    deductCosts('ai', 'Barracks');
+                    createBuilding('ai', 'Barracks', newBuildingX, newBuildingZ);
+                    showTemporaryMessage('AI is building Barracks!', 1500, false, '#c4b5fd');
+                } else {
+                    executeAIAction('TRAIN_SOLDIER');
+                }
+                break;
+            case 'TRAIN_SOLDIER':
+                if (availableBarracks.length > 0) {
+                    const barracks = availableBarracks[0]; // Just use the first one
+                    trainSoldier('ai', barracks);
+                    showTemporaryMessage('AI is training a Soldier!', 1000, false, '#f87171');
+                } else if (checkCosts('ai', 'Barracks')) {
+                    executeAIAction('BUILD_BARRACKS');
+                } else {
+                    executeAIAction('WAIT');
+                }
+                break;
+            case 'ATTACK_PLAYER_BASE':
+                if (state.units.length > gameState.player.units.length + 3) { // AI has numerical advantage
+                    const playerBase = scene.children.find(c => c.name === 'Base' && c.userData.owner === 'player');
+                    if (playerBase) {
+                        state.units.forEach(u => u.target = playerBase);
+                        showTemporaryMessage('AI ATTACK IMMINENT!', 2000, false, '#ef4444');
+                    }
+                } else {
+                    executeAIAction('TRAIN_SOLDIER'); // Revert to building up forces
+                }
+                break;
+            case 'WAIT':
+            default:
+                // No action, resources will accumulate
+                break;
+        }
+    }
+
+    // --- Utility Functions ---
+
+    function showTemporaryMessage(text, duration, isGameOver = false, color = '#facc15') {
+        const msgBox = document.getElementById('message-box');
+        const msgText = document.getElementById('message-text');
+
+        msgText.textContent = text;
+        msgText.style.color = color;
+        msgBox.classList.remove('hidden');
+        msgBox.classList.add('opacity-100');
+
+        if (isGameOver) {
+            clock.stop();
+            return;
+        }
+
+        setTimeout(() => {
+            msgBox.classList.remove('opacity-100');
+            msgBox.classList.add('opacity-0');
+            setTimeout(() => {
+                msgBox.classList.add('hidden');
+            }, 500);
+        }, duration);
+    }
+
+    function updateUI() {
+        // Player Resources
+        document.getElementById('ore-player').textContent = gameState.player.resources.ore.toFixed(0);
+        document.getElementById('energy-player').textContent = gameState.player.resources.energy.toFixed(0);
+        document.getElementById('units-player').textContent = gameState.player.units.length;
+
+        // AI Units
+        document.getElementById('units-ai').textContent = gameState.ai.units.length;
+
+        // Selection Panel
+        const panel = document.getElementById('selection-panel');
+        panel.innerHTML = '';
+
+        if (gameState.selectedObject) {
+            const data = gameState.selectedObject.userData;
+            panel.classList.remove('hidden');
+
+            let content = `<div class="p-2">
+                                <h3 class="text-lg font-semibold mb-1 text-blue-400">${data.owner === 'player' ? 'Your' : 'Enemy'} ${data.type}</h3>
+                                <p class="text-sm text-gray-300">Health: <span class="text-green-400">${data.health.toFixed(0)}/${GAME_CONFIG.MAX_HEALTH}</span></p>
+                           </div>`;
+
+            if (data.type === 'Base') {
+                content += `
+                    <button id="build-refinery" class="btn-action btn-primary" onclick="startBuildingPlacement('Refinery')">
+                        Build Refinery <br><span class="text-xs text-amber-300">(100 Ore)</span>
+                    </button>
+                    <button id="build-barracks" class="btn-action btn-primary" onclick="startBuildingPlacement('Barracks')">
+                        Build Barracks <br><span class="text-xs text-amber-300">(150 Ore, 50 E)</span>
+                    </button>
+                `;
+            } else if (data.type === 'Barracks') {
+                content += `
+                    <button id="train-soldier" class="btn-action btn-primary" onclick="handleTrainUnit('Soldier')">
+                        Train Soldier <br><span class="text-xs text-amber-300">(50 Ore, 10 E)</span>
+                    </button>
+                `;
+            }
+
+            panel.innerHTML = content;
+
+            // Disable buttons if resources are insufficient
+            if (data.type === 'Base') {
+                const canRefine = checkCosts('player', 'Refinery');
+                const btnRefine = document.getElementById('build-refinery');
+                btnRefine.disabled = !canRefine;
+                btnRefine.className = canRefine ? 'btn-action btn-primary' : 'btn-action btn-disabled';
+
+                const canBarracks = checkCosts('player', 'Barracks');
+                const btnBarracks = document.getElementById('build-barracks');
+                btnBarracks.disabled = !canBarracks;
+                btnBarracks.className = canBarracks ? 'btn-action btn-primary' : 'btn-action btn-disabled';
+            } else if (data.type === 'Barracks') {
+                const canSoldier = checkCosts('player', 'Soldier');
+                const btnSoldier = document.getElementById('train-soldier');
+                btnSoldier.disabled = !canSoldier;
+                btnSoldier.className = canSoldier ? 'btn-action btn-primary' : 'btn-action btn-disabled';
+            }
+
+        } else if (gameState.targetPosition) {
+             // Building preview mode
+            panel.classList.remove('hidden');
+            panel.innerHTML = `<div class="p-2">
+                                <h3 class="text-lg font-semibold mb-1 text-yellow-400">Placing ${gameState.targetPosition.type}</h3>
+                                <p class="text-sm text-gray-300">Click on the terrain to place.</p>
+                           </div>`;
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+
+    // --- Interaction Handlers ---
+
+    function selectObject(object) {
+        // Clear previous highlight
+        if (gameState.selectedObject) {
+            gameState.selectedObject.traverse(child => {
+                if (child.isMesh && child.material.length) {
+                    child.material[0] = child.material[0].originalMaterial;
+                } else if (child.isMesh && child.material.originalMaterial) {
+                    child.material = child.material.originalMaterial;
+                }
+            });
+        }
+
+        if (object && object.userData.owner === 'player') {
+            // Apply new highlight
+            object.traverse(child => {
+                if (child.isMesh) {
+                    const originalMaterial = child.material.clone();
+                    child.material = MAT_HIGHLIGHT;
+                    child.material.originalMaterial = originalMaterial;
+                }
+            });
+            gameState.selectedObject = object;
+        } else {
+            gameState.selectedObject = null;
+        }
+        updateUI();
+    }
+
+    function onCanvasClick(event) {
+        if (clock.running === false) return;
+
+        // Calculate mouse position in normalized device coordinates (-1 to +1)
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children);
+
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            const object = hit.object;
+
+            if (object.name === 'terrain') {
+                // Terrain click
+
+                if (gameState.targetPosition) {
+                    // 1. Placing a building
+                    const { x, z, type } = gameState.targetPosition;
+                    if (type === 'Refinery' && checkCosts('player', 'Refinery')) {
+                        deductCosts('player', 'Refinery');
+                        createBuilding('player', 'Refinery', x, z);
+                    } else if (type === 'Barracks' && checkCosts('player', 'Barracks')) {
+                        deductCosts('player', 'Barracks');
+                        createBuilding('player', 'Barracks', x, z);
+                    } else {
+                         showTemporaryMessage('Not enough resources!', 1500);
+                    }
+
+                    // Clear placement mode
+                    scene.remove(gameState.targetPosition.mesh);
+                    gameState.targetPosition = null;
+                    selectObject(null); // Deselect everything
+                } else if (gameState.selectedObject && gameState.selectedObject.userData.type === 'Soldier') {
+                    // 2. Unit movement command
+                    gameState.selectedObject.userData.target = { x: hit.point.x, z: hit.point.z };
+                    selectObject(null); // Clear selection after command
+                } else {
+                    // 3. Simple click on terrain - deselect
+                    selectObject(null);
+                }
+
+            } else if (object.userData.owner === 'player') {
+                // Click on own object - select it
+                if (object.userData.type === 'Soldier') {
+                    // If a unit is clicked, they become the selected object
+                    selectObject(object);
+                } else {
+                    // If a building is clicked, it becomes the selected object
+                    selectObject(object);
+                }
+            } else if (object.userData.owner === 'ai' && gameState.selectedObject && gameState.selectedObject.userData.type === 'Soldier') {
+                // Click on enemy object with a friendly unit selected - attack command
+                gameState.selectedObject.userData.target = object;
+                selectObject(null); // Clear selection after command
+            } else {
+                 // Click on enemy object without selected unit - just deselect
+                selectObject(null);
+            }
+        }
+    }
+
+    function startBuildingPlacement(type) {
+        // Clear previous placement
+        if (gameState.targetPosition) {
+            scene.remove(gameState.targetPosition.mesh);
+        }
+
+        // Create a ghost object for placement
+        let geometry = type === 'Refinery' ? new THREE.BoxGeometry(2, 1, 2) : new THREE.CylinderGeometry(1.5, 1.5, 3, 8);
+        const ghost = new THREE.Mesh(geometry, MAT_ERROR);
+        ghost.position.y = GAME_CONFIG.BUILDING_Y + (geometry.parameters.height / 2);
+        scene.add(ghost);
+
+        gameState.targetPosition = { x: 0, z: 0, type: type, mesh: ghost };
+        updateUI();
+
+        // Add mouse move listener to update ghost position
+        renderer.domElement.addEventListener('mousemove', updateGhostPosition);
+    }
+
+    function updateGhostPosition(event) {
+        if (!gameState.targetPosition) {
+             renderer.domElement.removeEventListener('mousemove', updateGhostPosition);
+             return;
+        }
+
+        // Calculate mouse position
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children.filter(o => o.name === 'terrain'));
+
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            const p = hit.point;
+
+            // Update ghost position
+            gameState.targetPosition.mesh.position.x = p.x;
+            gameState.targetPosition.mesh.position.z = p.z;
+            gameState.targetPosition.x = p.x;
+            gameState.targetPosition.z = p.z;
+        }
+    }
+
+    function handleTrainUnit(type) {
+        if (gameState.selectedObject && gameState.selectedObject.userData.type === 'Barracks') {
+            trainSoldier('player', gameState.selectedObject);
+            selectObject(null); // Deselect after command
+        }
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // --- Main Game Loop ---
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const delta = clock.getDelta(); // Time elapsed since last frame
+
+        // 1. Resource Generation
+        if (clock.elapsedTime * 1000 > 1000) { // Check every second (or faster)
+            const playerRefineries = gameState.player.buildings.filter(b => b.type === 'Refinery').length;
+            const aiRefineries = gameState.ai.buildings.filter(b => b.type === 'Refinery').length;
+
+            gameState.player.resources.ore += playerRefineries * GAME_CONFIG.REFINERY_RATE * delta;
+            gameState.ai.resources.ore += aiRefineries * GAME_CONFIG.REFINERY_RATE * delta;
+        }
+
+        // 2. Unit and Combat Logic
+        const allUnits = [...gameState.player.units, ...gameState.ai.units];
+        allUnits.forEach(unit => {
+            const isFighting = fightUnit(unit);
+
+            if (!isFighting && unit.target) {
+                // Only move if not actively fighting (simple AI priority: fight > move)
+                moveUnit(unit, delta);
+            }
+
+            // Simple visual indicator for health (color shift towards red when low)
+            if (unit.mesh.material.originalMaterial) {
+                 const healthRatio = unit.health / GAME_CONFIG.MAX_HEALTH;
+                 const originalColor = unit.mesh.material.originalMaterial.color.getHex();
+                 if (healthRatio < 0.5) {
+                    unit.mesh.material.color.setHex(0xff0000).lerp(new THREE.Color(originalColor), healthRatio * 2);
+                 } else {
+                    unit.mesh.material.color.setHex(originalColor);
+                 }
+            }
+        });
+
+        // 3. AI Strategy Call
+        if (Date.now() - aiLastActionTime > GAME_CONFIG.AI_THINK_INTERVAL) {
+             getAIStrategy();
+        }
+
+        // 4. Update UI
+        updateUI();
+
+        // 5. Render
+        renderer.render(scene, camera);
+    }
+
+
+    // --- Initialization ---
+
+    window.onload = function() {
+        initThreeJS();
+        animate();
+        showTemporaryMessage('Welcome to Galactic Command! Build Refineries for Ore, Barracks for units. Click units to move/attack, or buildings to command.', 5000);
+    };
+
+</script>
+</body>
+</html>
