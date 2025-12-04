@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Conveyor Game - JGK Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none; /* Let clicks pass through to canvas */
+            user-select: none;
+        }
+        h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }
+        #score-board { font-size: 18px; margin-top: 5px; color: #aaa; }
+        #lives { margin-top: 5px; color: #ff5555; font-weight: bold;}
+
+        /* Game Over Screen */
+        #game-over {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            z-index: 10;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+        button:hover { background: #45a049; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Quality Control: JGK Ops</h1>
+        <div id="score-board">Score: 0</div>
+        <div id="lives">Lives: 3</div>
+        <p style="font-size: 12px; color: #888;">Click RED shapes. Save GREEN shapes.</p>
+    </div>
+
+    <div id="game-over">
+        <h1 style="font-size: 50px; color: #ff5555;">GAME OVER</h1>
+        <p id="final-score">Final Score: 0</p>
+        <button id="restart-btn">Restart Shift</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Configuration ---
+        const BELT_SPEED = 2.5; // Units per second
+        const SPAWN_RATE = 1.2; // Seconds between spawns
+        const BELT_WIDTH = 4;
+        const BELT_LENGTH = 15;
+        
+        // JGK Algorithm Constants (Bounce Physics)
+        const JGK_BOUNCE_HEIGHT = 1.2; 
+        const JGK_FREQUENCY = 4.0; 
+
+        // --- State ---
+        let score = 0;
+        let lives = 3;
+        let isGameOver = false;
+        let lastTime = 0;
+        let spawnTimer = 0;
+        let items = []; 
+
+        // --- DOM Elements ---
+        const scoreEl = document.getElementById('score-board');
+        const livesEl = document.getElementById('lives');
+        const gameOverEl = document.getElementById('game-over');
+        const finalScoreEl = document.getElementById('final-score');
+        const restartBtn = document.getElementById('restart-btn');
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+
+        // Isometric-ish Camera
+        const aspect = window.innerWidth / window.innerHeight;
+        const d = 10;
+        const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+        camera.position.set(20, 20, 20); 
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; 
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- The Conveyor Belt ---
+        function createBeltTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(0, 0, 64, 64);
+            ctx.fillStyle = '#444444';
+            ctx.fillRect(0, 0, 4, 64); 
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(10, 1); 
+            return texture;
+        }
+
+        const beltTexture = createBeltTexture();
+        const beltGeometry = new THREE.BoxGeometry(BELT_LENGTH, 0.5, BELT_WIDTH);
+        const beltMaterial = new THREE.MeshStandardMaterial({ map: beltTexture });
+        const belt = new THREE.Mesh(beltGeometry, beltMaterial);
+        belt.position.y = -0.25;
+        belt.receiveShadow = true;
+        scene.add(belt);
+
+        const frameGeo = new THREE.BoxGeometry(BELT_LENGTH, 0.6, BELT_WIDTH + 0.5);
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
+        const frame = new THREE.Mesh(frameGeo, frameMat);
+        frame.position.y = -0.35;
+        scene.add(frame);
+
+        // --- Interaction ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        window.addEventListener('pointerdown', (event) => {
+            if (isGameOver) return;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(items);
+            if (intersects.length > 0) {
+                handleItemClick(intersects[0].object);
+            }
+        });
+
+        // --- Helper: Random Geometry Generator ---
+        function getRandomGeometry() {
+            const type = Math.floor(Math.random() * 4);
+            switch(type) {
+                case 0: return new THREE.BoxGeometry(1, 1, 1);
+                case 1: return new THREE.SphereGeometry(0.6, 16, 16);
+                case 2: return new THREE.ConeGeometry(0.6, 1.2, 16);
+                case 3: return new THREE.IcosahedronGeometry(0.6, 0);
+                default: return new THREE.BoxGeometry(1, 1, 1);
+            }
+        }
+
+        // --- Game Logic ---
+
+        function spawnItem() {
+            const isBad = Math.random() > 0.6; 
+            
+            // 1. Get Random Shape
+            const geometry = getRandomGeometry();
+            
+            // Green for Good, Red for Bad
+            const color = isBad ? 0xff3333 : 0x33cc33;
+            const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
+            
+            const item = new THREE.Mesh(geometry, material);
+            
+            // Start at right side
+            const startZ = (Math.random() - 0.5) * (BELT_WIDTH - 1.5);
+            item.position.set(BELT_LENGTH / 2, 0.5, startZ);
+            item.castShadow = true;
+
+            // 2. Initialize JGK Data (randomize phase so they don't bounce in unison)
+            item.userData = { 
+                isBad: isBad, 
+                type: 'item',
+                jgkTime: Math.random() * 100, // Random starting phase
+                rotationSpeed: {
+                    x: Math.random() * 2,
+                    y: Math.random() * 2
+                }
+            }; 
+            
+            scene.add(item);
+            items.push(item);
+        }
+
+        /**
+         * The JGK Algorithm (Jump-Gravity-Kinematics)
+         * Calculates the new position based on time and velocity.
+         * Creates a bouncing effect using absolute sine waves.
+         */
+        function applyJGKAlgorithm(item, dt) {
+            // Kinematics (Horizontal Movement)
+            item.position.x -= BELT_SPEED * dt;
+
+            // Jump/Gravity (Vertical Movement)
+            item.userData.jgkTime += dt * JGK_FREQUENCY;
+            
+            // Formula: BaseHeight + | Amplitude * Sin(Time) |
+            // We use Math.abs to create the "bounce" arch instead of a smooth wave
+            const bounceY = Math.abs(Math.sin(item.userData.jgkTime)) * JGK_BOUNCE_HEIGHT;
+            
+            // Apply height (0.5 is base size offset)
+            item.position.y = 0.5 + bounceY;
+
+            // Rotation Flair (Rotate while in air)
+            item.rotation.x += item.userData.rotationSpeed.x * dt;
+            item.rotation.z -= item.userData.rotationSpeed.y * dt;
+        }
+
+        function handleItemClick(object) {
+            scene.remove(object);
+            items = items.filter(i => i !== object);
+            
+            if (object.userData.isBad) {
+                score += 10;
+                updateUI();
+                spawnExplosion(object.position, 0xff3333);
+            } else {
+                loseLife();
+            }
+        }
+
+        function loseLife() {
+            lives--;
+            updateUI();
+            if (lives <= 0) endGame();
+        }
+
+        function endGame() {
+            isGameOver = true;
+            gameOverEl.style.display = 'flex';
+            finalScoreEl.innerText = `Final Score: ${score}`;
+        }
+
+        function updateUI() {
+            scoreEl.innerText = `Score: ${score}`;
+            livesEl.innerText = `Lives: ${lives}`;
+        }
+
+        function spawnExplosion(pos, color) {
+            const particleCount = 8;
+            const geom = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+            
+            for(let i=0; i<particleCount; i++) {
+                const p = new THREE.Mesh(geom, mat);
+                p.position.copy(pos);
+                p.userData.vel = new THREE.Vector3(
+                    (Math.random()-0.5) * 0.5,
+                    Math.random() * 0.5,
+                    (Math.random()-0.5) * 0.5
+                );
+                scene.add(p);
+                animateParticle(p);
+            }
+        }
+
+        function animateParticle(p) {
+            let life = 30;
+            function step() {
+                if(life > 0) {
+                    p.position.add(p.userData.vel);
+                    p.rotation.x += 0.1;
+                    p.userData.vel.y -= 0.02; 
+                    life--;
+                    requestAnimationFrame(step);
+                } else {
+                    scene.remove(p);
+                }
+            }
+            step();
+        }
+
+        function resetGame() {
+            items.forEach(i => scene.remove(i));
+            items = [];
+            score = 0;
+            lives = 3;
+            isGameOver = false;
+            gameOverEl.style.display = 'none';
+            updateUI();
+        }
+
+        restartBtn.addEventListener('click', resetGame);
+
+        // --- Main Game Loop ---
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            const dt = (time - lastTime) / 1000;
+            lastTime = time;
+
+            if (isGameOver) {
+                renderer.render(scene, camera);
+                return;
+            }
+
+            // Animate Belt
+            beltTexture.offset.x -= (BELT_SPEED / 10) * dt; 
+
+            // Spawn Logic
+            spawnTimer += dt;
+            if (spawnTimer > SPAWN_RATE) {
+                spawnItem();
+                spawnTimer = 0;
+            }
+
+            // Move Items using JGK Algorithm
+            for (let i = items.length - 1; i >= 0; i--) {
+                const item = items[i];
+
+                // APPLY JGK ALGORITHM HERE
+                applyJGKAlgorithm(item, dt);
+
+                // Check Bounds
+                if (item.position.x < -BELT_LENGTH / 2) {
+                    if (item.userData.isBad) loseLife();
+                    scene.remove(item);
+                    items.splice(i, 1);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate(0);
+
+    </script>
+</body>
+</html>
