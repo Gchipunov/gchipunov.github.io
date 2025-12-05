@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL RTS: Faction Wars</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        #game-container { width: 100vw; height: 100vh; display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* HUD */
+        #hud {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 120px;
+            background: rgba(0, 0, 0, 0.8);
+            border-top: 2px solid #4488ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            gap: 20px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 5px;
+            color: white;
+            text-align: center;
+        }
+
+        #resources {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #4f4;
+            padding: 10px 20px;
+            font-size: 24px;
+            border: 1px solid #4f4;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+
+        /* Unit Buttons */
+        .btn {
+            width: 80px;
+            height: 80px;
+            background: #222;
+            border: 2px solid #555;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .btn:hover { background: #333; border-color: #fff; }
+        .btn:active { background: #444; }
+        .btn .cost { color: #fe0; margin-top: 4px; font-weight: bold; }
+        .btn .hotkey { position: absolute; top: 2px; left: 4px; font-size: 10px; color: #888; }
+        
+        .btn.blue { border-color: #4488ff; }
+
+        /* Instructions */
+        #instructions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: rgba(255,255,255,0.7);
+            text-align: right;
+            font-size: 14px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+        }
+
+        /* Selection Box */
+        #selection-box {
+            position: absolute;
+            border: 1px solid #0f0;
+            background-color: rgba(0, 255, 0, 0.2);
+            display: none;
+            pointer-events: none;
+        }
+
+        /* Winner Modal */
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 40px;
+            border: 2px solid white;
+            text-align: center;
+            display: none;
+            z-index: 100;
+        }
+        #game-over h1 { margin-top: 0; }
+        #restart-btn {
+            background: #4488ff;
+            border: none;
+            padding: 10px 20px;
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+    </style>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="game-container"></div>
+    
+    <div id="selection-box"></div>
+
+    <div id="ui-layer">
+        <div id="resources">Money: $0</div>
+        
+        <div id="instructions">
+            <strong>Controls:</strong><br>
+            Left Click: Select Unit<br>
+            Drag: Box Select<br>
+            Right Click: Move / Attack / Capture<br>
+            WASD / Arrows: Pan Camera
+        </div>
+
+        <div id="hud">
+            <div class="panel">
+                <strong>COMMAND</strong><br>
+                <span id="unit-count">0 Units</span>
+            </div>
+            
+            <button class="btn blue" onclick="game.buildUnit('soldier')">
+                <span class="hotkey">1</span>
+                <span>Soldier</span>
+                <span class="cost">$50</span>
+            </button>
+            <button class="btn blue" onclick="game.buildUnit('dog')">
+                <span class="hotkey">2</span>
+                <span>Dog</span>
+                <span class="cost">$40</span>
+            </button>
+            <button class="btn blue" onclick="game.buildUnit('engineer')">
+                <span class="hotkey">3</span>
+                <span>Engineer</span>
+                <span class="cost">$100</span>
+            </button>
+        </div>
+
+        <div id="game-over">
+            <h1 id="winner-text">GAME OVER</h1>
+            <button id="restart-btn" onclick="location.reload()">Play Again</button>
+        </div>
+    </div>
+
+<script>
+/**
+ * RTS Game Logic
+ * built using Three.js
+ */
+
+// --- Constants & Config ---
+const COLORS = {
+    P1: 0x4488ff, // Blue
+    P2: 0xff4444, // Red
+    NEUTRAL: 0xaaaaaa,
+    SELECTED: 0x00ff00,
+    GROUND: 0x222222,
+    GRID: 0x333333
+};
+
+const UNIT_TYPES = {
+    soldier: { hp: 100, dmg: 10, range: 40, speed: 0.8, cost: 50, color: 0x00ccff, type: 'ranged', reload: 60, scale: {x:1, y:2, z:1} },
+    dog:     { hp: 60,  dmg: 8,  range: 5,  speed: 1.5, cost: 40, color: 0xccaa00, type: 'melee', reload: 30, scale: {x:0.8, y:1, z:0.8} },
+    bear:    { hp: 150, dmg: 20, range: 6,  speed: 1.0, cost: 80, color: 0x8B4513, type: 'melee', reload: 50, scale: {x:1.5, y:1.5, z:1.5} },
+    engineer:{ hp: 50,  dmg: 0,  range: 8,  speed: 0.6, cost: 100, color: 0xffff00, type: 'capture', reload: 0, scale: {x:1, y:1.5, z:1} }
+};
+
+const BUILDING_TYPES = {
+    base: { hp: 1000, income: 2, range: 0 },
+    outpost: { hp: 500, income: 1, range: 0 }
+};
+
+// --- Game Engine Class ---
+class Game {
+    constructor() {
+        this.container = document.getElementById('game-container');
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+        
+        // Scene Setup
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x111111);
+        this.scene.fog = new THREE.Fog(0x111111, 50, 300);
+
+        // Camera
+        this.camera = new THREE.PerspectiveCamera(45, this.width / this.height, 1, 1000);
+        this.camera.position.set(0, 120, 100);
+        this.camera.lookAt(0, 0, 0);
+
+        // Renderer
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer.setSize(this.width, this.height);
+        this.renderer.shadowMap.enabled = true;
+        this.container.appendChild(this.renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        this.scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        this.scene.add(dirLight);
+
+        // Ground
+        const planeGeometry = new THREE.PlaneGeometry(400, 400);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: COLORS.GROUND });
+        this.ground = new THREE.Mesh(planeGeometry, planeMaterial);
+        this.ground.rotation.x = -Math.PI / 2;
+        this.ground.receiveShadow = true;
+        this.scene.add(this.ground);
+        
+        // Grid Helper
+        const grid = new THREE.GridHelper(400, 40, COLORS.GRID, COLORS.GRID);
+        this.scene.add(grid);
+
+        // Game State
+        this.units = [];
+        this.buildings = [];
+        this.projectiles = [];
+        this.particles = [];
+        
+        this.money = 200;
+        this.aiMoney = 200;
+        this.gameOver = false;
+        
+        this.selectedUnits = [];
+        
+        // Input State
+        this.raycaster = new THREE.Raycaster();
+        this.mouse = new THREE.Vector2();
+        this.mouseDownPos = new THREE.Vector2();
+        this.isDragging = false;
+        this.cameraVelocity = new THREE.Vector3();
+
+        // Bindings
+        this.initInput();
+        this.initLevel();
+
+        // Loop
+        this.lastTime = performance.now();
+        this.animate = this.animate.bind(this);
+        requestAnimationFrame(this.animate);
+    }
+
+    initLevel() {
+        // Player Base (Blue)
+        this.spawnBuilding(0, 0, 80, 1, 'base');
+        
+        // AI Base (Red)
+        this.spawnBuilding(0, 0, -80, 2, 'base');
+
+        // Neutral Buildings
+        this.spawnBuilding(-60, 0, 0, 0, 'outpost');
+        this.spawnBuilding(60, 0, 0, 0, 'outpost');
+        this.spawnBuilding(0, 0, 0, 0, 'outpost');
+    }
+
+    spawnBuilding(x, y, z, faction, type) {
+        const building = new Building(x, z, faction, type, this.scene);
+        this.buildings.push(building);
+        return building;
+    }
+
+    spawnUnit(x, z, faction, typeKey) {
+        const unit = new Unit(x, z, faction, typeKey, this.scene);
+        this.units.push(unit);
+    }
+
+    buildUnit(type) {
+        if (this.gameOver) return;
+        const cost = UNIT_TYPES[type].cost;
+        if (this.money >= cost) {
+            // Find player base
+            const base = this.buildings.find(b => b.faction === 1 && b.type === 'base');
+            if (base) {
+                this.money -= cost;
+                this.updateUI();
+                // Spawn near base with slight random offset
+                const offsetX = (Math.random() - 0.5) * 20;
+                const offsetZ = (Math.random() - 0.5) * 20 + 20;
+                this.spawnUnit(base.mesh.position.x + offsetX, base.mesh.position.z + offsetZ, 1, type);
+            }
+        }
+    }
+
+    // --- Core Logic ---
+
+    update(dt) {
+        if (this.gameOver) return;
+
+        // Passive Income
+        if (Math.random() < 0.05) { // Slow tick
+            this.buildings.forEach(b => {
+                if (b.faction === 1) this.money += b.config.income * 0.1;
+                if (b.faction === 2) this.aiMoney += b.config.income * 0.1;
+            });
+            this.updateUI();
+        }
+
+        // AI Logic (Simple)
+        this.updateAI();
+
+        // Entity Updates
+        
+        // Units
+        for (let i = this.units.length - 1; i >= 0; i--) {
+            const u = this.units[i];
+            u.update(dt, this.units, this.buildings, this);
+            if (u.dead) {
+                u.dispose(this.scene);
+                this.units.splice(i, 1);
+                // Deselect if dead
+                const selIdx = this.selectedUnits.indexOf(u);
+                if (selIdx > -1) this.selectedUnits.splice(selIdx, 1);
+            }
+        }
+
+        // Buildings
+        let p1Bases = 0;
+        let p2Bases = 0;
+        this.buildings.forEach(b => {
+            b.update(dt);
+            if(b.faction === 1 && b.type === 'base') p1Bases++;
+            if(b.faction === 2 && b.type === 'base') p2Bases++;
+        });
+
+        if (p1Bases === 0) this.endGame(2);
+        if (p2Bases === 0) this.endGame(1);
+
+        // Projectiles
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+            const p = this.projectiles[i];
+            p.life -= dt;
+            if (p.life <= 0) {
+                this.scene.remove(p.mesh);
+                this.projectiles.splice(i, 1);
+            }
+        }
+
+        // Camera Movement
+        this.camera.position.add(this.cameraVelocity);
+    }
+
+    updateAI() {
+        // AI Spawning
+        const base = this.buildings.find(b => b.faction === 2 && b.type === 'base');
+        if (base && Math.random() < 0.02) {
+            // Decide what to build
+            let choice = 'soldier';
+            if (Math.random() > 0.6) choice = 'bear';
+            if (Math.random() > 0.9) choice = 'engineer';
+
+            const cost = UNIT_TYPES[choice].cost;
+            if (this.aiMoney >= cost) {
+                this.aiMoney -= cost;
+                const offsetX = (Math.random() - 0.5) * 20;
+                const offsetZ = (Math.random() - 0.5) * 20 - 20;
+                this.spawnUnit(base.mesh.position.x + offsetX, base.mesh.position.z + offsetZ, 2, choice);
+            }
+        }
+
+        // AI Commands (Very basic state machine)
+        this.units.filter(u => u.faction === 2).forEach(unit => {
+            if (unit.state === 'idle') {
+                // Find target
+                if (unit.config.type === 'capture') {
+                    // Engineers look for neutral/enemy buildings
+                    const target = this.buildings.find(b => b.faction !== 2);
+                    if (target) {
+                        unit.setTarget(target);
+                        unit.command = 'capture';
+                    }
+                } else {
+                    // Attack units or buildings
+                    let target = this.units.find(u => u.faction === 1);
+                    if (!target) target = this.buildings.find(b => b.faction === 1);
+                    
+                    if (target) {
+                        unit.setTarget(target);
+                        unit.command = 'attack';
+                    }
+                }
+            }
+        });
+    }
+
+    addProjectile(start, end, color) {
+        const points = [start, end];
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const material = new THREE.LineBasicMaterial({ color: color });
+        const line = new THREE.Line(geometry, material);
+        this.scene.add(line);
+        this.projectiles.push({ mesh: line, life: 0.1 });
+    }
+
+    updateUI() {
+        document.getElementById('resources').innerText = `Money: $${Math.floor(this.money)}`;
+        document.getElementById('unit-count').innerText = `${this.selectedUnits.length} Selected`;
+    }
+
+    endGame(winner) {
+        this.gameOver = true;
+        const modal = document.getElementById('game-over');
+        const text = document.getElementById('winner-text');
+        modal.style.display = 'block';
+        if (winner === 1) {
+            text.innerText = "VICTORY!";
+            text.style.color = "#4488ff";
+        } else {
+            text.innerText = "DEFEAT";
+            text.style.color = "#ff4444";
+        }
+    }
+
+    // --- Input Handling ---
+
+    initInput() {
+        const selectionBox = document.getElementById('selection-box');
+        
+        // Mouse Down
+        window.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return; // Only Left Click
+            if (e.target.closest('#hud')) return;
+
+            this.mouseDownPos.set(e.clientX, e.clientY);
+            this.isDragging = true;
+            
+            selectionBox.style.left = e.clientX + 'px';
+            selectionBox.style.top = e.clientY + 'px';
+            selectionBox.style.width = '0px';
+            selectionBox.style.height = '0px';
+            selectionBox.style.display = 'block';
+        });
+
+        // Mouse Move
+        window.addEventListener('mousemove', (e) => {
+            this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            if (this.isDragging) {
+                const width = e.clientX - this.mouseDownPos.x;
+                const height = e.clientY - this.mouseDownPos.y;
+                
+                selectionBox.style.width = Math.abs(width) + 'px';
+                selectionBox.style.height = Math.abs(height) + 'px';
+                selectionBox.style.left = (width < 0 ? e.clientX : this.mouseDownPos.x) + 'px';
+                selectionBox.style.top = (height < 0 ? e.clientY : this.mouseDownPos.y) + 'px';
+            }
+        });
+
+        // Mouse Up (Selection Logic)
+        window.addEventListener('mouseup', (e) => {
+            if (e.button !== 0 || !this.isDragging) return;
+            this.isDragging = false;
+            selectionBox.style.display = 'none';
+
+            // Check for drag or click
+            const dx = e.clientX - this.mouseDownPos.x;
+            const dy = e.clientY - this.mouseDownPos.y;
+            const isClick = Math.sqrt(dx*dx + dy*dy) < 5;
+
+            // Deselect previous
+            if (!e.shiftKey) {
+                this.selectedUnits.forEach(u => u.setSelected(false));
+                this.selectedUnits = [];
+            }
+
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+
+            if (isClick) {
+                // Click Select
+                const intersects = this.raycaster.intersectObjects(this.units.map(u => u.mesh));
+                if (intersects.length > 0) {
+                    const unit = intersects[0].object.userData.parent;
+                    if (unit.faction === 1) {
+                        unit.setSelected(true);
+                        this.selectedUnits.push(unit);
+                    }
+                }
+            } else {
+                // Box Select (Project world coords to screen)
+                // Simplified: Just select all onscreen units within box bounds logic could be complex in 3D
+                // We'll use a frustration check approximation or simple loop
+                const startX = Math.min(e.clientX, this.mouseDownPos.x);
+                const endX = Math.max(e.clientX, this.mouseDownPos.x);
+                const startY = Math.min(e.clientY, this.mouseDownPos.y);
+                const endY = Math.max(e.clientY, this.mouseDownPos.y);
+
+                this.units.forEach(u => {
+                    if (u.faction !== 1) return;
+                    
+                    // Project 3D pos to 2D screen
+                    const v = u.mesh.position.clone().project(this.camera);
+                    const sx = (v.x * .5 + .5) * this.width;
+                    const sy = (-(v.y * .5) + .5) * this.height;
+
+                    if (sx >= startX && sx <= endX && sy >= startY && sy <= endY) {
+                        u.setSelected(true);
+                        this.selectedUnits.push(u);
+                    }
+                });
+            }
+            this.updateUI();
+        });
+
+        // Right Click (Command)
+        window.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (this.selectedUnits.length === 0) return;
+
+            this.raycaster.setFromCamera(this.mouse, this.camera);
+            
+            // Check for Enemies/Buildings
+            const allMeshes = [...this.units.map(u=>u.mesh), ...this.buildings.map(b=>b.mesh)];
+            const intersects = this.raycaster.intersectObjects(allMeshes);
+
+            if (intersects.length > 0) {
+                const targetObj = intersects[0].object.userData.parent;
+                
+                // Attack or Capture Logic
+                if (targetObj.faction !== 1) {
+                    this.selectedUnits.forEach(u => {
+                        if (u.config.type === 'capture' && targetObj instanceof Building) {
+                             u.command = 'capture';
+                             u.setTarget(targetObj);
+                        } else if (u.config.type !== 'capture') {
+                             u.command = 'attack';
+                             u.setTarget(targetObj);
+                        }
+                    });
+                    this.showIndicator(intersects[0].point, 0xff0000);
+                    return;
+                }
+            }
+
+            // Move Logic (Ground Click)
+            const groundIntersect = this.raycaster.intersectObject(this.ground);
+            if (groundIntersect.length > 0) {
+                const point = groundIntersect[0].point;
+                // Group formation offset
+                const gridSize = Math.ceil(Math.sqrt(this.selectedUnits.length));
+                
+                this.selectedUnits.forEach((u, i) => {
+                    const row = Math.floor(i / gridSize);
+                    const col = i % gridSize;
+                    const dest = new THREE.Vector3(
+                        point.x + (col - gridSize/2) * 3,
+                        0,
+                        point.z + (row - gridSize/2) * 3
+                    );
+                    u.command = 'move';
+                    u.setTargetPos(dest);
+                });
+                this.showIndicator(point, 0x00ff00);
+            }
+        });
+
+        // Keyboard (Camera)
+        window.addEventListener('keydown', (e) => {
+            const speed = 2;
+            switch(e.key.toLowerCase()) {
+                case 'w': case 'arrowup': this.cameraVelocity.z = -speed; break;
+                case 's': case 'arrowdown': this.cameraVelocity.z = speed; break;
+                case 'a': case 'arrowleft': this.cameraVelocity.x = -speed; break;
+                case 'd': case 'arrowright': this.cameraVelocity.x = speed; break;
+                case '1': this.buildUnit('soldier'); break;
+                case '2': this.buildUnit('dog'); break;
+                case '3': this.buildUnit('engineer'); break;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            switch(e.key.toLowerCase()) {
+                case 'w': case 's': case 'arrowup': case 'arrowdown': this.cameraVelocity.z = 0; break;
+                case 'a': case 'd': case 'arrowleft': case 'arrowright': this.cameraVelocity.x = 0; break;
+            }
+        });
+    }
+
+    showIndicator(pos, color) {
+        const geo = new THREE.RingGeometry(1, 2, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(pos);
+        mesh.position.y = 0.5;
+        mesh.rotation.x = -Math.PI/2;
+        this.scene.add(mesh);
+        
+        // Animate and remove
+        let scale = 1;
+        const anim = () => {
+            scale -= 0.05;
+            mesh.scale.set(scale, scale, scale);
+            if(scale <= 0) this.scene.remove(mesh);
+            else requestAnimationFrame(anim);
+        };
+        anim();
+    }
+
+    animate(time) {
+        const dt = (time - this.lastTime) / 1000;
+        this.lastTime = time;
+        this.update(dt > 0.1 ? 0.1 : dt); // Cap dt
+        this.renderer.render(this.scene, this.camera);
+        requestAnimationFrame(this.animate);
+    }
+}
+
+// --- Entity Classes ---
+
+class Entity {
+    constructor(x, z, faction, scene) {
+        this.faction = faction;
+        this.dead = false;
+        this.scene = scene;
+        this.position = new THREE.Vector3(x, 0, z);
+    }
+}
+
+class Unit extends Entity {
+    constructor(x, z, faction, type, scene) {
+        super(x, z, faction, scene);
+        this.typeKey = type;
+        this.config = UNIT_TYPES[type];
+        this.hp = this.config.hp;
+        this.maxHp = this.config.hp;
+        this.reloadTimer = 0;
+        this.state = 'idle'; // idle, move, attack, capture
+        this.command = 'idle'; // what the player ordered
+        this.targetEntity = null;
+        this.targetPos = null;
+
+        // Mesh Construction
+        const geo = new THREE.CylinderGeometry(1 * this.config.scale.x, 1 * this.config.scale.x, 3 * this.config.scale.y, 8);
+        let color = faction === 1 ? COLORS.P1 : COLORS.P2;
+        
+        // Special appearance based on type
+        if (type === 'dog' || type === 'bear') {
+             // Rotate to look horizontal
+             geo.rotateX(Math.PI/2);
+             color = this.config.color; // Use specific animal color
+        }
+        
+        if (type === 'engineer') color = this.config.color;
+
+        const mat = new THREE.MeshStandardMaterial({ color: color });
+        this.mesh = new THREE.Mesh(geo, mat);
+        this.mesh.position.set(x, 1.5, z);
+        this.mesh.castShadow = true;
+        this.mesh.userData.parent = this;
+        scene.add(this.mesh);
+
+        // Selection Ring
+        const ringGeo = new THREE.RingGeometry(2, 2.2, 16);
+        const ringMat = new THREE.MeshBasicMaterial({ color: COLORS.SELECTED, side: THREE.DoubleSide });
+        this.ring = new THREE.Mesh(ringGeo, ringMat);
+        this.ring.rotation.x = -Math.PI / 2;
+        this.ring.position.y = -1.4;
+        this.ring.visible = false;
+        this.mesh.add(this.ring);
+
+        // HP Bar
+        const barBg = new THREE.Mesh(new THREE.PlaneGeometry(4, 0.5), new THREE.MeshBasicMaterial({color:0x000000}));
+        barBg.position.y = 3;
+        this.mesh.add(barBg);
+        this.hpBar = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 0.3), new THREE.MeshBasicMaterial({color:0x00ff00}));
+        this.hpBar.position.z = 0.01;
+        barBg.add(this.hpBar);
+        // orient HP bar to camera
+        barBg.lookAt(0, 100, 100); 
+    }
+
+    setSelected(val) {
+        this.ring.visible = val;
+    }
+
+    setTargetPos(vec) {
+        this.targetPos = vec;
+        this.targetEntity = null;
+        this.state = 'move';
+    }
+
+    setTarget(entity) {
+        this.targetEntity = entity;
+        this.targetPos = null;
+    }
+
+    takeDamage(amount) {
+        this.hp -= amount;
+        this.updateHpBar();
+        if (this.hp <= 0) this.dead = true;
+    }
+
+    updateHpBar() {
+        const pct = Math.max(0, this.hp / this.maxHp);
+        this.hpBar.scale.x = pct;
+        this.hpBar.position.x = -(1-pct)*1.9; // Left align
+        this.hpBar.material.color.setHex(pct > 0.5 ? 0x00ff00 : 0xff0000);
+    }
+
+    update(dt, units, buildings, game) {
+        // Cooldown
+        if (this.reloadTimer > 0) this.reloadTimer--;
+
+        // Determine Action
+        if (this.targetEntity) {
+            if (this.targetEntity.dead || (this.targetEntity instanceof Building && this.targetEntity.faction === this.faction && this.config.type !== 'capture')) {
+                this.targetEntity = null;
+                this.state = 'idle';
+            } else {
+                const dist = this.mesh.position.distanceTo(this.targetEntity.mesh.position);
+                if (dist <= this.config.range) {
+                    // In range
+                    this.state = this.command; // attack or capture
+                    
+                    if (this.config.type === 'capture' && this.targetEntity instanceof Building) {
+                         // Capture Logic
+                         this.mesh.rotation.y += dt * 5; // Spin animation
+                         if (this.reloadTimer <= 0) {
+                             const captured = this.targetEntity.capture(this.faction);
+                             if (captured) {
+                                 this.targetEntity = null;
+                                 this.state = 'idle';
+                             }
+                             this.reloadTimer = 10;
+                         }
+                    } else {
+                        // Combat Logic
+                        if (this.reloadTimer <= 0) {
+                            this.attack(this.targetEntity, game);
+                            this.reloadTimer = this.config.reload;
+                        }
+                    }
+                } else {
+                    // Move towards target
+                    this.moveTo(this.targetEntity.mesh.position, dt);
+                }
+            }
+        } else if (this.targetPos) {
+            const dist = this.mesh.position.distanceTo(this.targetPos);
+            if (dist < 1) {
+                this.targetPos = null;
+                this.state = 'idle';
+            } else {
+                this.moveTo(this.targetPos, dt);
+            }
+        } else {
+            // Auto-acquire targets if idle (aggro)
+            if (this.command !== 'move' && this.config.type !== 'capture') {
+                let closest = null;
+                let minDist = 30; // Aggro range
+                
+                // Check units
+                units.forEach(u => {
+                    if (u.faction !== this.faction) {
+                        const d = this.mesh.position.distanceTo(u.mesh.position);
+                        if (d < minDist) { minDist = d; closest = u; }
+                    }
+                });
+                
+                if (closest) this.setTarget(closest);
+            }
+        }
+    }
+
+    moveTo(targetVec, dt) {
+        const dir = new THREE.Vector3().subVectors(targetVec, this.mesh.position).normalize();
+        this.mesh.position.add(dir.multiplyScalar(this.config.speed));
+        this.mesh.lookAt(targetVec);
+    }
+
+    attack(target, game) {
+        if (this.config.type === 'ranged') {
+            game.addProjectile(this.mesh.position.clone().add(new THREE.Vector3(0,1,0)), target.mesh.position.clone(), 0xffff00);
+        } else {
+            // Melee animation bump
+            this.mesh.position.add(this.mesh.getWorldDirection(new THREE.Vector3()).multiplyScalar(1));
+        }
+        target.takeDamage(this.config.dmg);
+    }
+
+    dispose(scene) {
+        scene.remove(this.mesh);
+    }
+}
+
+class Building extends Entity {
+    constructor(x, z, faction, type, scene) {
+        super(x, z, faction, scene);
+        this.type = type;
+        this.config = BUILDING_TYPES[type];
+        this.hp = this.config.hp;
+        this.maxHp = this.config.hp;
+        this.captureProgress = 0; // -100 (P1) to 100 (P2). 0 is Neutral.
+
+        // Visuals
+        const size = type === 'base' ? 8 : 5;
+        const geo = new THREE.BoxGeometry(size, size*2, size);
+        this.mat = new THREE.MeshStandardMaterial({ color: this.getColor(faction) });
+        this.mesh = new THREE.Mesh(geo, this.mat);
+        this.mesh.position.set(x, size, z);
+        this.mesh.castShadow = true;
+        this.mesh.userData.parent = this;
+        scene.add(this.mesh);
+        
+        // Capture Flag / Bar
+        const barBg = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.8), new THREE.MeshBasicMaterial({color:0x000000}));
+        barBg.position.y = size + 2;
+        this.mesh.add(barBg);
+        this.capBar = new THREE.Mesh(new THREE.PlaneGeometry(5.8, 0.6), new THREE.MeshBasicMaterial({color:0xffffff}));
+        this.capBar.position.z = 0.01;
+        barBg.add(this.capBar);
+        
+        // Face camera
+        barBg.rotation.x = -Math.PI/6;
+        barBg.rotation.y = Math.PI/4; // Approximate
+    }
+
+    getColor(faction) {
+        if (faction === 1) return COLORS.P1;
+        if (faction === 2) return COLORS.P2;
+        return COLORS.NEUTRAL;
+    }
+
+    update(dt) {
+        // Natural decay of capture progress if neutral
+        if (this.faction === 0 && Math.abs(this.captureProgress) > 0) {
+            this.captureProgress *= 0.99;
+        }
+        this.updateVisuals();
+    }
+
+    capture(capturerFaction) {
+        // Capturing logic
+        const rate = 2; 
+        
+        if (capturerFaction === 1) {
+            this.captureProgress -= rate; // Move towards -100
+        } else {
+            this.captureProgress += rate; // Move towards 100
+        }
+
+        // Check for flip
+        if (this.captureProgress <= -100) {
+            this.faction = 1;
+            this.captureProgress = -100;
+            return true;
+        } else if (this.captureProgress >= 100) {
+            this.faction = 2;
+            this.captureProgress = 100;
+            return true;
+        } else if (this.faction !== 0 && Math.sign(this.captureProgress) !== (this.faction === 2 ? 1 : -1)) {
+            // Lost control, becomes neutral
+            this.faction = 0;
+        }
+        
+        return false;
+    }
+
+    takeDamage(amount) {
+        this.hp -= amount;
+        if (this.hp <= 0) {
+            // Destroyed buildings become neutral ruins or reset
+            this.faction = 0;
+            this.hp = this.maxHp / 2;
+            this.captureProgress = 0;
+            // Visual flicker
+            this.mesh.material.emissive = new THREE.Color(0xaa4400);
+            setTimeout(() => this.mesh.material.emissive = new THREE.Color(0x000000), 100);
+        }
+    }
+
+    updateVisuals() {
+        this.mat.color.setHex(this.getColor(this.faction));
+        
+        // Update Capture Bar
+        // Map -100...100 to 0...1 visual width, color based on side
+        const totalWidth = 5.8;
+        const pct = this.captureProgress / 100; // -1 to 1
+        
+        this.capBar.scale.x = Math.abs(pct);
+        this.capBar.material.color.setHex(pct < 0 ? COLORS.P1 : COLORS.P2);
+        
+        // If neutral, bar is empty in middle
+        if (this.faction === 0 && Math.abs(pct) < 0.05) {
+            this.capBar.scale.x = 0.01;
+            this.capBar.material.color.setHex(0xffffff);
+        }
+    }
+}
+
+// --- Init Game ---
+const game = new Game();
+
+</script>
+</body>
+</html>
