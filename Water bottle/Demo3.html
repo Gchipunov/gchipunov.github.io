@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic Movable Sloshing Water Bottle</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; cursor: grab; }
+        canvas:active { cursor: grabbing; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Movable Sloshing Bottle<br>Drag bottle to move & slosh water | Drag background to rotate camera</div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        // 1. SCENE SETUP
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x333333);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 5, 14); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ReinhardToneMapping; 
+        renderer.toneMappingExposure = 1.5;
+        document.body.appendChild(renderer.domElement);
+
+        // 2. LIGHTING & ENVIRONMENT
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 2.0);
+        dirLight1.position.set(5, 10, 5);
+        scene.add(dirLight1);
+        const dirLight2 = new THREE.DirectionalLight(0xffffff, 1.0);
+        dirLight2.position.set(-5, 8, 2);
+        scene.add(dirLight2);
+
+        // 3. GEOMETRY GENERATION
+        const points = [];
+        const radiusBase = 1.2;
+        let height = 0;
+
+        // Bottle profile (same as before)
+        points.push(new THREE.Vector2(0, height)); 
+        points.push(new THREE.Vector2(radiusBase * 0.9, height)); height += 0.1;
+        points.push(new THREE.Vector2(radiusBase, height)); height += 0.1;
+        for(let i = 0; i < 5; i++) {
+             points.push(new THREE.Vector2(radiusBase * 0.95, height + 0.1));
+             points.push(new THREE.Vector2(radiusBase, height + 0.3));
+             points.push(new THREE.Vector2(radiusBase * 0.95, height + 0.5));
+             height += 0.5;
+        }
+        const labelStartHeight = height;
+        points.push(new THREE.Vector2(radiusBase * 0.98, height + 0.1));
+        points.push(new THREE.Vector2(radiusBase * 0.98, height + 2.0));
+        height += 2.1;
+        const labelEndHeight = height;
+        for(let i = 0; i < 4; i++) {
+             let t = i / 3; 
+             let currentRad = radiusBase * (1.0 - t * 0.4);
+             points.push(new THREE.Vector2(currentRad * 0.95, height + 0.1));
+             points.push(new THREE.Vector2(currentRad, height + 0.3));
+             points.push(new THREE.Vector2(currentRad * 0.95, height + 0.5));
+             height += 0.5;
+        }
+        points.push(new THREE.Vector2(0.6, height)); height += 0.2;
+        points.push(new THREE.Vector2(0.7, height)); height += 0.1;
+        points.push(new THREE.Vector2(0.7, height)); height += 0.1;
+        points.push(new THREE.Vector2(0.6, height)); height += 0.1;
+        points.push(new THREE.Vector2(0.6, height + 0.5)); 
+        points.push(new THREE.Vector2(0.55, height + 0.5));
+        const topHeight = height + 0.5;
+        points.push(new THREE.Vector2(0.5, topHeight - 0.1)); 
+
+        const bottleGeometry = new THREE.LatheGeometry(points, 128); 
+        
+        // --- MODIFIED WATER GEOMETRY (HALF FULL) ---
+        // Define the height for half full roughly around the middle ribs
+        const waterHalfHeight = 2.5; 
+        const waterRadiusAtHalfHeight = radiusBase * 0.95; // Approx radius there
+
+        const waterPoints = [
+            new THREE.Vector2(0, 0.1), // Bottom center, slightly lifted
+            new THREE.Vector2(radiusBase * 0.85, 0.1), // Bottom corner
+            // Go straight up to half height. We simplify the inside shape for the water volume.
+            new THREE.Vector2(waterRadiusAtHalfHeight, waterHalfHeight) 
+        ];
+        const waterGeometry = new THREE.LatheGeometry(waterPoints, 64);
+        const waterLevelY = waterHalfHeight;
+
+        // 4. SHADER MATERIALS (Same as before)
+        const plasticMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff, metalness: 0.0, roughness: 0.1, transmission: 1.0, 
+            thickness: 0.1, ior: 1.57, side: THREE.DoubleSide,
+            clearcoat: 1.0, clearcoatRoughness: 0.1, envMapIntensity: 1.5
+        });
+
+        const waterMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff, metalness: 0, roughness: 0.02, transmission: 1.0,
+            thickness: 1.5, ior: 1.33, opacity: 1.0, transparent: true,
+            side: THREE.FrontSide, envMapIntensity: 1.2
+        });
+
+        // 5. MESH CREATION
+
+        // Bottle Group - Everything moves together
+        const bottleGroup = new THREE.Group();
+        scene.add(bottleGroup);
+
+        const bottle = new THREE.Mesh(bottleGeometry, plasticMaterial);
+        bottle.castShadow = true;
+        bottleGroup.add(bottle);
+
+        // The Water Mesh Volume
+        const water = new THREE.Mesh(waterGeometry, waterMaterial);
+        // Scale slightly to avoid z-fighting with bottle base
+        water.scale.set(0.99, 1, 0.99); 
+        // Important: Shift water up slightly so its origin is near its center of mass for better rotation
+        water.position.y = 0.05;
+        bottleGroup.add(water);
+
+        // Water Surface Top cap (Modified size and position for half-full)
+        const surfaceGeo = new THREE.CircleGeometry(waterRadiusAtHalfHeight * 0.99, 32);
+        const surfaceMat = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff, transmission: 0.9, roughness: 0.1, ior: 1.33, envMapIntensity: 1.5
+        });
+        const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
+        surface.rotation.x = -Math.PI / 2;
+        surface.position.y = waterLevelY + 0.05; // Match the shifted water volume height
+        bottleGroup.add(surface);
+
+
+        // --- LABEL & CAP (Same as before) ---
+        function createLabelTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 256;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#0065bd'; context.fillRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = '#ffffff'; context.textAlign = 'center';
+            context.font = 'bold 60px Arial, sans-serif'; context.fillText('NIAGARA', canvas.width / 2, 100);
+            context.font = '20px Arial, sans-serif'; context.fillText('Purified Water', canvas.width / 2, 140);
+            context.font = '14px Arial, sans-serif'; context.fillText('Enhanced with minerals for taste', canvas.width / 2, 170);
+            context.beginPath(); context.arc(450, 200, 20, 0, 2 * Math.PI);
+            context.strokeStyle = 'white'; context.lineWidth = 3; context.stroke();
+            context.font = 'bold 24px Arial'; context.fillText('U', 450, 208);
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping; texture.repeat.set(2, 1);
+            return texture;
+        }
+        const labelHeight = labelEndHeight - labelStartHeight - 0.2;
+        const labelGeo = new THREE.CylinderGeometry(radiusBase * 0.99, radiusBase * 0.99, labelHeight, 64, 1, true);
+        const labelMat = new THREE.MeshStandardMaterial({
+            map: createLabelTexture(), roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide, transparent: true, opacity: 0.95
+        });
+        const labelMesh = new THREE.Mesh(labelGeo, labelMat);
+        labelMesh.position.y = labelStartHeight + (labelHeight / 2) + 0.1; 
+        labelMesh.rotation.y = -Math.PI / 2;
+        bottleGroup.add(labelMesh);
+
+        const capGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.5, 32);
+        const capMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0 });
+        const capMesh = new THREE.Mesh(capGeo, capMat);
+        capMesh.position.y = topHeight + 0.25;
+        bottleGroup.add(capMesh);
+
+
+        // 6. SCENE EXTRAS 
+        const gridHelper = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
+        scene.add(gridHelper);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 4, 0); 
+
+        // Center the whole bottle group initially
+        bottleGroup.position.y = -3;
+
+
+        // --- 7. DRAG & DROP IMPLEMENTATION ---
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        // An invisible plane we will drag along
+        const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 3); 
+        const planeIntersect = new THREE.Vector3();
+        const dragOffset = new THREE.Vector3();
+        let isDragging = false;
+
+        function onMouseDown(event) {
+            event.preventDefault();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            // Check if we clicked the bottle
+            const intersects = raycaster.intersectObject(bottleGroup, true);
+
+            if (intersects.length > 0) {
+                // Disable orbit controls while dragging object
+                controls.enabled = false;
+                isDragging = true;
+                
+                // Find where on the invisible floor plane we clicked
+                raycaster.ray.intersectPlane(dragPlane, planeIntersect);
+                // Calculate offset so the bottle doesn't jump to center of mouse
+                dragOffset.subVectors(bottleGroup.position, planeIntersect);
+            }
+        }
+
+        function onMouseMove(event) {
+            event.preventDefault();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (isDragging) {
+                raycaster.setFromCamera(mouse, camera);
+                raycaster.ray.intersectPlane(dragPlane, planeIntersect);
+                // Move bottle to new position minus initial offset
+                bottleGroup.position.addVectors(planeIntersect, dragOffset);
+            }
+        }
+
+        function onMouseUp(event) {
+            isDragging = false;
+            controls.enabled = true; // Re-enable camera rotation
+        }
+
+        renderer.domElement.addEventListener('mousedown', onMouseDown, false);
+        renderer.domElement.addEventListener('mousemove', onMouseMove, false);
+        renderer.domElement.addEventListener('mouseup', onMouseUp, false);
+
+
+        // --- 8. SLOSHING PHYSICS VARIABLES ---
+        let previousPosition = new THREE.Vector3().copy(bottleGroup.position);
+        let bottleVelocity = new THREE.Vector3();
+        // Current tilt of the water
+        let sloshOffset = new THREE.Vector2(0, 0); 
+        // Velocity of the tilt change
+        let sloshVelocity = new THREE.Vector2(0, 0); 
+
+        const tension = 0.15; // How stiff the water "spring" is
+        const damping = 0.92; // How fast the sloshing settles down (closer to 1 = longer slosh)
+        const sensitivity = 15.0; // How much velocity affects tilt
+        const maxTilt = 0.25; // Max radians to tilt (prevents clipping through bottle)
+
+
+        // 9. ANIMATION LOOP
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const currentPosition = bottleGroup.position.clone();
+
+            // --- SLOSH PHYSICS CALCULATION ---
+            // Calculate bottle velocity based on change in position this frame
+            bottleVelocity.subVectors(currentPosition, previousPosition);
+
+            // Target tilt is opposite to velocity (water lags behind)
+            // We ignore Y velocity for now to keep it simple
+            const targetSloshX = -bottleVelocity.z * sensitivity;
+            const targetSloshZ = bottleVelocity.x * sensitivity;
+
+            // Spring physics simulation loop
+            // Calculate acceleration towards target
+            const ax = (targetSloshX - sloshOffset.x) * tension;
+            const az = (targetSloshZ - sloshOffset.y) * tension;
+
+            // Update velocity & apply damping
+            sloshVelocity.x += ax;
+            sloshVelocity.y += az;
+            sloshVelocity.x *= damping;
+            sloshVelocity.y *= damping;
+
+            // Update current tilt offset
+            sloshOffset.x += sloshVelocity.x;
+            sloshOffset.y += sloshVelocity.y;
+
+            // Apply rotation to water mesh and surface mesh.
+            // Clamp values to prevent water escaping the bottle geometry.
+            const finalTiltX = THREE.MathUtils.clamp(sloshOffset.x, -maxTilt, maxTilt);
+            const finalTiltZ = THREE.MathUtils.clamp(sloshOffset.y, -maxTilt, maxTilt);
+
+            // Apply calculated tilt to the water volume
+            water.rotation.x = finalTiltX;
+            water.rotation.z = finalTiltZ;
+
+            // Apply calculated tilt to the surface cap relative to its initial -90deg rotation
+            surface.rotation.x = -Math.PI / 2 + finalTiltX;
+            surface.rotation.z = finalTiltZ;
+
+            // Update previous position for the next frame comparison
+            previousPosition.copy(currentPosition);
+            // ---------------------------------
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
