@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic WebGL Water Bottle based on Photo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Plastic Water Bottle based on Photo reference<br>Drag to rotate | Scroll to zoom</div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+        // 1. SCENE SETUP
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x333333);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 5, 12); // Lower camera angle slightly
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        // Using skewed tone mapping to help blow out highlights on plastic
+        renderer.toneMapping = THREE.ReinhardToneMapping; 
+        renderer.toneMappingExposure = 1.5;
+        document.body.appendChild(renderer.domElement);
+
+        // 2. LIGHTING & ENVIRONMENT
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        // Using a brighter environment to emphasize plastic reflections
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
+        // Add sharp directional lights to mimic the overhead lighting in the photo
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 2.0);
+        dirLight1.position.set(5, 10, 5);
+        scene.add(dirLight1);
+        const dirLight2 = new THREE.DirectionalLight(0xffffff, 1.0);
+        dirLight2.position.set(-5, 8, 2);
+        scene.add(dirLight2);
+
+        // 3. GEOMETRY GENERATION (Complex ribbed profile)
+        const points = [];
+        const radiusBase = 1.2;
+        let height = 0;
+
+        // Bottom Center
+        points.push(new THREE.Vector2(0, height)); 
+        // Bottom Edge
+        points.push(new THREE.Vector2(radiusBase * 0.9, height)); height += 0.1;
+        points.push(new THREE.Vector2(radiusBase, height)); height += 0.1;
+        
+        // Lower Ribs section
+        for(let i = 0; i < 5; i++) {
+             points.push(new THREE.Vector2(radiusBase * 0.95, height + 0.1));
+             points.push(new THREE.Vector2(radiusBase, height + 0.3));
+             points.push(new THREE.Vector2(radiusBase * 0.95, height + 0.5));
+             height += 0.5;
+        }
+
+        // Label Area (Smooth section)
+        const labelStartHeight = height;
+        points.push(new THREE.Vector2(radiusBase * 0.98, height + 0.1));
+        points.push(new THREE.Vector2(radiusBase * 0.98, height + 2.0));
+        height += 2.1;
+        const labelEndHeight = height;
+
+        // Upper shoulder (Tapering ribs)
+        for(let i = 0; i < 4; i++) {
+             let t = i / 3; // taper factor
+             let currentRad = radiusBase * (1.0 - t * 0.4);
+             points.push(new THREE.Vector2(currentRad * 0.95, height + 0.1));
+             points.push(new THREE.Vector2(currentRad, height + 0.3));
+             points.push(new THREE.Vector2(currentRad * 0.95, height + 0.5));
+             height += 0.5;
+        }
+
+        // Neck area
+        points.push(new THREE.Vector2(0.6, height)); height += 0.2;
+        // Neck Ring
+        points.push(new THREE.Vector2(0.7, height)); height += 0.1;
+        points.push(new THREE.Vector2(0.7, height)); height += 0.1;
+        points.push(new THREE.Vector2(0.6, height)); height += 0.1;
+        // Mouth finish
+        points.push(new THREE.Vector2(0.6, height + 0.5)); 
+        points.push(new THREE.Vector2(0.55, height + 0.5));
+        const topHeight = height + 0.5;
+        // Close inside slightly for thickness illusion before capping
+        points.push(new THREE.Vector2(0.5, topHeight - 0.1)); 
+
+        // Increase segments for smoother ribs
+        const bottleGeometry = new THREE.LatheGeometry(points, 128); 
+        
+        // Simplified water geometry (doesn't need complex ribs inside)
+        const waterPoints = [
+            new THREE.Vector2(0, 0.2),
+            new THREE.Vector2(radiusBase*0.9, 0.2),
+            new THREE.Vector2(radiusBase*0.9, labelStartHeight + 1.0) // Filled up to label mid-point
+        ];
+        const waterGeometry = new THREE.LatheGeometry(waterPoints, 64);
+        const waterLevelY = labelStartHeight + 1.0;
+
+        // 4. SHADER MATERIALS
+
+        // Material A: The Plastic Bottle (PET)
+        const plasticMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            metalness: 0.0,
+            roughness: 0.1, // Plastic is fairly smooth but not perfect glass
+            transmission: 1.0, 
+            thickness: 0.1, // Thin plastic walls
+            ior: 1.57,      // IOR of PET plastic
+            side: THREE.DoubleSide,
+            clearcoat: 1.0, // High clearcoat for shiny plastic look
+            clearcoatRoughness: 0.1,
+            envMapIntensity: 1.5
+        });
+
+        // Material B: The Water (Clear)
+        const waterMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,  // Clear water, no blue tint based on photo
+            metalness: 0,
+            roughness: 0.02,
+            transmission: 1.0,
+            thickness: 1.5,   // Volume thickness
+            ior: 1.33,
+            opacity: 1.0,
+            transparent: true,
+            side: THREE.FrontSide,
+            envMapIntensity: 1.2
+        });
+
+        // 5. MESH CREATION
+
+        // Bottle Group
+        const bottleGroup = new THREE.Group();
+        scene.add(bottleGroup);
+
+        // The Bottle Mesh
+        const bottle = new THREE.Mesh(bottleGeometry, plasticMaterial);
+        bottle.castShadow = true;
+        bottleGroup.add(bottle);
+
+        // The Water Mesh
+        const water = new THREE.Mesh(waterGeometry, waterMaterial);
+        // Scale down slightly to prevent Z-fighting with inner bottle wall
+        water.scale.set(0.98, 1, 0.98); 
+        bottleGroup.add(water);
+
+        // Water Surface Top cap
+        const surfaceGeo = new THREE.CircleGeometry(radiusBase * 0.9 * 0.98, 32);
+        const surfaceMat = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff,
+            transmission: 0.9,
+            roughness: 0.1,
+            ior: 1.33,
+            envMapIntensity: 1.5
+        });
+        const surface = new THREE.Mesh(surfaceGeo, surfaceMat);
+        surface.rotation.x = -Math.PI / 2;
+        surface.position.y = waterLevelY;
+        bottleGroup.add(surface);
+
+
+        // --- GENERATE LABEL TEXTURE ---
+        function createLabelTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const context = canvas.getContext('2d');
+
+            // Blue background (matching the Niagara label color)
+            context.fillStyle = '#0065bd'; 
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            // White text elements
+            context.fillStyle = '#ffffff';
+            context.textAlign = 'center';
+            
+            // Main brand text simulation
+            context.font = 'bold 60px Arial, sans-serif';
+            context.fillText('NIAGARA', canvas.width / 2, 100);
+            
+            // Smaller text simulation
+            context.font = '20px Arial, sans-serif';
+            context.fillText('Purified Water', canvas.width / 2, 140);
+            context.font = '14px Arial, sans-serif';
+            context.fillText('Enhanced with minerals for taste', canvas.width / 2, 170);
+
+            // Little 'U' symbol roughly where it is in photo
+            context.beginPath();
+            context.arc(450, 200, 20, 0, 2 * Math.PI);
+            context.strokeStyle = 'white';
+            context.lineWidth = 3;
+            context.stroke();
+            context.font = 'bold 24px Arial';
+            context.fillText('U', 450, 208);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.repeat.set(2, 1); // Repeat twice around the bottle
+            return texture;
+        }
+
+        // Label Mesh
+        const labelHeight = labelEndHeight - labelStartHeight - 0.2;
+        // Cylinder sleeve slightly larger than bottle
+        const labelGeo = new THREE.CylinderGeometry(radiusBase * 0.99, radiusBase * 0.99, labelHeight, 64, 1, true);
+        const labelMat = new THREE.MeshStandardMaterial({
+            map: createLabelTexture(),
+            roughness: 0.6, // Paper/plastic label texture is rougher
+            metalness: 0.0,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.95 // Slight transparency so it looks glued on
+        });
+        const labelMesh = new THREE.Mesh(labelGeo, labelMat);
+        // Position in the middle of the smooth section
+        labelMesh.position.y = labelStartHeight + (labelHeight / 2) + 0.1; 
+        // Rotate so text faces front
+        labelMesh.rotation.y = -Math.PI / 2;
+        bottleGroup.add(labelMesh);
+
+        // White Cap Mesh
+        const capGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.5, 32);
+        const capMat = new THREE.MeshStandardMaterial({ 
+            color: 0xffffff, 
+            roughness: 0.5, // Matte plastic cap
+            metalness: 0
+        });
+        const capMesh = new THREE.Mesh(capGeo, capMat);
+        capMesh.position.y = topHeight + 0.25;
+        bottleGroup.add(capMesh);
+
+
+        // 6. SCENE EXTRAS 
+        // Darker floor to contrast the bright plastic
+        const gridHelper = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
+        scene.add(gridHelper);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 4, 0); // Focus controls on the middle of bottle
+
+        // Center the whole bottle group
+        bottleGroup.position.y = -3;
+
+
+        // 7. ANIMATION LOOP
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Slow rotation to show off reflections
+            bottleGroup.rotation.y += 0.003;
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
