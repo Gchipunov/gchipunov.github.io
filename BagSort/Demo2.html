@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shipping Logistics: Pack the Bags</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #222; 
+            /* CRITICAL FOR MOBILE: Prevents scrolling while dragging items */
+            touch-action: none; 
+        }
+        
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px; /* improved layout for mobile */
+            color: white;
+            pointer-events: none;
+            user-select: none; /* Prevents text highlighting on touch */
+        }
+
+        h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }
+        p { margin: 5px 0; font-size: 14px; opacity: 0.8; }
+        
+        #score-board {
+            margin-top: 20px;
+            font-size: 30px;
+            font-weight: bold;
+            color: #4caf50;
+        }
+
+        #feedback {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0px 0px 10px black;
+            opacity: 0;
+            transition: opacity 0.5s;
+            pointer-events: none;
+            white-space: nowrap; /* Keeps text on one line */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Shipping Station 3D</h1>
+        <p>Drag <b>RED CUBES</b> to <b>BOX</b></p>
+        <p>Drag <b>BLUE SPHERES</b> to <b>JIFFY</b></p>
+        <div id="score-board">Score: 0</div>
+    </div>
+
+    <div id="feedback">Generic Feedback</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- GLOBAL VARIABLES ---
+        let scene, camera, renderer;
+        let items = [];
+        let score = 0;
+        
+        // Interaction variables
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let selectedObject = null;
+        let planeIntersector = new THREE.Plane();
+        let pNormal = new THREE.Vector3(0, 1, 0); 
+        let shift = new THREE.Vector3();
+
+        // Containers
+        let boxContainer, jiffyContainer;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xa0a0a0);
+            scene.fog = new THREE.Fog(0xa0a0a0, 10, 50);
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            adjustCameraForMobile(); // Set initial position based on screen width
+            camera.lookAt(0, 0, 0);
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            // FIX: Handle High DPI (Retina) screens for sharp text/edges
+            renderer.setPixelRatio(window.devicePixelRatio); 
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 4. Lighting
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+            hemiLight.position.set(0, 20, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024; // Better shadow quality
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            // 5. Environment (Table)
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(50, 50),
+                new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false })
+            );
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            // Grid helper
+            const grid = new THREE.GridHelper(50, 50, 0x000000, 0x000000);
+            grid.material.opacity = 0.2;
+            grid.material.transparent = true;
+            scene.add(grid);
+
+            createContainers();
+            spawnItems(5); 
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            
+            // Pointer events work for both Mouse and Touch
+            // We attach to the renderer.domElement to ensure we only catch events on the canvas
+            renderer.domElement.addEventListener('pointermove', onPointerMove);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            renderer.domElement.addEventListener('pointerup', onPointerUp);
+            // Handle case where finger slides off screen
+            renderer.domElement.addEventListener('pointercancel', onPointerUp); 
+        }
+
+        // --- CREATION FUNCTIONS ---
+
+        function createContainers() {
+            // 1. The Shipping Box
+            const boxGeo = new THREE.BoxGeometry(4, 3, 4);
+            const boxMat = new THREE.MeshPhongMaterial({ 
+                color: 0x8B4513, 
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.8
+            });
+            boxContainer = new THREE.Mesh(boxGeo, boxMat);
+            boxContainer.position.set(-5, 1.5, 0);
+            boxContainer.receiveShadow = true;
+            
+            const boxLabel = createLabel("BOX");
+            boxLabel.position.y = 2.5; // Raised slightly
+            boxContainer.add(boxLabel);
+
+            scene.add(boxContainer);
+
+            // 2. The Jiffy Bag
+            const jiffyGeo = new THREE.BoxGeometry(3, 0.5, 4); 
+            const jiffyMat = new THREE.MeshPhongMaterial({ 
+                color: 0xFFD700, 
+                side: THREE.DoubleSide
+            });
+            jiffyContainer = new THREE.Mesh(jiffyGeo, jiffyMat);
+            jiffyContainer.position.set(5, 0.25, 0);
+            jiffyContainer.receiveShadow = true;
+
+            const jiffyLabel = createLabel("JIFFY");
+            jiffyLabel.position.y = 1.5; // Raised slightly
+            jiffyContainer.add(jiffyLabel);
+
+            scene.add(jiffyContainer);
+        }
+
+        function createLabel(text) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.font = "bold 60px Arial";
+            ctx.textAlign = "center";
+            // Add a black outline for better visibility against bright backgrounds
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = 4;
+            ctx.strokeText(text, 128, 80);
+            ctx.fillText(text, 128, 80);
+            
+            const tex = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(4, 2, 1);
+            return sprite;
+        }
+
+        function spawnItems(count) {
+            for (let i = 0; i < count; i++) {
+                const isCube = Math.random() > 0.5;
+                let geometry, material, type;
+
+                if (isCube) {
+                    geometry = new THREE.BoxGeometry(1, 1, 1);
+                    material = new THREE.MeshPhongMaterial({ color: 0xff3333 }); 
+                    type = 'box_item';
+                } else {
+                    geometry = new THREE.SphereGeometry(0.6, 32, 16);
+                    material = new THREE.MeshPhongMaterial({ color: 0x3333ff }); 
+                    type = 'jiffy_item';
+                }
+
+                const item = new THREE.Mesh(geometry, material);
+                
+                // Keep items closer to center initially so they fit on mobile screens
+                item.position.x = (Math.random() - 0.5) * 3;
+                item.position.z = (Math.random() - 0.5) * 3 + 5; 
+                item.position.y = 1; 
+
+                item.castShadow = true;
+                item.userData = { type: type, isDraggable: true };
+                
+                items.push(item);
+                scene.add(item);
+            }
+        }
+
+        // --- INTERACTION LOGIC ---
+
+        function onPointerMove(event) {
+            // Prevent default browser behavior explicitly (extra safety)
+            event.preventDefault(); 
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (selectedObject) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = new THREE.Vector3();
+                raycaster.ray.intersectPlane(planeIntersector, intersects);
+                selectedObject.position.copy(intersects.sub(shift));
+            }
+        }
+
+        function onPointerDown(event) {
+            event.preventDefault();
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(items);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if(object.userData.isDraggable) {
+                    selectedObject = object;
+                    
+                    pNormal.copy(camera.position).sub(object.position).normalize();
+                    pNormal.set(0, 1, 0); 
+                    planeIntersector.setFromNormalAndCoplanarPoint(pNormal, object.position);
+
+                    const point = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(planeIntersector, point);
+                    shift.subVectors(point, object.position);
+                    
+                    selectedObject.position.y = 2;
+                    // Provide scale feedback when touched
+                    selectedObject.scale.set(1.1, 1.1, 1.1);
+                }
+            }
+        }
+
+        function onPointerUp(event) {
+            if(event) event.preventDefault();
+
+            if (selectedObject) {
+                checkDropZone(selectedObject);
+                // Reset scale and height if not destroyed
+                if(selectedObject) {
+                    selectedObject.position.y = 0.5; 
+                    selectedObject.scale.set(1, 1, 1);
+                    selectedObject = null;
+                }
+            }
+        }
+
+        function checkDropZone(item) {
+            const distToBox = item.position.distanceTo(new THREE.Vector3(-5, item.position.y, 0));
+            const distToJiffy = item.position.distanceTo(new THREE.Vector3(5, item.position.y, 0));
+
+            const limit = 3.0; // Increased tolerance slightly for touch accuracy
+
+            if (distToBox < limit) {
+                if (item.userData.type === 'box_item') {
+                    processSuccess(item, "Correct Box!");
+                } else {
+                    processFail("Wrong Container!");
+                }
+            } else if (distToJiffy < limit) {
+                if (item.userData.type === 'jiffy_item') {
+                    processSuccess(item, "Correct Jiffy!");
+                } else {
+                    processFail("Wrong Container!");
+                }
+            }
+        }
+
+        function processSuccess(item, msg) {
+            showFeedback(msg, '#4caf50');
+            score += 100;
+            document.getElementById('score-board').innerText = "Score: " + score;
+            
+            scene.remove(item);
+            items = items.filter(i => i !== item);
+            
+            setTimeout(() => spawnItems(1), 500);
+            
+            // If we successfully removed it, set selectedObject to null immediately
+            if(selectedObject === item) selectedObject = null;
+        }
+
+        function processFail(msg) {
+            showFeedback(msg, '#ff3333');
+            score -= 50;
+            document.getElementById('score-board').innerText = "Score: " + score;
+        }
+
+        function showFeedback(text, color) {
+            const el = document.getElementById('feedback');
+            el.innerText = text;
+            el.style.color = color;
+            el.style.opacity = 1;
+            setTimeout(() => { el.style.opacity = 0; }, 1000);
+        }
+
+        // --- RESPONSIVE LOGIC ---
+
+        function adjustCameraForMobile() {
+            // If screen is portrait (narrower than tall), pull camera back
+            if (window.innerWidth < window.innerHeight) {
+                camera.position.set(0, 15, 25); // Further away
+            } else {
+                camera.position.set(0, 10, 15); // Standard
+            }
+            camera.lookAt(0, 0, 0);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            adjustCameraForMobile(); // Re-adjust on rotation
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
