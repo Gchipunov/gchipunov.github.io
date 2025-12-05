@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Shipping Logistics: Pack the Bags</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #222; }
+        
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none; /* Let clicks pass through to canvas */
+        }
+
+        h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; }
+        p { margin: 5px 0; font-size: 14px; opacity: 0.8; }
+        
+        #score-board {
+            margin-top: 20px;
+            font-size: 30px;
+            font-weight: bold;
+            color: #4caf50;
+        }
+
+        #feedback {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0px 0px 10px black;
+            opacity: 0;
+            transition: opacity 0.5s;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Shipping Station 3D</h1>
+        <p>drag <b>RED CUBES</b> into the <b>BOX</b></p>
+        <p>drag <b>BLUE SPHERES</b> into the <b>JIFFY BAG</b></p>
+        <div id="score-board">Score: 0</div>
+    </div>
+
+    <div id="feedback">Generic Feedback</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- GLOBAL VARIABLES ---
+        let scene, camera, renderer;
+        let items = [];
+        let score = 0;
+        
+        // Interaction variables
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let selectedObject = null;
+        let planeIntersector = new THREE.Plane();
+        let pNormal = new THREE.Vector3(0, 1, 0); // Plane facing up
+        let shift = new THREE.Vector3();
+
+        // Containers
+        let boxContainer, jiffyContainer;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xa0a0a0);
+            scene.fog = new THREE.Fog(0xa0a0a0, 10, 50);
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 10, 15);
+            camera.lookAt(0, 0, 0);
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 4. Lighting
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+            hemiLight.position.set(0, 20, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.top = 10;
+            dirLight.shadow.camera.bottom = -10;
+            dirLight.shadow.camera.left = -10;
+            dirLight.shadow.camera.right = 10;
+            scene.add(dirLight);
+
+            // 5. Environment (Table)
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(50, 50),
+                new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false })
+            );
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            // Grid helper
+            const grid = new THREE.GridHelper(50, 50, 0x000000, 0x000000);
+            grid.material.opacity = 0.2;
+            grid.material.transparent = true;
+            scene.add(grid);
+
+            createContainers();
+            spawnItems(5); // Start with 5 items
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerdown', onPointerDown);
+            document.addEventListener('pointerup', onPointerUp);
+        }
+
+        // --- CREATION FUNCTIONS ---
+
+        function createContainers() {
+            // 1. The Shipping Box (Left side)
+            // Visuals: Open topped box using 5 planes or a hollow geometry logic
+            const boxGeo = new THREE.BoxGeometry(4, 3, 4);
+            const boxMat = new THREE.MeshPhongMaterial({ 
+                color: 0x8B4513, // Cardboard brown
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.8
+            });
+            boxContainer = new THREE.Mesh(boxGeo, boxMat);
+            boxContainer.position.set(-5, 1.5, 0);
+            boxContainer.receiveShadow = true;
+            
+            // Visual Label
+            const boxLabel = createLabel("BOX");
+            boxLabel.position.y = 2;
+            boxContainer.add(boxLabel);
+
+            scene.add(boxContainer);
+
+            // 2. The Jiffy Bag (Right side)
+            // Visuals: Flatter, whitish/yellow
+            const jiffyGeo = new THREE.BoxGeometry(3, 0.5, 4); // Flatter
+            const jiffyMat = new THREE.MeshPhongMaterial({ 
+                color: 0xFFD700, // Gold/Yellow
+                side: THREE.DoubleSide
+            });
+            jiffyContainer = new THREE.Mesh(jiffyGeo, jiffyMat);
+            jiffyContainer.position.set(5, 0.25, 0);
+            jiffyContainer.receiveShadow = true;
+
+            const jiffyLabel = createLabel("JIFFY");
+            jiffyLabel.position.y = 1;
+            jiffyContainer.add(jiffyLabel);
+
+            scene.add(jiffyContainer);
+        }
+
+        function createLabel(text) {
+            // Simple canvas texture for text
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.font = "bold 60px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText(text, 128, 80);
+            
+            const tex = new THREE.CanvasTexture(canvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: tex });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(4, 2, 1);
+            return sprite;
+        }
+
+        function spawnItems(count) {
+            for (let i = 0; i < count; i++) {
+                const isCube = Math.random() > 0.5;
+                let geometry, material, type;
+
+                if (isCube) {
+                    // Box Item
+                    geometry = new THREE.BoxGeometry(1, 1, 1);
+                    material = new THREE.MeshPhongMaterial({ color: 0xff3333 }); // Red
+                    type = 'box_item';
+                } else {
+                    // Jiffy Item (Sphere)
+                    geometry = new THREE.SphereGeometry(0.6, 32, 16);
+                    material = new THREE.MeshPhongMaterial({ color: 0x3333ff }); // Blue
+                    type = 'jiffy_item';
+                }
+
+                const item = new THREE.Mesh(geometry, material);
+                
+                // Random position in the center
+                item.position.x = (Math.random() - 0.5) * 4;
+                item.position.z = (Math.random() - 0.5) * 4 + 4; // Closer to camera
+                item.position.y = 1; 
+
+                item.castShadow = true;
+                item.userData = { type: type, isDraggable: true }; // Store data
+                
+                items.push(item);
+                scene.add(item);
+            }
+        }
+
+        // --- INTERACTION LOGIC ---
+
+        function onPointerMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if (selectedObject) {
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = new THREE.Vector3();
+                raycaster.ray.intersectPlane(planeIntersector, intersects);
+                // Move object
+                selectedObject.position.copy(intersects.sub(shift));
+            }
+        }
+
+        function onPointerDown(event) {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(items);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if(object.userData.isDraggable) {
+                    selectedObject = object;
+                    
+                    // Create an invisible plane at the object's height to drag along
+                    pNormal.copy(camera.position).sub(object.position).normalize(); // Billboarding behavior
+                    pNormal.set(0, 1, 0); // Lock drag to horizontal plane
+                    planeIntersector.setFromNormalAndCoplanarPoint(pNormal, object.position);
+
+                    const point = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(planeIntersector, point);
+                    shift.subVectors(point, object.position);
+                    
+                    // Lift it up slightly
+                    selectedObject.position.y = 2;
+                }
+            }
+        }
+
+        function onPointerUp() {
+            if (selectedObject) {
+                // Check where we dropped it
+                checkDropZone(selectedObject);
+                selectedObject.position.y = 0.5; // Reset height if not destroyed
+                selectedObject = null;
+            }
+        }
+
+        function checkDropZone(item) {
+            // Simple distance check (AABB logic is better for production, radius is fine here)
+            
+            // Box Zone (-5, 0, 0)
+            const distToBox = item.position.distanceTo(new THREE.Vector3(-5, item.position.y, 0));
+            // Jiffy Zone (5, 0, 0)
+            const distToJiffy = item.position.distanceTo(new THREE.Vector3(5, item.position.y, 0));
+
+            const limit = 2.5; // Radius of acceptance
+
+            if (distToBox < limit) {
+                if (item.userData.type === 'box_item') {
+                    processSuccess(item, "Correct Box!");
+                } else {
+                    processFail("Wrong Container!");
+                }
+            } else if (distToJiffy < limit) {
+                if (item.userData.type === 'jiffy_item') {
+                    processSuccess(item, "Correct Jiffy!");
+                } else {
+                    processFail("Wrong Container!");
+                }
+            }
+        }
+
+        function processSuccess(item, msg) {
+            showFeedback(msg, '#4caf50');
+            score += 100;
+            document.getElementById('score-board').innerText = "Score: " + score;
+            
+            // Remove item
+            scene.remove(item);
+            items = items.filter(i => i !== item);
+            
+            // Respawn a new one to keep game going
+            setTimeout(() => spawnItems(1), 500);
+        }
+
+        function processFail(msg) {
+            showFeedback(msg, '#ff3333');
+            score -= 50;
+            document.getElementById('score-board').innerText = "Score: " + score;
+        }
+
+        function showFeedback(text, color) {
+            const el = document.getElementById('feedback');
+            el.innerText = text;
+            el.style.color = color;
+            el.style.opacity = 1;
+            setTimeout(() => { el.style.opacity = 0; }, 1000);
+        }
+
+        // --- ANIMATION LOOP ---
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
