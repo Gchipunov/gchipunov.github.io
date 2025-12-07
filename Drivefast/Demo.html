@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Busy City Driving Game</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+    <script src="https://threejs.org/build/three.js"></script>
+</head>
+<body>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(10, 20, 10);
+        scene.add(directionalLight);
+
+        // Road geometry (a long plane for the street)
+        const roadGeometry = new THREE.PlaneGeometry(20, 200);
+        const roadMaterial = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
+        const road = new THREE.Mesh(roadGeometry, roadMaterial);
+        road.rotation.x = -Math.PI / 2;
+        scene.add(road);
+
+        // Lane markings (white lines)
+        for (let i = -1; i <= 1; i += 2) {
+            const lineGeometry = new THREE.PlaneGeometry(0.5, 200);
+            const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+            const line = new THREE.Mesh(lineGeometry, lineMaterial);
+            line.rotation.x = -Math.PI / 2;
+            line.position.x = i * 4;
+            scene.add(line);
+        }
+
+        // Buildings (simple boxes on sides)
+        for (let i = 0; i < 10; i++) {
+            const buildingGeometry = new THREE.BoxGeometry(5, Math.random() * 10 + 5, 5);
+            const buildingMaterial = new THREE.MeshBasicMaterial({ color: 0x888888 });
+            const buildingLeft = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            buildingLeft.position.set(-12, buildingGeometry.parameters.height / 2, -i * 20);
+            scene.add(buildingLeft);
+
+            const buildingRight = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            buildingRight.position.set(12, buildingGeometry.parameters.height / 2, -i * 20);
+            scene.add(buildingRight);
+        }
+
+        // Player car
+        const carGeometry = new THREE.BoxGeometry(2, 1, 4);
+        const carMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const playerCar = new THREE.Mesh(carGeometry, carMaterial);
+        playerCar.position.y = 0.5;
+        playerCar.position.z = 0;
+        playerCar.position.x = 0; // Middle lane
+        scene.add(playerCar);
+
+        // AI cars (fast moving)
+        const aiCars = [];
+        for (let i = 0; i < 5; i++) {
+            const aiCarGeometry = new THREE.BoxGeometry(2, 1, 4);
+            const aiCarMaterial = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+            const aiCar = new THREE.Mesh(aiCarGeometry, aiCarMaterial);
+            aiCar.position.y = 0.5;
+            aiCar.position.z = -20 - i * 30;
+            aiCar.position.x = (Math.random() > 0.5 ? -4 : 4); // Left or right lane
+            aiCar.speed = Math.random() * 2 + 3; // Fast speeds
+            scene.add(aiCar);
+            aiCars.push(aiCar);
+        }
+
+        // Camera setup (third-person view)
+        camera.position.set(0, 5, 10);
+        camera.lookAt(playerCar.position);
+
+        // Controls
+        const keys = {};
+        document.addEventListener('keydown', (e) => keys[e.key] = true);
+        document.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // Game variables
+        let playerSpeed = 0;
+        const maxSpeed = 5;
+        const acceleration = 0.1;
+        const deceleration = 0.05;
+        const steeringSpeed = 0.1;
+
+        // Intersection for left turn (simple stop area)
+        const intersectionZ = -100;
+        const drivewayGeometry = new THREE.PlaneGeometry(5, 5);
+        const drivewayMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
+        const driveway = new THREE.Mesh(drivewayGeometry, drivewayMaterial);
+        driveway.rotation.x = -Math.PI / 2;
+        driveway.position.set(-8, 0, intersectionZ);
+        scene.add(driveway);
+
+        // Risky right turn area
+        const rightTurnZ = -150;
+        // Oncoming traffic for risky right turn
+        const oncomingCars = [];
+        for (let i = 0; i < 3; i++) {
+            const oncomingCar = new THREE.Mesh(carGeometry, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+            oncomingCar.position.y = 0.5;
+            oncomingCar.position.z = rightTurnZ + 20 + i * 30;
+            oncomingCar.position.x = 4; // Right lane oncoming
+            oncomingCar.speed = - (Math.random() * 2 + 3); // Coming towards player
+            scene.add(oncomingCar);
+            oncomingCars.push(oncomingCar);
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Player movement
+            if (keys['ArrowUp']) {
+                playerSpeed = Math.min(playerSpeed + acceleration, maxSpeed);
+            } else if (keys['ArrowDown']) {
+                playerSpeed = Math.max(playerSpeed - acceleration, -maxSpeed / 2);
+            } else {
+                playerSpeed += (playerSpeed > 0 ? -deceleration : deceleration);
+                if (Math.abs(playerSpeed) < deceleration) playerSpeed = 0;
+            }
+
+            playerCar.position.z -= playerSpeed; // Move forward (negative z)
+
+            // Steering
+            if (keys['ArrowLeft']) {
+                playerCar.position.x -= steeringSpeed;
+            }
+            if (keys['ArrowRight']) {
+                playerCar.position.x += steeringSpeed;
+            }
+
+            // Clamp player to road
+            playerCar.position.x = Math.max(-6, Math.min(6, playerCar.position.x));
+
+            // AI cars movement (fast and risky)
+            aiCars.forEach(car => {
+                car.position.z -= car.speed; // Move forward faster than player potentially
+                if (car.position.z < -200) {
+                    car.position.z = 50; // Reset to front
+                }
+            });
+
+            // Oncoming cars for risky right
+            oncomingCars.forEach(car => {
+                car.position.z += car.speed; // Move towards player
+                if (car.position.z > 50) {
+                    car.position.z = rightTurnZ - 50; // Reset
+                }
+            });
+
+            // Camera follow player
+            camera.position.set(playerCar.position.x, playerCar.position.y + 5, playerCar.position.z + 10);
+            camera.lookAt(playerCar.position.x, playerCar.position.y, playerCar.position.z - 10);
+
+            // Simple collision detection (for game over, alert)
+            aiCars.forEach(car => {
+                if (Math.abs(car.position.z - playerCar.position.z) < 4 &&
+                    Math.abs(car.position.x - playerCar.position.x) < 2) {
+                    alert('Collision! Game Over.');
+                    playerSpeed = 0;
+                }
+            });
+            oncomingCars.forEach(car => {
+                if (Math.abs(car.position.z - playerCar.position.z) < 4 &&
+                    Math.abs(car.position.x - playerCar.position.x) < 2) {
+                    alert('Collision! Game Over.');
+                    playerSpeed = 0;
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
