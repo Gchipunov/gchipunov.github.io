@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>XPBD Exploding Softbody (Mobile Optimized)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; color: white; font-family: sans-serif; }
+        #canvas-container { 
+            width: 100vw; height: 100vh; 
+            touch-action: none; /* Prevents scrolling on mobile while rotating */
+        }
+        #ui {
+            position: absolute; top: 20px; left: 20px;
+            background: rgba(0, 0, 0, 0.8); padding: 15px; border-radius: 8px;
+            pointer-events: none; user-select: none;
+            backdrop-filter: blur(5px);
+            max-width: 300px;
+        }
+        button {
+            pointer-events: auto; padding: 12px 20px;
+            background: #ff4444; color: white; border: none;
+            border-radius: 4px; font-weight: bold; cursor: pointer;
+            font-size: 16px; margin-top: 10px; width: 100%;
+        }
+        button:hover { background: #ff6666; }
+        button:active { transform: scale(0.98); }
+        .slider-container { margin-bottom: 10px; pointer-events: auto; }
+        label { display: block; margin-bottom: 5px; font-size: 14px;}
+        input { width: 100%; height: 20px; }
+        
+        /* Mobile adjustments */
+        @media (max-width: 600px) {
+            #ui { left: 10px; right: 10px; top: 10px; width: auto; max-width: none; }
+            h3 { margin-top: 0; font-size: 1.1rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h3>XPBD Volume Constraint</h3>
+    <div class="slider-container">
+        <label>Pressure (Target Volume)</label>
+        <input type="range" id="pressureRange" min="1.0" max="6.0" step="0.1" value="1.0">
+    </div>
+    <div id="stats" style="font-family: monospace; font-size: 12px; margin-bottom: 5px;">Vertices: 0</div>
+    <button id="explodeBtn">💥 EXPLODE</button>
+    <button id="resetBtn" style="background: #444; margin-top: 5px;">Reset Simulation</button>
+</div>
+
+<div id="canvas-container"></div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+
+// --- CONFIGURATION ---
+const FIXED_STEP = 1/60; // Fixed physics timestep
+const SUBSTEPS = 5; // Reduced slightly for Mobile CPU performance
+const TEAR_THRESHOLD = 3.0; // Stretch ratio before snapping
+
+// --- PHYSICS STATE ---
+let particles = []; 
+let constraints = []; 
+let faces = []; 
+let targetVolumeScale = 1.0;
+let initialVolume = 0;
+let meshRef = null;
+
+// --- THREE.JS SETUP ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a1a);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 2, 8);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setSize(window.innerWidth, window.innerHeight);
+// OPTIMIZATION: Limit pixel ratio for mobile (saves battery and GPU)
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+
+// Lights
+const ambientLight = new THREE.AmbientLight(0x404040, 2.0);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.5);
+dirLight.position.set(5, 10, 7);
+dirLight.castShadow = true;
+// OPTIMIZATION: Smaller shadow map for mobile
+dirLight.shadow.mapSize.width = 1024;
+dirLight.shadow.mapSize.height = 1024;
+scene.add(dirLight);
+
+// Floor
+const floorGeo = new THREE.PlaneGeometry(30, 30);
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// --- XPBD MATH ---
+
+function getVolume() {
+    let vol = 0;
+    // Volume = 1/6 * sum( p1 . (p2 x p3) )
+    for (let f of faces) {
+        const p1 = particles[f[0]];
+        const p2 = particles[f[1]];
+        const p3 = particles[f[2]];
+
+        const cx = p2.y * p3.z - p2.z * p3.y;
+        const cy = p2.z * p3.x - p2.x * p3.z;
+        const cz = p2.x * p3.y - p2.y * p3.x;
+
+        vol += p1.x * cx + p1.y * cy + p1.z * cz;
+    }
+    return vol / 6.0;
+}
+
+function solveVolumeConstraint(dt) {
+    const currentVol = getVolume();
+    const restVol = initialVolume * targetVolumeScale;
+    let C = currentVol - restVol;
+    
+    // XPBD Compliance: alpha = 0 means perfectly rigid constraint. 
+    // We add small compliance to make it behave like gas.
+    const alpha = 0.00001 / (dt * dt); 
+    
+    const grads = new Float32Array(particles.length * 3).fill(0);
+    let sumGradSq = 0;
+
+    for (let f of faces) {
+        const id1 = f[0], id2 = f[1], id3 = f[2];
+        const p1 = particles[id1], p2 = particles[id2], p3 = particles[id3];
+
+        // Gradient is Area Normal / 3 (distributed to vertices)
+        // Effectively: (p2 x p3) / 6 etc.
+        
+        const n1x = (p2.y * p3.z - p2.z * p3.y) / 6;
+        const n1y = (p2.z * p3.x - p2.x * p3.z) / 6;
+        const n1z = (p2.x * p3.y - p2.y * p3.x) / 6;
+
+        const n2x = (p3.y * p1.z - p3.z * p1.y) / 6;
+        const n2y = (p3.z * p1.x - p3.x * p1.z) / 6;
+        const n2z = (p3.x * p1.y - p3.y * p1.x) / 6;
+
+        const n3x = (p1.y * p2.z - p1.z * p2.y) / 6;
+        const n3y = (p1.z * p2.x - p1.x * p2.z) / 6;
+        const n3z = (p1.x * p2.y - p1.y * p2.x) / 6;
+
+        grads[id1 * 3] += n1x; grads[id1 * 3 + 1] += n1y; grads[id1 * 3 + 2] += n1z;
+        grads[id2 * 3] += n2x; grads[id2 * 3 + 1] += n2y; grads[id2 * 3 + 2] += n2z;
+        grads[id3 * 3] += n3x; grads[id3 * 3 + 1] += n3y; grads[id3 * 3 + 2] += n3z;
+    }
+
+    for (let i = 0; i < particles.length; i++) {
+        if (particles[i].invMass === 0) continue;
+        const gx = grads[i*3], gy = grads[i*3+1], gz = grads[i*3+2];
+        sumGradSq += particles[i].invMass * (gx*gx + gy*gy + gz*gz);
+    }
+
+    if (sumGradSq < 1e-6) return;
+
+    const lambda = -C / (sumGradSq + alpha);
+
+    for (let i = 0; i < particles.length; i++) {
+        if (particles[i].invMass === 0) continue;
+        const w = particles[i].invMass;
+        particles[i].x += lambda * w * grads[i*3];
+        particles[i].y += lambda * w * grads[i*3+1];
+        particles[i].z += lambda * w * grads[i*3+2];
+    }
+}
+
+function solveDistanceConstraints(dt) {
+    for (let i = constraints.length - 1; i >= 0; i--) {
+        const c = constraints[i];
+        const p1 = particles[c.p1];
+        const p2 = particles[c.p2];
+
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dz = p2.z - p1.z;
+        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+        if (dist === 0) continue;
+
+        // TEARING / EXPLOSION LOGIC
+        if (dist > c.restLen * TEAR_THRESHOLD) {
+            constraints.splice(i, 1); 
+            continue;
+        }
+
+        const correction = (dist - c.restLen) / dist;
+        const w1 = p1.invMass;
+        const w2 = p2.invMass;
+        const wSum = w1 + w2;
+        
+        if (wSum === 0) continue;
+
+        // "Skin" stiffness. 
+        // We use alpha=0 (infinite stiffness) for the skin, relying on iterations.
+        const px = dx * correction * (w1 / wSum);
+        const py = dy * correction * (w1 / wSum);
+        const pz = dz * correction * (w1 / wSum);
+        
+        const qx = dx * correction * (w2 / wSum);
+        const qy = dy * correction * (w2 / wSum);
+        const qz = dz * correction * (w2 / wSum);
+
+        p1.x += px; p1.y += py; p1.z += pz;
+        p2.x -= qx; p2.y -= qy; p2.z -= qz;
+    }
+}
+
+function updatePhysics(dt) {
+    const subDt = dt / SUBSTEPS;
+
+    for (let s = 0; s < SUBSTEPS; s++) {
+        // 1. Prediction & Gravity
+        for (let p of particles) {
+            if (p.invMass === 0) continue;
+
+            const vy = (p.y - p.oldY) / subDt + (-9.8 * subDt);
+            const vx = (p.x - p.oldX) / subDt;
+            const vz = (p.z - p.oldZ) / subDt;
+
+            p.oldX = p.x; p.oldY = p.y; p.oldZ = p.z;
+
+            // Damping (Air resistance)
+            p.x += vx * subDt * 0.99;
+            p.y += vy * subDt * 0.99;
+            p.z += vz * subDt * 0.99;
+
+            // Floor Collision
+            if (p.y < -2) {
+                p.y = -2;
+                // Friction
+                const frict = 0.9;
+                p.oldX += (p.x - p.oldX) * (1 - frict);
+                p.oldZ += (p.z - p.oldZ) * (1 - frict);
+            }
+        }
+
+        // 2. Constraints
+        solveVolumeConstraint(subDt);
+        solveDistanceConstraints(subDt);
+    }
+}
+
+function syncMesh() {
+    if(!meshRef) return;
+    const positions = meshRef.geometry.attributes.position.array;
+    for (let i = 0; i < particles.length; i++) {
+        positions[i * 3] = particles[i].x;
+        positions[i * 3 + 1] = particles[i].y;
+        positions[i * 3 + 2] = particles[i].z;
+    }
+    meshRef.geometry.attributes.position.needsUpdate = true;
+    meshRef.geometry.computeVertexNormals();
+}
+
+// --- INITIALIZATION ---
+
+function initPhysicsMesh(inputGeo) {
+    // Cleanup previous if exists
+    if(meshRef) {
+        scene.remove(meshRef);
+        meshRef.geometry.dispose();
+        meshRef.material.dispose();
+    }
+
+    // Merge vertices to ensure watertight mesh (Crucial for Volume)
+    inputGeo.deleteAttribute('normal');
+    inputGeo.deleteAttribute('uv');
+    const geometry = BufferGeometryUtils.mergeVertices(inputGeo);
+    
+    // Setup Particles
+    const posAttr = geometry.attributes.position;
+    particles = [];
+    const positions = geometry.attributes.position.array;
+
+    for (let i = 0; i < positions.length; i += 3) {
+        particles.push({
+            x: positions[i], y: positions[i+1], z: positions[i+2],
+            oldX: positions[i], oldY: positions[i+1], oldZ: positions[i+2],
+            invMass: 1.0
+        });
+    }
+
+    // Setup Constraints
+    constraints = [];
+    const indices = geometry.index.array;
+    const edges = new Set();
+    faces = [];
+
+    for (let i = 0; i < indices.length; i += 3) {
+        const a = indices[i];
+        const b = indices[i+1];
+        const c = indices[i+2];
+
+        faces.push([a, b, c]);
+
+        [[a,b], [b,c], [c,a]].forEach(pair => {
+            const min = Math.min(pair[0], pair[1]);
+            const max = Math.max(pair[0], pair[1]);
+            const key = `${min},${max}`;
+            if(!edges.has(key)) {
+                edges.add(key);
+                const p1 = particles[min], p2 = particles[max];
+                const dist = Math.sqrt((p1.x-p2.x)**2 + (p1.y-p2.y)**2 + (p1.z-p2.z)**2);
+                constraints.push({ p1: min, p2: max, restLen: dist });
+            }
+        });
+    }
+
+    // Visual Material
+    const material = new THREE.MeshPhysicalMaterial({ 
+        color: 0xffaa00, 
+        metalness: 0.1, roughness: 0.2, 
+        clearcoat: 1.0, clearcoatRoughness: 0.1,
+        side: THREE.DoubleSide
+    });
+    
+    meshRef = new THREE.Mesh(geometry, material);
+    meshRef.castShadow = true;
+    meshRef.receiveShadow = true; // Self shadowing
+    scene.add(meshRef);
+
+    initialVolume = getVolume();
+    document.getElementById('stats').innerText = `Vertices: ${particles.length} | Constraints: ${constraints.length}`;
+}
+
+// Start with Icosahedron
+const startGeo = new THREE.IcosahedronGeometry(1.2, 2); // Subdiv 2 is safer for mobile
+initPhysicsMesh(startGeo);
+
+// --- UI EVENT LISTENERS ---
+const pRange = document.getElementById('pressureRange');
+pRange.addEventListener('input', (e) => {
+    targetVolumeScale = parseFloat(e.target.value);
+});
+
+document.getElementById('explodeBtn').addEventListener('click', () => {
+    targetVolumeScale = 10.0; // Instant massive pressure
+    pRange.value = 6.0;
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    const geo = new THREE.IcosahedronGeometry(1.2, 2);
+    initPhysicsMesh(geo);
+    targetVolumeScale = 1.0;
+    pRange.value = 1.0;
+});
+
+// --- MAIN LOOP (Fixed Timestep) ---
+let lastTime = 0;
+let accumulator = 0;
+
+function animate(time) {
+    requestAnimationFrame(animate);
+    
+    // Normalize time to seconds
+    const seconds = time * 0.001;
+    const dt = seconds - lastTime;
+    lastTime = seconds;
+
+    // Cap dt to prevent spiral of death if tab is backgrounded
+    const safeDt = Math.min(dt, 0.1); 
+    
+    accumulator += safeDt;
+
+    // Run Physics in fixed chunks
+    while(accumulator >= FIXED_STEP) {
+        updatePhysics(FIXED_STEP);
+        accumulator -= FIXED_STEP;
+    }
+    
+    syncMesh();
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+// Start loop
+animate(0);
+
+// Handle Resize
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+});
+
+</script>
+</body>
+</html>
