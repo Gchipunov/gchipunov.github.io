@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL FPS with Bluetooth Stub</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Courier New', Courier, monospace; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: #00ff00; pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 20px; height: 20px;
+            background: transparent; border: 2px solid #00ff00; border-radius: 50%;
+            transform: translate(-50%, -50%); pointer-events: none;
+        }
+        #dot {
+            position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+            background: red; border-radius: 50%; transform: translate(-50%, -50%);
+        }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: white;
+        }
+        button {
+            padding: 10px 20px; font-size: 20px; background: #00ff00; border: none;
+            cursor: pointer; margin-top: 10px; font-family: inherit; font-weight: bold;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="crosshair"><div id="dot"></div></div>
+    
+    <div id="ui">
+        <h2>WEAPON: <span id="weapon-name">PISTOL</span></h2>
+        <p>Enemies Left: <span id="score">5</span></p>
+        <p id="bt-status">Bluetooth: Disconnected</p>
+    </div>
+
+    <div id="overlay">
+        <h1>NEON PROTOCOL</h1>
+        <p>Click below to enter simulation</p>
+        <button id="start-btn">START GAME</button>
+        <button id="bt-btn" style="background:#00aaff; color: white;">CONNECT BLUETOOTH (Exp)</button>
+        <p style="font-size: 12px; margin-top: 20px;">Use WASD to Move, 1 & 2 to Switch Weapons</p>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // --- GAME VARIABLES ---
+        let camera, scene, renderer, controls;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let prevTime = performance.now();
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        
+        // Weapons
+        let currentWeapon = 'pistol'; // 'pistol' or 'launcher'
+        let canShoot = true;
+        const projectiles = [];
+        const enemies = [];
+        let score = 5;
+
+        // Bluetooth Global
+        let bluetoothDevice;
+        let bluetoothServer;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+            scene.fog = new THREE.Fog(0x111111, 0, 750);
+
+            // 2. Setup Lighting
+            const light = new THREE.HemisphereLight(0xeeeeff, 0x777788, 2.5);
+            const spotLight = new THREE.SpotLight(0xffffff, 100); // Higher intensity for newer Three.js
+            spotLight.position.set(0, 50, 0);
+            scene.add(light);
+            scene.add(spotLight);
+
+            // 3. Setup Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.y = 10;
+
+            // 4. Setup Weapon Models (Attached to Camera)
+            createWeaponModels();
+
+            // 5. Setup Controls
+            controls = new PointerLockControls(camera, document.body);
+            
+            const startBtn = document.getElementById('start-btn');
+            startBtn.addEventListener('click', () => controls.lock());
+
+            const btBtn = document.getElementById('bt-btn');
+            btBtn.addEventListener('click', initBluetooth);
+
+            controls.addEventListener('lock', () => {
+                document.getElementById('overlay').style.display = 'none';
+            });
+            controls.addEventListener('unlock', () => {
+                document.getElementById('overlay').style.display = 'flex';
+            });
+
+            scene.add(controls.getObject());
+
+            // 6. Input Handling
+            const onKeyDown = (event) => {
+                switch (event.code) {
+                    case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                    case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                    case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                    case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                    case 'Digit1': switchWeapon('pistol'); break;
+                    case 'Digit2': switchWeapon('launcher'); break;
+                }
+            };
+
+            const onKeyUp = (event) => {
+                switch (event.code) {
+                    case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                    case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                    case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                    case 'ArrowRight': case 'KeyD': moveRight = false; break;
+                }
+            };
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', shoot);
+
+            // 7. Render Environment (Floor & Enemies)
+            const floorGeo = new THREE.PlaneGeometry(2000, 2000, 100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, wireframe: true });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // Create random enemies
+            const boxGeo = new THREE.BoxGeometry(20, 20, 20);
+            const boxMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+
+            for(let i=0; i<5; i++) {
+                const enemy = new THREE.Mesh(boxGeo, boxMat);
+                enemy.position.x = Math.floor(Math.random() * 20 - 10) * 20;
+                enemy.position.y = 10;
+                enemy.position.z = Math.floor(Math.random() * 20 - 10) * 20;
+                scene.add(enemy);
+                enemies.push(enemy);
+            }
+
+            // 8. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        let pistolModel, launcherModel;
+
+        function createWeaponModels() {
+            // Pistol (Yellow Box)
+            const pistolGeo = new THREE.BoxGeometry(1, 1, 3);
+            const pistolMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            pistolModel = new THREE.Mesh(pistolGeo, pistolMat);
+            pistolModel.position.set(2, -2, -3);
+            camera.add(pistolModel);
+
+            // Launcher (Grey Cylinder)
+            const launcherGeo = new THREE.CylinderGeometry(1, 1, 6, 16);
+            launcherGeo.rotateX(Math.PI / 2);
+            const launcherMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
+            launcherModel = new THREE.Mesh(launcherGeo, launcherMat);
+            launcherModel.position.set(2, -2, -3);
+            launcherModel.visible = false;
+            camera.add(launcherModel);
+        }
+
+        function switchWeapon(type) {
+            currentWeapon = type;
+            document.getElementById('weapon-name').innerText = type.toUpperCase();
+            
+            if(type === 'pistol') {
+                pistolModel.visible = true;
+                launcherModel.visible = false;
+            } else {
+                pistolModel.visible = false;
+                launcherModel.visible = true;
+            }
+            sendBluetoothData(`WEAPON:${type}`);
+        }
+
+        function shoot() {
+            if (!controls.isLocked) return;
+
+            // Recoil animation
+            const activeModel = currentWeapon === 'pistol' ? pistolModel : launcherModel;
+            activeModel.position.z += 1;
+            setTimeout(() => activeModel.position.z -= 1, 100);
+
+            if (currentWeapon === 'pistol') {
+                // Raycasting (Hitscan)
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObjects(enemies);
+
+                if (intersects.length > 0) {
+                    const hitObj = intersects[0].object;
+                    scene.remove(hitObj);
+                    enemies.splice(enemies.indexOf(hitObj), 1);
+                    updateScore();
+                    createExplosion(intersects[0].point, 0xffff00);
+                }
+            } else {
+                // Rocket Launcher (Projectile)
+                const geometry = new THREE.SphereGeometry(1, 8, 8);
+                const material = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+                const rocket = new THREE.Mesh(geometry, material);
+                
+                // Start at gun position
+                const vector = new THREE.Vector3();
+                rocket.position.copy(camera.position);
+                // Move slightly forward/right so it doesn't clip player
+                rocket.position.add(camera.getWorldDirection(vector).multiplyScalar(2));
+
+                // Calculate Velocity vector
+                const velocity = new THREE.Vector3();
+                camera.getWorldDirection(velocity);
+                velocity.multiplyScalar(4); // Rocket speed
+                
+                rocket.userData = { velocity: velocity, life: 100 };
+                scene.add(rocket);
+                projectiles.push(rocket);
+            }
+            sendBluetoothData("FIRE");
+        }
+
+        function createExplosion(pos, color) {
+            // Simple visual marker for hit
+            const geo = new THREE.SphereGeometry(2, 8, 8);
+            const mat = new THREE.MeshBasicMaterial({ color: color });
+            const sphere = new THREE.Mesh(geo, mat);
+            sphere.position.copy(pos);
+            scene.add(sphere);
+            setTimeout(() => scene.remove(sphere), 300);
+        }
+
+        function updateScore() {
+            score--;
+            document.getElementById('score').innerText = score;
+            if(score <= 0) {
+                document.getElementById('score').innerText = "WINNER";
+                sendBluetoothData("GAME_OVER");
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- BLUETOOTH STUB LOGIC ---
+        // Note: Browsers connect to Peripherals (Devices), not other Browsers directly.
+        // This simulates connecting to a game controller or HUD device.
+        async function initBluetooth() {
+            try {
+                // Request any device broadcasting a standard service (like Battery or generic)
+                // For a real game, you would specify your custom UUID
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['battery_service'] // Example service
+                });
+                
+                bluetoothServer = await bluetoothDevice.gatt.connect();
+                document.getElementById('bt-status').innerText = "Bluetooth: Connected to " + bluetoothDevice.name;
+                document.getElementById('bt-status').style.color = "#00aaff";
+                
+                bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+            } catch (error) {
+                console.log("BT Error:", error);
+                document.getElementById('bt-status').innerText = "BT Error: " + error.message;
+            }
+        }
+
+        function onDisconnected() {
+            document.getElementById('bt-status').innerText = "Bluetooth: Disconnected";
+        }
+
+        function sendBluetoothData(msg) {
+            // In a real scenario, you would write to a Characteristic here.
+            if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+                console.log(`[Bluetooth Tx]: ${msg}`);
+                // Example: service.getCharacteristic(...).then(c => c.writeValue(...))
+            }
+        }
+
+        // --- MAIN LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            
+            if (controls.isLocked) {
+                const delta = (time - prevTime) / 1000;
+
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+                velocity.y -= 9.8 * 100.0 * delta; // Gravity
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize(); // Ensure consistent speed in all directions
+
+                if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+                
+                // Simple floor collision
+                if (controls.getObject().position.y < 10) {
+                    velocity.y = 0;
+                    controls.getObject().position.y = 10;
+                }
+            }
+
+            // Update Rockets
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.position.add(p.userData.velocity);
+                p.userData.life--;
+
+                // Collision Detection for Rockets
+                const pBox = new THREE.Box3().setFromObject(p);
+                let hit = false;
+                
+                // Check floor collision
+                if (p.position.y < 0) hit = true;
+
+                // Check enemy collision
+                enemies.forEach((enemy, index) => {
+                    const eBox = new THREE.Box3().setFromObject(enemy);
+                    if (pBox.intersectsBox(eBox)) {
+                        scene.remove(enemy);
+                        enemies.splice(index, 1);
+                        updateScore();
+                        createExplosion(p.position, 0xff0000);
+                        hit = true;
+                    }
+                });
+
+                if (hit || p.userData.life <= 0) {
+                    scene.remove(p);
+                    projectiles.splice(i, 1);
+                }
+            }
+
+            prevTime = time;
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
