@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h3>WebGL RTS Engine</h3>
+    <p><strong>Left Click:</strong> Select Unit</p>
+    <p><strong>Right Click:</strong> Move Selected</p>
+    <div id="stats">Units: 0</div>
+</div>
+
+<canvas id="glcanvas"></canvas>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform float u_size;
+
+    void main() {
+        // Translate position
+        vec2 position = a_position * u_size + u_translation;
+
+        // Convert from pixels to 0.0->1.0
+        vec2 zeroToOne = position / u_resolution;
+
+        // Convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+
+        // Convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+    // --- 1. WEBGL BOILERPLATE ---
+    const canvas = document.getElementById("glcanvas");
+    const gl = canvas.getContext("webgl");
+
+    if (!gl) {
+        alert("WebGL not supported");
+        throw new Error("WebGL not supported");
+    }
+
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const vsSource = document.getElementById("vertex-shader").text;
+    const fsSource = document.getElementById("fragment-shader").text;
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(program));
+    }
+
+    // Look up locations
+    const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+    const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+    const colorUniformLocation = gl.getUniformLocation(program, "u_color");
+    const translationLocation = gl.getUniformLocation(program, "u_translation");
+    const sizeLocation = gl.getUniformLocation(program, "u_size");
+
+    // Create a buffer for a unit square
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    // Define a 1x1 unit square centered at 0
+    const positions = [
+        0, 0,
+        1, 0,
+        0, 1,
+        0, 1,
+        1, 0,
+        1, 1,
+    ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    // --- 2. GAME ENGINE ---
+
+    class Unit {
+        constructor(x, y, team) {
+            this.x = x;
+            this.y = y;
+            this.targetX = x;
+            this.targetY = y;
+            this.team = team; // 0 = Player, 1 = Enemy
+            this.selected = false;
+            this.speed = 2 + Math.random(); // Add variation
+            this.size = 20;
+        }
+
+        update() {
+            // Basic movement logic
+            const dx = this.targetX - this.x;
+            const dy = this.targetY - this.y;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+
+            if (distance > 1) {
+                // Normalize and move
+                this.x += (dx / distance) * this.speed;
+                this.y += (dy / distance) * this.speed;
+            }
+        }
+    }
+
+    const units = [];
+    const unitCount = 20;
+
+    // Spawn Units
+    function initGame() {
+        // Player units (Blue)
+        for (let i = 0; i < 10; i++) {
+            units.push(new Unit(100 + Math.random() * 200, 100 + Math.random() * 200, 0));
+        }
+        // Enemy units (Red)
+        for (let i = 0; i < 10; i++) {
+            units.push(new Unit(800 + Math.random() * 200, 500 + Math.random() * 200, 1));
+        }
+        document.getElementById('stats').innerText = `Units: ${units.length}`;
+    }
+
+    // --- 3. RENDERING LOOP ---
+
+    function resizeCanvasToDisplaySize(canvas) {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+    }
+
+    function drawScene() {
+        resizeCanvasToDisplaySize(canvas);
+
+        gl.clearColor(0.1, 0.1, 0.1, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        gl.useProgram(program);
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+        // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
+        const size = 2;          // 2 components per iteration
+        const type = gl.FLOAT;   // the data is 32bit floats
+        const normalize = false; // don't normalize the data
+        const stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+        const offset = 0;        // start at the beginning of the buffer
+        gl.vertexAttribPointer(positionAttributeLocation, size, type, normalize, stride, offset);
+
+        gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+        // Draw Units
+        units.forEach(unit => {
+            // Setup Color
+            if (unit.selected) {
+                gl.uniform4f(colorUniformLocation, 0.0, 1.0, 0.0, 1); // Green for selected
+            } else if (unit.team === 0) {
+                gl.uniform4f(colorUniformLocation, 0.2, 0.5, 1.0, 1); // Blue for Player
+            } else {
+                gl.uniform4f(colorUniformLocation, 1.0, 0.3, 0.3, 1); // Red for Enemy
+            }
+
+            // Setup Position (Translation)
+            gl.uniform2f(translationLocation, unit.x - unit.size/2, unit.y - unit.size/2);
+            gl.uniform1f(sizeLocation, unit.size);
+
+            // Draw Rect
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        });
+    }
+
+    function gameLoop() {
+        // Update Logic
+        units.forEach(u => u.update());
+        
+        // Draw Logic
+        drawScene();
+        
+        requestAnimationFrame(gameLoop);
+    }
+
+    // --- 4. INPUT HANDLING ---
+
+    canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        if (e.button === 0) { // Left Click (Select)
+            let hit = false;
+            
+            // Simple click selection
+            units.forEach(unit => {
+                if (unit.team === 0) { // Can only select own units
+                    const dist = Math.hypot(unit.x - mouseX, unit.y - mouseY);
+                    if (dist < unit.size) {
+                        unit.selected = !unit.selected; // Toggle
+                        hit = true;
+                    } else if (!e.shiftKey) {
+                        // If we didn't hold shift and clicked outside, deselect others?
+                        // For simplicity, we only deselect if we click empty space without shift
+                    }
+                }
+            });
+
+            // Deselect all if clicked empty space
+            if (!hit && !e.shiftKey) {
+                units.forEach(u => u.selected = false);
+            }
+        }
+        else if (e.button === 2) { // Right Click (Move)
+            // Prevent context menu
+        }
+    });
+
+    canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const targetX = e.clientX - rect.left;
+        const targetY = e.clientY - rect.top;
+
+        // Order selected units to move
+        // We add a slight offset so they don't stack perfectly on top of each other
+        let count = 0;
+        units.forEach(unit => {
+            if (unit.selected) {
+                const offsetX = (Math.random() - 0.5) * 40;
+                const offsetY = (Math.random() - 0.5) * 40;
+                unit.targetX = targetX + offsetX;
+                unit.targetY = targetY + offsetY;
+                count++;
+            }
+        });
+        console.log(`Ordered ${count} units to move.`);
+    });
+
+    // Start
+    initGame();
+    requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
