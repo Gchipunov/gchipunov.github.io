@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS Mobile</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #222; 
+            font-family: sans-serif;
+            touch-action: none; /* Prevents mobile scrolling */
+            user-select: none;  /* Prevents text highlighting */
+            -webkit-user-select: none;
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        /* 2. Mobile Control Bar */
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            z-index: 10;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid white;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            transition: background 0.2s;
+        }
+
+        .btn.active {
+            background: rgba(0, 255, 0, 0.6); /* Active Green */
+            border-color: #0f0;
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h3>WebGL RTS Mobile</h3>
+    <div id="stats">Units: 0</div>
+    <div style="margin-top:5px; font-size: 12px; opacity: 0.8">
+        PC: Right Click to Move<br>
+        Mobile: Use Buttons below
+    </div>
+</div>
+
+<div id="controls">
+    <div id="btn-select" class="btn active">SELECT</div>
+    <div id="btn-move" class="btn">MOVE</div>
+</div>
+
+<canvas id="glcanvas"></canvas>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform float u_size;
+
+    void main() {
+        vec2 position = a_position * u_size + u_translation;
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+    // --- 1. WEBGL SETUP ---
+    const canvas = document.getElementById("glcanvas");
+    const gl = canvas.getContext("webgl");
+
+    if (!gl) { alert("WebGL not supported"); throw new Error("WebGL not supported"); }
+
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById("vertex-shader").text));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById("fragment-shader").text));
+    gl.linkProgram(program);
+
+    const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+    const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+    const colorUniformLocation = gl.getUniformLocation(program, "u_color");
+    const translationLocation = gl.getUniformLocation(program, "u_translation");
+    const sizeLocation = gl.getUniformLocation(program, "u_size");
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+
+    // --- 2. GAME ENGINE ---
+
+    // Game State
+    let inputMode = 'SELECT'; // 'SELECT' or 'MOVE'
+
+    class Unit {
+        constructor(x, y, team) {
+            this.x = x;
+            this.y = y;
+            this.targetX = x;
+            this.targetY = y;
+            this.team = team; 
+            this.selected = false;
+            this.speed = 2 + Math.random(); 
+            this.size = 30; // Made slightly larger for mobile touch
+        }
+
+        update() {
+            const dx = this.targetX - this.x;
+            const dy = this.targetY - this.y;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            if (distance > 1) {
+                this.x += (dx / distance) * this.speed;
+                this.y += (dy / distance) * this.speed;
+            }
+        }
+    }
+
+    const units = [];
+
+    function initGame() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        // Adjust spawn area based on screen size
+        for (let i = 0; i < 8; i++) units.push(new Unit(w * 0.1 + Math.random() * 100, h * 0.2 + Math.random() * 100, 0));
+        for (let i = 0; i < 8; i++) units.push(new Unit(w * 0.7 + Math.random() * 100, h * 0.6 + Math.random() * 100, 1));
+        document.getElementById('stats').innerText = `Units: ${units.length}`;
+    }
+
+    // --- 3. RENDERING ---
+
+    function resizeCanvasToDisplaySize(canvas) {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        }
+    }
+
+    function drawScene() {
+        resizeCanvasToDisplaySize(canvas);
+        gl.clearColor(0.1, 0.1, 0.1, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.useProgram(program);
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+        units.forEach(unit => {
+            if (unit.selected) gl.uniform4f(colorUniformLocation, 0.0, 1.0, 0.0, 1);
+            else if (unit.team === 0) gl.uniform4f(colorUniformLocation, 0.2, 0.6, 1.0, 1);
+            else gl.uniform4f(colorUniformLocation, 1.0, 0.3, 0.3, 1);
+
+            gl.uniform2f(translationLocation, unit.x - unit.size/2, unit.y - unit.size/2);
+            gl.uniform1f(sizeLocation, unit.size);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        });
+    }
+
+    function gameLoop() {
+        units.forEach(u => u.update());
+        drawScene();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // --- 4. UNIFIED INPUT HANDLING (TOUCH & MOUSE) ---
+
+    // Toggle Buttons Logic
+    const btnSelect = document.getElementById('btn-select');
+    const btnMove = document.getElementById('btn-move');
+
+    function setMode(mode) {
+        inputMode = mode;
+        if (mode === 'SELECT') {
+            btnSelect.classList.add('active');
+            btnMove.classList.remove('active');
+        } else {
+            btnSelect.classList.remove('active');
+            btnMove.classList.add('active');
+        }
+    }
+
+    btnSelect.addEventListener('touchstart', (e) => { e.preventDefault(); setMode('SELECT'); });
+    btnSelect.addEventListener('mousedown', (e) => { e.preventDefault(); setMode('SELECT'); });
+    
+    btnMove.addEventListener('touchstart', (e) => { e.preventDefault(); setMode('MOVE'); });
+    btnMove.addEventListener('mousedown', (e) => { e.preventDefault(); setMode('MOVE'); });
+
+
+    // Core Interaction Logic
+    function handleInteraction(x, y, isRightClick = false) {
+        // If it's a right click, force Move mode temporarily
+        const effectiveMode = isRightClick ? 'MOVE' : inputMode;
+
+        if (effectiveMode === 'SELECT') {
+            let hit = false;
+            units.forEach(unit => {
+                if (unit.team === 0) {
+                    // Larger touch radius for easier mobile selection (size * 1.5)
+                    const dist = Math.hypot(unit.x - x, unit.y - y);
+                    if (dist < unit.size * 1.5) {
+                        unit.selected = !unit.selected;
+                        hit = true;
+                    }
+                }
+            });
+            // If we tapped empty space, deselect all
+            if (!hit) {
+                units.forEach(u => u.selected = false);
+            }
+        } 
+        else if (effectiveMode === 'MOVE') {
+            let count = 0;
+            units.forEach(unit => {
+                if (unit.selected) {
+                    // Scatter destination slightly so they don't stack
+                    const offsetX = (Math.random() - 0.5) * 40;
+                    const offsetY = (Math.random() - 0.5) * 40;
+                    unit.targetX = x + offsetX;
+                    unit.targetY = y + offsetY;
+                    count++;
+                }
+            });
+            
+            // UX Polish: Automatically switch back to Select mode after moving
+            if (count > 0) {
+                setMode('SELECT');
+            }
+        }
+    }
+
+    // Mouse Listeners
+    canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const isRight = e.button === 2;
+        handleInteraction(x, y, isRight);
+    });
+
+    // Touch Listeners
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent scrolling
+        const rect = canvas.getBoundingClientRect();
+        // Handle the first touch only
+        const touch = e.touches[0];
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        handleInteraction(x, y, false);
+    }, {passive: false});
+
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Start
+    initGame();
+    requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
