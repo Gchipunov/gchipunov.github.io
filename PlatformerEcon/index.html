@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal WebGL Platformer Starter</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- Game Logic Constants ---
+        const WIDTH = 800;
+        const HEIGHT = 600;
+        const PLAYER_SIZE = 50.0;
+        const PLAYER_COLOR = [1.0, 0.6, 0.0]; // Orange
+
+        // --- WebGL Shaders ---
+        const VSHADER_SOURCE = `
+            attribute vec4 a_Position;
+            uniform mat4 u_Matrix;
+            void main() {
+                gl_Position = u_Matrix * a_Position;
+            }
+        `;
+
+        const FSHADER_SOURCE = `
+            precision mediump float;
+            uniform vec3 u_Color;
+            void main() {
+                gl_FragColor = vec4(u_Color, 1.0);
+            }
+        `;
+
+        // --- Game Class (The Engine) ---
+        class Game {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.gl = this.canvas.getContext('webgl');
+
+                if (!this.gl) {
+                    console.error('Failed to get the rendering context for WebGL');
+                    return;
+                }
+
+                this.setupGL();
+                this.setupShaders();
+                this.setupBuffers();
+                
+                this.playerPos = [0, 0]; // Normalized clip space: -1 to 1
+                this.lastTime = 0;
+                this.running = true;
+                
+                this.start();
+            }
+
+            setupGL() {
+                this.canvas.width = WIDTH;
+                this.canvas.height = HEIGHT;
+                this.gl.viewport(0, 0, WIDTH, HEIGHT);
+                this.gl.clearColor(0.2, 0.2, 0.2, 1.0); // Dark grey background
+                this.gl.enable(this.gl.DEPTH_TEST);
+            }
+
+            setupShaders() {
+                // 1. Compile Shaders
+                const vshader = this.compileShader(this.gl.VERTEX_SHADER, VSHADER_SOURCE);
+                const fshader = this.compileShader(this.gl.FRAGMENT_SHADER, FSHADER_SOURCE);
+
+                // 2. Link Program
+                this.program = this.gl.createProgram();
+                this.gl.attachShader(this.program, vshader);
+                this.gl.attachShader(this.program, fshader);
+                this.gl.linkProgram(this.program);
+
+                if (!this.gl.getProgramParameter(this.program, this.gl.LINK_STATUS)) {
+                    console.error('Failed to link program: ' + this.gl.getProgramInfoLog(this.program));
+                    this.gl.deleteProgram(this.program);
+                }
+
+                this.gl.useProgram(this.program);
+                
+                // 3. Get Locations
+                this.attribLocations = {
+                    a_Position: this.gl.getAttribLocation(this.program, 'a_Position')
+                };
+                this.uniformLocations = {
+                    u_Matrix: this.gl.getUniformLocation(this.program, 'u_Matrix'),
+                    u_Color: this.gl.getUniformLocation(this.program, 'u_Color')
+                };
+            }
+            
+            compileShader(type, source) {
+                const shader = this.gl.createShader(type);
+                this.gl.shaderSource(shader, source);
+                this.gl.compileShader(shader);
+                if (!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)) {
+                    console.error('Shader compile error: ' + this.gl.getShaderInfoLog(shader));
+                    this.gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            setupBuffers() {
+                // Defines a simple square (2 triangles) centered at the origin for a sprite
+                // Coords are in clip space: -1.0 to 1.0
+                const vertices = new Float32Array([
+                    -1.0,  1.0, // Top-left
+                    -1.0, -1.0, // Bottom-left
+                     1.0,  1.0, // Top-right
+                     1.0, -1.0  // Bottom-right
+                ]);
+
+                this.vertexBuffer = this.gl.createBuffer();
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+                this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
+            }
+
+            // Simple 2D Matrix helper for translation and scaling
+            createMatrix(x, y, scaleX, scaleY) {
+                const matrix = [
+                    scaleX, 0, 0, 0,
+                    0, scaleY, 0, 0,
+                    0, 0, 1, 0,
+                    x, y, 0, 1
+                ];
+                // WebGL uses column-major order, so this transpose is needed for matrix math
+                return new Float32Array([
+                    scaleX, 0, 0, x,
+                    0, scaleY, 0, y,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1
+                ]);
+            }
+            
+            start() {
+                // Game loop setup
+                const loop = (time) => {
+                    if (!this.running) return;
+
+                    const deltaTime = (time - this.lastTime) / 1000.0; // Time in seconds
+                    this.lastTime = time;
+
+                    this.update(deltaTime);
+                    this.render();
+
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+            }
+
+            // --- Game Update (Physics/Logic goes here) ---
+            update(deltaTime) {
+                // ** Player Physics and Movement Placeholder **
+                // Example: Move the player slightly to the right every frame
+                // Note: This is in clip space (-1 to 1), not pixels.
+                // this.playerPos[0] += 0.1 * deltaTime;
+
+                // ** Inventory/Loot Update Placeholder **
+                // 1. Check item expire time:
+                // if (Date.now() > this.inventory.potionTimer) { // destroy potion/effect }
+                
+                // 2. Handle Player Input (Keyboard/Mouse)
+                // 3. Check for collisions
+                // 4. Update enemy AI
+                // 5. Apply gravity
+            }
+
+            // --- Game Rendering (Drawing on screen) ---
+            render() {
+                this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+
+                // ** Render Player **
+                const x = this.playerPos[0];
+                const y = this.playerPos[1];
+                const scaleX = PLAYER_SIZE / WIDTH;
+                const scaleY = PLAYER_SIZE / HEIGHT;
+
+                const matrix = this.createMatrix(x, y, scaleX, scaleY);
+
+                this.gl.uniformMatrix4fv(this.uniformLocations.u_Matrix, false, matrix);
+                this.gl.uniform3fv(this.uniformLocations.u_Color, PLAYER_COLOR);
+
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+                this.gl.vertexAttribPointer(this.attribLocations.a_Position, 2, this.gl.FLOAT, false, 0, 0);
+                this.gl.enableVertexAttribArray(this.attribLocations.a_Position);
+
+                // Draw the square (as 2 triangles: TRIANGLE_STRIP)
+                this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+                // ** Render other elements (Platforms, Enemies, UI) in similar fashion **
+                // ...
+            }
+        }
+
+        // --- Game Logic Classes (Data Structures) ---
+
+        // Basic object structure for inventory/weapons/loot
+        const ITEM_TYPES = {
+            SWORD: 'sword', AXE: 'axe', BOW: 'bow',
+            HEALTH_POTION: 'health', EXP_SCROLL: 'exp'
+        };
+
+        class Inventory {
+            constructor() {
+                // Stacking/Categorized Inventory
+                this.weapons = {
+                    [ITEM_TYPES.SWORD]: { count: 1, damage: 10 },
+                    [ITEM_TYPES.AXE]: { count: 0, damage: 15 },
+                    [ITEM_TYPES.BOW]: { count: 0, damage: 8 }
+                };
+                this.loot = {
+                    [ITEM_TYPES.HEALTH_POTION]: { count: 3, expireTime: null },
+                    [ITEM_TYPES.EXP_SCROLL]: { count: 1, expireTime: null }
+                };
+                this.activeWeapon = ITEM_TYPES.SWORD;
+            }
+
+            addItem(type, expiresAfterMs = 0) {
+                // Simplified Add/Stack logic
+                if (this.weapons[type]) {
+                    this.weapons[type].count++;
+                } else if (this.loot[type]) {
+                    this.loot[type].count++;
+                    if (expiresAfterMs > 0) {
+                        // Set the expiration time for the stack/item
+                        this.loot[type].expireTime = Date.now() + expiresAfterMs;
+                        console.log(`${type} added, expires at ${new Date(this.loot[type].expireTime).toLocaleTimeString()}`);
+                    }
+                }
+            }
+
+            updateExpiration(deltaTime) {
+                const now = Date.now();
+                for (const type in this.loot) {
+                    const item = this.loot[type];
+                    if (item.expireTime !== null && item.expireTime < now) {
+                        item.count = Math.max(0, item.count - 1); // Remove one item
+                        item.expireTime = null; // Reset for next item in stack (complex expiration needs better tracking)
+                        console.log(`${type} expired! Remaining: ${item.count}`);
+                    }
+                }
+            }
+        }
+
+        class Player {
+            constructor() {
+                this.health = 100;
+                this.xp = 0;
+                this.level = 1;
+                this.inventory = new Inventory();
+            }
+
+            gainXP(amount) {
+                this.xp += amount;
+                console.log(`Gained ${amount} XP. Total: ${this.xp}`);
+                // Basic Level Up Logic
+                const nextLevelXP = this.level * 100;
+                if (this.xp >= nextLevelXP) {
+                    this.level++;
+                    this.xp = this.xp - nextLevelXP;
+                    this.health = 100; // Heal on level up
+                    console.log(`*** LEVEL UP! Player is now level ${this.level} ***`);
+                }
+            }
+        }
+
+        // --- Initialization ---
+        const game = new Game('gameCanvas');
+        const player = new Player();
+
+        // Simulate acquiring items and expiration
+        player.inventory.addItem(ITEM_TYPES.HEALTH_POTION, 5000); // Expires in 5 seconds
+        player.gainXP(50); 
+        player.gainXP(70); // Level up!
+
+    </script>
+</body>
+</html>
