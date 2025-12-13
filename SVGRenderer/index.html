@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>WebGL SDF Renderer Concept</title>
+<style>
+  body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; }
+  textarea { width: 90%; height: 150px; margin-bottom: 10px; font-family: monospace; }
+  canvas { border: 1px solid #ccc; }
+  #info { margin-top: 10px; max-width: 800px; text-align: center; color: #555; }
+</style>
+</head>
+<body>
+
+  <h1>WebGL SDF Renderer Concept</h1>
+  
+  <textarea id="svgInput" placeholder="Paste SVG Code here... (Note: This simple example uses a fixed circle SDF in the shader, so input won't change the output.)"></textarea>
+  
+  <canvas id="sdfCanvas" width="512" height="512"></canvas>
+
+  <div id="info">
+    <p>This is a **conceptual example** demonstrating WebGL rendering using a Signed Distance Field (SDF) calculated directly in the fragment shader. To implement a full SVG renderer, the JavaScript would need to parse the SVG path data from the text box and pass complex parameters (path segments, transforms) to the shader to calculate the SDF for the complex shape.</p>
+    <p>The shader below renders a simple circle: $d = \text{length}(p) - r$.</p>
+  </div>
+
+<script>
+// --- 1. Shader Definitions ---
+
+// Basic Vertex Shader: Passes the position coordinates (uv) to the fragment shader.
+const vsSource = `
+  attribute vec4 a_position;
+  varying vec2 v_uv;
+
+  void main() {
+    // Map clip space (-1 to 1) to UV space (0 to 1)
+    v_uv = (a_position.xy * 0.5) + 0.5;
+    gl_Position = a_position;
+  }
+`;
+
+// Fragment Shader: Calculates the SDF and renders the shape.
+const fsSource = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform vec2 u_resolution;
+
+  // --- Core SDF function: Distance to a circle centered at origin ---
+  float circleSDF(vec2 p, float r) {
+    return length(p) - r;
+  }
+
+  void main() {
+    // 1. Calculate the coordinate of the current pixel (fragCoord)
+    vec2 fragCoord = v_uv * u_resolution;
+
+    // 2. Normalize and center the coordinate system (p)
+    // p is now in a range like [-1.0, 1.0] centered at (0, 0)
+    vec2 p = (fragCoord - 0.5 * u_resolution) / u_resolution.y;
+
+    // 3. Calculate the Signed Distance (d)
+    // For this example, we render a circle with radius 0.25
+    float d = circleSDF(p, 0.25);
+
+    // 4. Color the pixel based on the distance (d)
+
+    // Smoothstep creates a smooth edge for the shape.
+    // The width of the edge is defined by the range (0.005, -0.005)
+    float antialiasing = 0.005;
+    float alpha = 1.0 - smoothstep(-antialiasing, antialiasing, d);
+    
+    // Simple color: Red shape
+    vec3 color = vec3(1.0, 0.2, 0.2); 
+
+    // Final output color (RGB + Alpha)
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+// --- 2. WebGL Initialization and Setup ---
+
+function main() {
+  const canvas = document.getElementById('sdfCanvas');
+  const gl = canvas.getContext('webgl');
+
+  if (!gl) {
+    alert('Unable to initialize WebGL. Your browser may not support it.');
+    return;
+  }
+
+  // Create shaders and program
+  const program = initShaderProgram(gl, vsSource, fsSource);
+  if (!program) return;
+
+  gl.useProgram(program);
+
+  // --- Lookups for Attributes and Uniforms ---
+  const positionLocation = gl.getAttribLocation(program, 'a_position');
+  const resolutionLocation = gl.getUniformLocation(program, 'u_resolution');
+
+  // --- Create Vertex Buffer (Full Screen Quad) ---
+  // We draw a simple quad that covers the entire viewport (-1 to 1 in clip space)
+  const positions = new Float32Array([
+    -1, -1, // bottom-left
+     1, -1, // bottom-right
+    -1,  1, // top-left
+     1,  1, // top-right
+  ]);
+  
+  const positionBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+  // --- Drawing Setup ---
+  gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+  gl.clearColor(0.95, 0.95, 0.95, 1.0); // Light gray background
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  // --- Draw Function ---
+  function drawScene() {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // 1. Set the uniform resolution
+    gl.uniform2f(resolutionLocation, gl.canvas.width, gl.canvas.height);
+
+    // 2. Bind the position buffer
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(positionLocation);
+
+    // 3. Draw the quad (2 triangles forming a quad)
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  // Initial draw
+  drawScene();
+}
+
+// --- Helper Functions ---
+
+function loadShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+function initShaderProgram(gl, vsSource, fsSource) {
+  const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+  const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+  const shaderProgram = gl.createProgram();
+  gl.attachShader(shaderProgram, vertexShader);
+  gl.attachShader(shaderProgram, fragmentShader);
+  gl.linkProgram(shaderProgram);
+
+  if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+    console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+    return null;
+  }
+  return shaderProgram;
+}
+
+// Run the main function when the page loads
+window.onload = main;
+</script>
+
+</body>
+</html>
