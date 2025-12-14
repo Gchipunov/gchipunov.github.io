@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL 2D Platformer with Replay</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; display: flex; flex-direction: column; align-items: center; }
+        canvas { border: 2px solid #00f; }
+        #controls { margin-top: 10px; color: white; font-family: sans-serif; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <canvas id="game-canvas" width="800" height="600"></canvas>
+    
+    <div id="controls">
+        <p>Use **A** and **D** to move the square.</p>
+        <button id="stop-save-btn">Stop Recording & Save Replay</button>
+    </div>
+
+    <script>
+        // --- WebGL Setup and Shaders ---
+        const canvas = document.getElementById('game-canvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert('Your browser does not support WebGL.');
+        }
+
+        // Vertex Shader (Responsible for position)
+        const vsSource = `
+            attribute vec4 a_position;
+            uniform mat4 u_transform;
+            void main() {
+                gl_Position = u_transform * a_position;
+            }
+        `;
+
+        // Fragment Shader (Responsible for color)
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compilation error: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Program linking error: ' + gl.getProgramInfoLog(program));
+        }
+
+        gl.useProgram(program);
+
+        // Look up attributes and uniforms
+        const positionAttributeLocation = gl.getAttribLocation(program, 'a_position');
+        const transformUniformLocation = gl.getUniformLocation(program, 'u_transform');
+        const colorUniformLocation = gl.getUniformLocation(program, 'u_color');
+
+        // Create a buffer for the square vertices
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = [
+             -0.1,  0.1,  // Top-left
+             -0.1, -0.1,  // Bottom-left
+              0.1,  0.1,  // Top-right
+              0.1, -0.1,  // Bottom-right
+        ];
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        // --- Game State ---
+        const gameState = {
+            playerX: 0.0, // X position in normalized coordinates (-1 to 1)
+            playerY: 0.0, // Y position in normalized coordinates (-1 to 1)
+            moveSpeed: 0.01,
+            keysPressed: {},
+            isRecording: true,
+            replayData: [], // Stores [{ frame: N, input: 'D' }, ...]
+            frameCounter: 0,
+            startTime: Date.now()
+        };
+
+        // --- Input and Replay Recording ---
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'a' || e.key === 'd') {
+                gameState.keysPressed[e.key] = true;
+                if (gameState.isRecording) {
+                    gameState.replayData.push({ frame: gameState.frameCounter, input: e.key, type: 'down' });
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'a' || e.key === 'd') {
+                delete gameState.keysPressed[e.key];
+                if (gameState.isRecording) {
+                    // Record key release as well for fidelity
+                    gameState.replayData.push({ frame: gameState.frameCounter, input: e.key, type: 'up' });
+                }
+            }
+        });
+
+        const stopSaveBtn = document.getElementById('stop-save-btn');
+        stopSaveBtn.addEventListener('click', () => {
+            gameState.isRecording = false;
+            stopSaveBtn.disabled = true;
+
+            // 1. Create the replay JSON data
+            const replayObject = {
+                gameVersion: "v1.0-simple",
+                durationFrames: gameState.frameCounter,
+                inputs: gameState.replayData,
+                initialState: {
+                    playerX: 0.0,
+                    playerY: 0.0
+                } // Important for complex games
+            };
+            const json = JSON.stringify(replayObject, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            // 2. Trigger the download
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `platformer_replay_${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            console.log('Replay saved! Recording stopped.');
+        });
+        
+        // --- Matrix Helper (Identity matrix and Translation) ---
+        function createTranslationMatrix(tx, ty, tz) {
+            return [
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                tx, ty, tz, 1,
+            ];
+        }
+
+        // --- Game Logic Update ---
+        function updateGame() {
+            if (gameState.keysPressed['a']) {
+                gameState.playerX -= gameState.moveSpeed;
+            }
+            if (gameState.keysPressed['d']) {
+                gameState.playerX += gameState.moveSpeed;
+            }
+
+            // Simple boundary check
+            gameState.playerX = Math.max(-0.9, Math.min(0.9, gameState.playerX));
+        }
+
+        // --- WebGL Draw Function ---
+        function drawScene() {
+            gl.clearColor(0.2, 0.2, 0.3, 1.0); // Dark blue background
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // Set up the player square rendering
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+            // Set the color (e.g., bright green)
+            gl.uniform4f(colorUniformLocation, 0.0, 1.0, 0.0, 1.0);
+
+            // Create the translation matrix to position the player
+            const playerMatrix = createTranslationMatrix(gameState.playerX, gameState.playerY, 0);
+            gl.uniformMatrix4fv(transformUniformLocation, false, playerMatrix);
+
+            // Draw the square (4 vertices, GL_TRIANGLE_STRIP for a square)
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        // --- Main Loop ---
+        function gameLoop() {
+            if (gameState.isRecording) {
+                // Only update the game state if recording (or playing)
+                updateGame();
+            }
+            
+            drawScene();
+            
+            gameState.frameCounter++;
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start the game
+        gameLoop();
+    </script>
+
+</body>
+</html>
