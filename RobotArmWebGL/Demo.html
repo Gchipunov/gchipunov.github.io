@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Robot Arm Physics</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+            user-select: none;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 1.2rem; }
+        p { margin: 5px 0; font-size: 0.9rem; color: #ccc; }
+        .key { color: #ff9f43; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        <h1>Robot Arm Physics</h1>
+        <p><span class="key">W / S</span> : Lower Arm</p>
+        <p><span class="key">UP / DOWN</span> : Upper Arm</p>
+        <p><span class="key">A / D</span> : Rotate Base</p>
+        <p><span class="key">SPACE (Hold)</span> : Activate Magnet</p>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as CANNON from 'cannon-es';
+
+        // --- Configuration ---
+        const SETTINGS = {
+            baseSpeed: 2,
+            armSpeed: 3,
+            magnetRange: 2.5
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer, world;
+        let meshes = [], bodies = [];
+        let lastTime;
+        
+        // Robot parts
+        let robotBody, lowerArm, upperArm, endEffector;
+        let hingeBase, hingeLower, hingeUpper;
+        let cubes = [];
+        
+        // Input state
+        const keys = { w: false, s: false, a: false, d: false, ArrowUp: false, ArrowDown: false, " ": false };
+        let activeConstraint = null; // The joint holding a cube
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Three.js Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(10, 8, 10);
+            camera.lookAt(0, 2, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 10, 5);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 2. Setup Cannon.js Physics World
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            // Materials
+            const defaultMaterial = new CANNON.Material('default');
+            const defaultContactMaterial = new CANNON.ContactMaterial(defaultMaterial, defaultMaterial, {
+                friction: 0.4,
+                restitution: 0.2
+            });
+            world.addContactMaterial(defaultContactMaterial);
+
+            // 3. Create Objects
+            createFloor(defaultMaterial);
+            createRobot(defaultMaterial);
+            
+            // Create 3 Cubes
+            createCube(new CANNON.Vec3(4, 1, 0), 0xff0055, defaultMaterial);
+            createCube(new CANNON.Vec3(3, 1, 2), 0x0055ff, defaultMaterial);
+            createCube(new CANNON.Vec3(4, 1, -2), 0x55ff00, defaultMaterial);
+
+            // 4. Controls
+            new OrbitControls(camera, renderer.domElement);
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('keydown', (e) => handleKey(e, true));
+            window.addEventListener('keyup', (e) => handleKey(e, false));
+        }
+
+        // --- Object Creation Helpers ---
+
+        function createFloor(material) {
+            // Physics
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0, material: material });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            world.addBody(groundBody);
+
+            // Visual
+            const groundGeo = new THREE.PlaneGeometry(20, 20);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.8 });
+            const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x333333);
+            scene.add(gridHelper);
+        }
+
+        function createBox(w, h, d, mass, pos, color, material, collisionFilterGroup = 1) {
+            // Physics
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({ mass: mass, material: material });
+            body.addShape(shape);
+            body.position.copy(pos);
+            body.collisionFilterGroup = collisionFilterGroup; // Used to avoid self-collision inside robot
+            world.addBody(body);
+            bodies.push(body);
+
+            // Visual
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({ color: color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            meshes.push(mesh);
+
+            return { body, mesh };
+        }
+
+        function createCube(pos, color, material) {
+            const cube = createBox(0.8, 0.8, 0.8, 1, pos, color, material);
+            cube.isPickupable = true; // Flag for logic
+            cubes.push(cube);
+        }
+
+        function createRobot(material) {
+            // Define dimensions
+            const baseH = 1, baseW = 1.5;
+            const armW = 0.4, armL = 3;
+            
+            // 1. Base (Static, rotates on Y)
+            // We make the base dynamic but constrained to the floor so it can rotate
+            // Actually, simpler: A kinematic body or a hinge constraint to the floor.
+            // Let's use a dynamic body constrained to the world (static floor).
+            const basePos = new CANNON.Vec3(0, baseH/2, 0);
+            const baseObj = createBox(baseW, baseH, baseW, 10, basePos, 0x888888, material, 2);
+            robotBody = baseObj.body;
+
+            // Hinge to Floor (Allows Y rotation)
+            const floorBody = new CANNON.Body({ mass: 0 }); // Invisible static anchor
+            floorBody.position.set(0, 0, 0);
+            world.addBody(floorBody);
+
+            hingeBase = new CANNON.HingeConstraint(floorBody, robotBody, {
+                pivotA: new CANNON.Vec3(0, 0, 0),
+                pivotB: new CANNON.Vec3(0, -baseH/2, 0),
+                axisA: new CANNON.Vec3(0, 1, 0),
+                axisB: new CANNON.Vec3(0, 1, 0)
+            });
+            hingeBase.enableMotor = true;
+            world.addConstraint(hingeBase);
+
+
+            // 2. Lower Arm
+            const lowerArmPos = new CANNON.Vec3(0, baseH + armL/2 + 0.2, 0);
+            const lowerObj = createBox(armW, armL, armW, 2, lowerArmPos, 0xffaa00, material, 2);
+            lowerArm = lowerObj.body;
+
+            // Hinge Base -> Lower Arm (Z axis rotation)
+            hingeLower = new CANNON.HingeConstraint(robotBody, lowerArm, {
+                pivotA: new CANNON.Vec3(0, baseH/2, 0),
+                pivotB: new CANNON.Vec3(0, -armL/2 - 0.1, 0),
+                axisA: new CANNON.Vec3(0, 0, 1),
+                axisB: new CANNON.Vec3(0, 0, 1)
+            });
+            hingeLower.enableMotor = true;
+            hingeLower.setMotorSpeed(0);
+            hingeLower.collideConnected = false;
+            world.addConstraint(hingeLower);
+
+            // 3. Upper Arm
+            const upperArmPos = new CANNON.Vec3(0, baseH + armL + armL/2 + 0.4, 0);
+            const upperObj = createBox(armW, armL, armW, 1, upperArmPos, 0xffaa00, material, 2);
+            upperArm = upperObj.body;
+
+            // Hinge Lower -> Upper (Z axis rotation)
+            hingeUpper = new CANNON.HingeConstraint(lowerArm, upperArm, {
+                pivotA: new CANNON.Vec3(0, armL/2 + 0.1, 0),
+                pivotB: new CANNON.Vec3(0, -armL/2 - 0.1, 0),
+                axisA: new CANNON.Vec3(0, 0, 1),
+                axisB: new CANNON.Vec3(0, 0, 1)
+            });
+            hingeUpper.enableMotor = true;
+            hingeUpper.collideConnected = false;
+            world.addConstraint(hingeUpper);
+
+            // 4. End Effector (The Magnet)
+            const effPos = new CANNON.Vec3(0, baseH + armL*2 + 0.5, 0);
+            const effObj = createBox(0.6, 0.2, 0.6, 0.5, effPos, 0xff0000, material, 2);
+            endEffector = effObj.body;
+
+            // Fixed joint (Lock) between Upper Arm and Effector
+            const lock = new CANNON.LockConstraint(upperArm, endEffector);
+            world.addConstraint(lock);
+        }
+
+        // --- Logic ---
+
+        function handleKey(e, isDown) {
+            if (keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) {
+                keys[e.key] = isDown;
+                if (e.key === " " && !isDown) releaseObject(); // Release on key up
+            }
+        }
+
+        function updateControls() {
+            // Base Rotation
+            if (keys['a']) hingeBase.setMotorSpeed(SETTINGS.baseSpeed);
+            else if (keys['d']) hingeBase.setMotorSpeed(-SETTINGS.baseSpeed);
+            else hingeBase.setMotorSpeed(0);
+
+            // Lower Arm
+            if (keys['w']) hingeLower.setMotorSpeed(SETTINGS.armSpeed);
+            else if (keys['s']) hingeLower.setMotorSpeed(-SETTINGS.armSpeed);
+            else hingeLower.setMotorSpeed(0);
+
+            // Upper Arm
+            if (keys['ArrowDown']) hingeUpper.setMotorSpeed(SETTINGS.armSpeed);
+            else if (keys['ArrowUp']) hingeUpper.setMotorSpeed(-SETTINGS.armSpeed);
+            else hingeUpper.setMotorSpeed(0);
+
+            // Magnet logic
+            if (keys[' ']) tryPickup();
+        }
+
+        function tryPickup() {
+            if (activeConstraint) return; // Already holding something
+
+            const effectorPos = endEffector.position;
+
+            for (let i = 0; i < cubes.length; i++) {
+                const cubeBody = cubes[i].body;
+                const distance = effectorPos.distanceTo(cubeBody.position);
+
+                if (distance < SETTINGS.magnetRange) {
+                    // Create a PointToPoint constraint to snap it
+                    activeConstraint = new CANNON.PointToPointConstraint(
+                        endEffector, new CANNON.Vec3(0, -0.2, 0),
+                        cubeBody, new CANNON.Vec3(0, 0, 0)
+                    );
+                    world.addConstraint(activeConstraint);
+                    
+                    // Visual feedback
+                    cubes[i].mesh.material.emissive.setHex(0x333333);
+                    break; 
+                }
+            }
+        }
+
+        function releaseObject() {
+            if (activeConstraint) {
+                world.removeConstraint(activeConstraint);
+                
+                // Reset visuals for all cubes (lazy way)
+                cubes.forEach(c => c.mesh.material.emissive.setHex(0x000000));
+                
+                activeConstraint = null;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Animation Loop ---
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            const dt = 1 / 60; // Fixed time step
+
+            updateControls();
+
+            // Step Physics
+            world.step(dt);
+
+            // Sync Visuals with Physics
+            for (let i = 0; i < meshes.length; i++) {
+                meshes[i].position.copy(bodies[i].position);
+                meshes[i].quaternion.copy(bodies[i].quaternion);
+            }
+
+            // Draw line from effector to picked object (Visual cable)
+            if (activeConstraint) {
+                // Could add a visual line here if desired
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
