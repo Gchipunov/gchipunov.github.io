@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Robot Arm Physics</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; touch-action: none; }
+        
+        /* PC Instructions */
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+            user-select: none;
+            z-index: 10;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 1.2rem; }
+        p { margin: 5px 0; font-size: 0.9rem; color: #ccc; }
+        .key { color: #ff9f43; font-weight: bold; }
+
+        /* Mobile Controls Overlay */
+        #controls-area {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            height: 180px;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            pointer-events: none; /* Let clicks pass through empty spaces */
+            z-index: 20;
+        }
+
+        .control-group {
+            pointer-events: auto;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 15px;
+            display: grid;
+            gap: 10px;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Left Group: Base (L/R) & Lower Arm (W/S) */
+        .dpad-left {
+            grid-template-areas: 
+                ". up ."
+                "left . right"
+                ". down .";
+            width: 150px;
+            height: 150px;
+        }
+
+        /* Right Group: Upper Arm (Arrows) & Magnet */
+        .dpad-right {
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            width: 160px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            color: white;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: background 0.1s;
+        }
+
+        .btn:active, .btn.active {
+            background: rgba(255, 159, 67, 0.8); /* Orange active state */
+            transform: scale(0.95);
+        }
+
+        /* Button Positioning Classes */
+        .btn-up { grid-area: up; }
+        .btn-down { grid-area: down; }
+        .btn-left { grid-area: left; }
+        .btn-right { grid-area: right; }
+        
+        .btn-magnet {
+            grid-column: 1 / -1; /* Span full width */
+            background: rgba(255, 0, 85, 0.3);
+            font-weight: bold;
+        }
+        .btn-magnet:active { background: rgba(255, 0, 85, 0.8); }
+
+        /* Media query to hide info on small phones if needed */
+        @media (max-width: 600px) {
+            #info { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        <h1>Robot Arm Physics</h1>
+        <p><span class="key">W / S</span> : Lower Arm</p>
+        <p><span class="key">UP / DOWN</span> : Upper Arm</p>
+        <p><span class="key">A / D</span> : Rotate Base</p>
+        <p><span class="key">SPACE</span> : Magnet</p>
+    </div>
+
+    <div id="controls-area">
+        <div class="control-group dpad-left">
+            <div class="btn btn-up" data-key="w">▲<br><small>Lower</small></div>
+            <div class="btn btn-left" data-key="a">◀ Base</div>
+            <div class="btn btn-right" data-key="d">Base ▶</div>
+            <div class="btn btn-down" data-key="s">▼<br><small>Lower</small></div>
+        </div>
+
+        <div class="control-group dpad-right">
+            <div class="btn" data-key="ArrowUp" style="grid-column: 1;">Upper ▲</div>
+            <div class="btn" data-key="ArrowDown" style="grid-column: 2;">Upper ▼</div>
+            <div class="btn btn-magnet" data-key=" ">MAGNET</div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import * as CANNON from 'cannon-es';
+
+        // --- Configuration ---
+        const SETTINGS = {
+            baseSpeed: 2,
+            armSpeed: 2.5, // Slightly slower for more torque feel
+            magnetRange: 2.5
+        };
+
+        // --- Globals ---
+        let scene, camera, renderer, world;
+        let meshes = [], bodies = [];
+        
+        // Robot parts
+        let robotBody, lowerArm, upperArm, endEffector;
+        let hingeBase, hingeLower, hingeUpper;
+        let cubes = [];
+        
+        // Input state
+        const keys = { w: false, s: false, a: false, d: false, ArrowUp: false, ArrowDown: false, " ": false };
+        let activeConstraint = null;
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Setup Three.js
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(12, 8, 12);
+            camera.lookAt(0, 3, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 10, 5);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 2. Setup Cannon.js
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 20; // Increased iterations for stiffer joints
+
+            const defaultMaterial = new CANNON.Material('default');
+            const defaultContactMaterial = new CANNON.ContactMaterial(defaultMaterial, defaultMaterial, {
+                friction: 0.4, restitution: 0.1
+            });
+            world.addContactMaterial(defaultContactMaterial);
+
+            // 3. Create Objects
+            createFloor(defaultMaterial);
+            createRobot(defaultMaterial);
+            
+            // Create Cubes
+            createCube(new CANNON.Vec3(4, 1, 0), 0xff0055, defaultMaterial);
+            createCube(new CANNON.Vec3(3, 1, 2), 0x0055ff, defaultMaterial);
+            createCube(new CANNON.Vec3(4, 1, -2), 0x55ff00, defaultMaterial);
+
+            // 4. Controls & Events
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            
+            window.addEventListener('resize', onWindowResize);
+            
+            // Keyboard Listeners
+            window.addEventListener('keydown', (e) => handleInput(e.key, true));
+            window.addEventListener('keyup', (e) => handleInput(e.key, false));
+
+            // Initialize Touch/Mouse Button Listeners
+            setupTouchControls();
+        }
+
+        // --- Touch Control Setup ---
+        function setupTouchControls() {
+            const buttons = document.querySelectorAll('.btn');
+            
+            buttons.forEach(btn => {
+                const key = btn.getAttribute('data-key');
+                
+                // Touch Events
+                btn.addEventListener('touchstart', (e) => {
+                    e.preventDefault(); // Prevent scroll/zoom
+                    btn.classList.add('active');
+                    handleInput(key, true);
+                }, { passive: false });
+
+                btn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    btn.classList.remove('active');
+                    handleInput(key, false);
+                });
+
+                // Mouse Events
+                btn.addEventListener('mousedown', (e) => {
+                    btn.classList.add('active');
+                    handleInput(key, true);
+                });
+                
+                btn.addEventListener('mouseup', () => {
+                    btn.classList.remove('active');
+                    handleInput(key, false);
+                });
+                
+                btn.addEventListener('mouseleave', () => {
+                    btn.classList.remove('active');
+                    handleInput(key, false);
+                });
+            });
+        }
+
+        // Unified Input Handler
+        function handleInput(keyName, isDown) {
+            if (keys.hasOwnProperty(keyName)) {
+                keys[keyName] = isDown;
+                // Magnet release logic: Trigger when key goes UP
+                if (keyName === " " && !isDown) {
+                    releaseObject();
+                }
+            }
+        }
+
+        // --- Creation Helpers ---
+
+        function createFloor(material) {
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0, material: material });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            world.addBody(groundBody);
+
+            const groundGeo = new THREE.PlaneGeometry(20, 20);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.8 });
+            const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+            scene.add(new THREE.GridHelper(20, 20, 0x555555, 0x333333));
+        }
+
+        function createBox(w, h, d, mass, pos, color, material, group = 1) {
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({ mass: mass, material: material });
+            body.addShape(shape);
+            body.position.copy(pos);
+            body.collisionFilterGroup = group;
+            world.addBody(body);
+            bodies.push(body);
+
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({ color: color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            meshes.push(mesh);
+
+            return { body, mesh };
+        }
+
+        function createCube(pos, color, material) {
+            const cube = createBox(0.8, 0.8, 0.8, 0.5, pos, color, material); // Mass 0.5 (lighter)
+            cubes.push(cube);
+        }
+
+        function createRobot(material) {
+            const baseH = 1, baseW = 1.5, armW = 0.4, armL = 3;
+            
+            // Base (Static pivot point, but body is dynamic)
+            const basePos = new CANNON.Vec3(0, baseH/2, 0);
+            const baseObj = createBox(baseW, baseH, baseW, 20, basePos, 0x888888, material, 2);
+            robotBody = baseObj.body;
+
+            const floorBody = new CANNON.Body({ mass: 0 });
+            world.addBody(floorBody);
+
+            hingeBase = new CANNON.HingeConstraint(floorBody, robotBody, {
+                pivotA: new CANNON.Vec3(0, 0, 0), pivotB: new CANNON.Vec3(0, -baseH/2, 0),
+                axisA: new CANNON.Vec3(0, 1, 0), axisB: new CANNON.Vec3(0, 1, 0)
+            });
+            hingeBase.enableMotor = true;
+            // High max force to prevent drift
+            hingeBase.setMotorMaxForce(500);
+            world.addConstraint(hingeBase);
+
+            // Lower Arm
+            // Reduced mass to 0.5 to make it easier to lift
+            const lowerArmPos = new CANNON.Vec3(0, baseH + armL/2 + 0.2, 0);
+            const lowerObj = createBox(armW, armL, armW, 0.5, lowerArmPos, 0xffaa00, material, 2);
+            lowerArm = lowerObj.body;
+
+            hingeLower = new CANNON.HingeConstraint(robotBody, lowerArm, {
+                pivotA: new CANNON.Vec3(0, baseH/2, 0), pivotB: new CANNON.Vec3(0, -armL/2 - 0.1, 0),
+                axisA: new CANNON.Vec3(0, 0, 1), axisB: new CANNON.Vec3(0, 0, 1)
+            });
+            hingeLower.enableMotor = true;
+            // CRITICAL FIX: Set high max force so it acts as a strong brake when speed is 0
+            hingeLower.setMotorMaxForce(1000); 
+            hingeLower.collideConnected = false;
+            world.addConstraint(hingeLower);
+
+            // Upper Arm
+            // Reduced mass to 0.5
+            const upperArmPos = new CANNON.Vec3(0, baseH + armL + armL/2 + 0.4, 0);
+            const upperObj = createBox(armW, armL, armW, 0.5, upperArmPos, 0xffaa00, material, 2);
+            upperArm = upperObj.body;
+
+            hingeUpper = new CANNON.HingeConstraint(lowerArm, upperArm, {
+                pivotA: new CANNON.Vec3(0, armL/2 + 0.1, 0), pivotB: new CANNON.Vec3(0, -armL/2 - 0.1, 0),
+                axisA: new CANNON.Vec3(0, 0, 1), axisB: new CANNON.Vec3(0, 0, 1)
+            });
+            hingeUpper.enableMotor = true;
+            // CRITICAL FIX: Set high max force to hold the elbow up
+            hingeUpper.setMotorMaxForce(1000); 
+            hingeUpper.collideConnected = false;
+            world.addConstraint(hingeUpper);
+
+            // End Effector
+            const effPos = new CANNON.Vec3(0, baseH + armL*2 + 0.5, 0);
+            const effObj = createBox(0.6, 0.2, 0.6, 0.1, effPos, 0xff0000, material, 2);
+            endEffector = effObj.body;
+            world.addConstraint(new CANNON.LockConstraint(upperArm, endEffector));
+        }
+
+        // --- Logic ---
+        function updateControls() {
+            // Base
+            if (keys['a']) hingeBase.setMotorSpeed(SETTINGS.baseSpeed);
+            else if (keys['d']) hingeBase.setMotorSpeed(-SETTINGS.baseSpeed);
+            else hingeBase.setMotorSpeed(0);
+
+            // Lower Arm
+            if (keys['w']) hingeLower.setMotorSpeed(SETTINGS.armSpeed);
+            else if (keys['s']) hingeLower.setMotorSpeed(-SETTINGS.armSpeed);
+            else hingeLower.setMotorSpeed(0);
+
+            // Upper Arm
+            if (keys['ArrowDown']) hingeUpper.setMotorSpeed(SETTINGS.armSpeed);
+            else if (keys['ArrowUp']) hingeUpper.setMotorSpeed(-SETTINGS.armSpeed);
+            else hingeUpper.setMotorSpeed(0);
+
+            // Magnet
+            if (keys[' ']) tryPickup();
+        }
+
+        function tryPickup() {
+            if (activeConstraint) return;
+            const effectorPos = endEffector.position;
+            for (let i = 0; i < cubes.length; i++) {
+                const cubeBody = cubes[i].body;
+                if (effectorPos.distanceTo(cubeBody.position) < SETTINGS.magnetRange) {
+                    activeConstraint = new CANNON.PointToPointConstraint(
+                        endEffector, new CANNON.Vec3(0, -0.2, 0),
+                        cubeBody, new CANNON.Vec3(0, 0, 0)
+                    );
+                    world.addConstraint(activeConstraint);
+                    cubes[i].mesh.material.emissive.setHex(0x333333);
+                    break; 
+                }
+            }
+        }
+
+        function releaseObject() {
+            if (activeConstraint) {
+                world.removeConstraint(activeConstraint);
+                cubes.forEach(c => c.mesh.material.emissive.setHex(0x000000));
+                activeConstraint = null;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateControls();
+            world.step(1 / 60);
+            for (let i = 0; i < meshes.length; i++) {
+                meshes[i].position.copy(bodies[i].position);
+                meshes[i].quaternion.copy(bodies[i].quaternion);
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
