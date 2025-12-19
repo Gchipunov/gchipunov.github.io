@@ -1,1 +1,424 @@
 
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Boosty: Mobile Gas Station Simulator</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 20px; color: #00d2ff; }
+        #health-bar {
+            width: 200px;
+            height: 20px;
+            background: #444;
+            border: 2px solid #fff;
+        }
+        #health-fill {
+            width: 100%;
+            height: 100%;
+            background: #0f0;
+            transition: width 0.2s, background 0.2s;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>Boosty Simulator 2025</h1>
+    <div>Hull Integrity:</div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <p>Use <b>Arrow Keys</b> to drive.</p>
+    <p id="status">Delivering Gas...</p>
+</div>
+<canvas id="glcanvas"></canvas>
+
+<script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    
+    void main() {
+        // Scale the unit quad
+        vec2 position = a_position * u_scale;
+        
+        // Translate
+        position = position + u_translation;
+        
+        // Convert from pixels to 0.0->1.0
+        vec2 zeroToOne = position / u_resolution;
+        
+        // Convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        
+        // Convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+        
+        // Flip Y axis because WebGL 0,0 is bottom left, but we want top left logic usually
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+/**
+ * ENGINE SETUP
+ */
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl");
+
+if (!gl) { alert("WebGL not supported"); }
+
+// Compile Shader Helper
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vsSource = document.getElementById("vs").text;
+const fsSource = document.getElementById("fs").text;
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+// Look up locations
+const positionLocation = gl.getAttribLocation(program, "a_position");
+const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+const translationLocation = gl.getUniformLocation(program, "u_translation");
+const scaleLocation = gl.getUniformLocation(program, "u_scale");
+
+// Create Buffer for a Unit Quad (0,0 to 1,1)
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    0, 0,
+    1, 0,
+    0, 1,
+    0, 1,
+    1, 0,
+    1, 1,
+]), gl.STATIC_DRAW);
+
+/**
+ * GAME LOGIC
+ */
+
+// Constants
+const TILE_SIZE = 50;
+const MAP_WIDTH = 20;
+const MAP_HEIGHT = 15;
+const MAX_HEALTH = 5;
+
+// State
+let keys = {};
+let lastTime = 0;
+let gameOver = false;
+let shakeTime = 0;
+
+// Entities
+const boosty = {
+    x: 100, y: 100, w: 40, h: 60,
+    vx: 0, vy: 0, speed: 300,
+    color: [0.0, 0.8, 1.0, 1.0], // Cyan
+    health: MAX_HEALTH
+};
+
+const particles = [];
+const traffic = [];
+const buildings = [];
+
+// Map Generation (0 = Road, 1 = Building)
+// Simple grid: Roads every 3 tiles
+const mapGrid = [];
+for(let y=0; y<MAP_HEIGHT; y++) {
+    const row = [];
+    for(let x=0; x<MAP_WIDTH; x++) {
+        if(x % 4 === 0 || y % 4 === 0) {
+            row.push(0); // Road
+        } else {
+            row.push(1); // Building
+            buildings.push({
+                x: x * TILE_SIZE,
+                y: y * TILE_SIZE,
+                w: TILE_SIZE,
+                h: TILE_SIZE,
+                color: [0.5, 0.5, 0.5, 1.0]
+            });
+        }
+    }
+    mapGrid.push(row);
+}
+
+// Spawn Traffic
+for(let i=0; i<8; i++) {
+    // Find a random road spot
+    let rx, ry;
+    do {
+        rx = Math.floor(Math.random() * MAP_WIDTH);
+        ry = Math.floor(Math.random() * MAP_HEIGHT);
+    } while(mapGrid[ry][rx] !== 0);
+
+    traffic.push({
+        x: rx * TILE_SIZE + 5,
+        y: ry * TILE_SIZE + 5,
+        w: 30, h: 30,
+        vx: (Math.random() > 0.5 ? 100 : -100) * (Math.random() > 0.5 ? 1 : 0),
+        vy: (Math.random() > 0.5 ? 100 : -100) * (Math.random() > 0.5 ? 0 : 1),
+        color: [1.0, 0.2, 0.2, 1.0] // Red
+    });
+}
+
+// Input Handling
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// AABB Collision
+function rectIntersect(r1, r2) {
+    return !(r2.x > r1.x + r1.w || 
+             r2.x + r2.w < r1.x || 
+             r2.y > r1.y + r1.h || 
+             r2.y + r2.h < r1.y);
+}
+
+function spawnExplosion(x, y) {
+    for(let i=0; i<50; i++) {
+        particles.push({
+            x: x + 20, y: y + 30,
+            vx: (Math.random() - 0.5) * 500,
+            vy: (Math.random() - 0.5) * 500,
+            life: 1.0 + Math.random(),
+            w: 10, h: 10,
+            color: [1.0, 0.5 + Math.random()*0.5, 0.0, 1.0]
+        });
+    }
+}
+
+function update(dt) {
+    if (gameOver) {
+        // Only update particles
+        particles.forEach(p => {
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= dt;
+        });
+        return;
+    }
+
+    // Boosty Movement
+    boosty.vx = 0;
+    boosty.vy = 0;
+    if (keys['ArrowUp']) boosty.vy = -boosty.speed;
+    if (keys['ArrowDown']) boosty.vy = boosty.speed;
+    if (keys['ArrowLeft']) boosty.vx = -boosty.speed;
+    if (keys['ArrowRight']) boosty.vx = boosty.speed;
+
+    let nextX = boosty.x + boosty.vx * dt;
+    let nextY = boosty.y + boosty.vy * dt;
+
+    // Boundary Checks
+    if (nextX < 0) nextX = 0;
+    if (nextX > canvas.width - boosty.w) nextX = canvas.width - boosty.w;
+    if (nextY < 0) nextY = 0;
+    if (nextY > canvas.height - boosty.h) nextY = canvas.height - boosty.h;
+
+    // Collision with Buildings
+    let collided = false;
+    // Check X move
+    let testRectX = { x: nextX, y: boosty.y, w: boosty.w, h: boosty.h };
+    for (let b of buildings) {
+        if (rectIntersect(testRectX, b)) {
+            nextX = boosty.x; // Cancel X move
+            collided = true;
+            break;
+        }
+    }
+    // Check Y move
+    let testRectY = { x: nextX, y: nextY, w: boosty.w, h: boosty.h };
+    for (let b of buildings) {
+        if (rectIntersect(testRectY, b)) {
+            nextY = boosty.y; // Cancel Y move
+            collided = true;
+            break;
+        }
+    }
+
+    // Apply Move
+    boosty.x = nextX;
+    boosty.y = nextY;
+
+    // Traffic Update & Collision
+    for(let car of traffic) {
+        car.x += car.vx * dt;
+        car.y += car.vy * dt;
+
+        // Bounce off walls
+        if(car.x <= 0 || car.x >= canvas.width - car.w) car.vx *= -1;
+        if(car.y <= 0 || car.y >= canvas.height - car.h) car.vy *= -1;
+
+        // Bounce off buildings
+        for(let b of buildings) {
+            if(rectIntersect(car, b)) {
+                car.vx *= -1;
+                car.vy *= -1;
+                car.x += car.vx * dt * 2; // unstuck
+                car.y += car.vy * dt * 2;
+            }
+        }
+
+        // Hit Boosty
+        if(rectIntersect(boosty, car)) {
+            collided = true;
+            // Push back
+            boosty.x -= boosty.vx * dt * 5;
+            boosty.y -= boosty.vy * dt * 5;
+            car.vx *= -1;
+            car.vy *= -1;
+        }
+    }
+
+    if (collided) {
+        handleDamage();
+    }
+
+    // Screen shake decay
+    if(shakeTime > 0) shakeTime -= dt;
+}
+
+function handleDamage() {
+    // Simple debounce via immunity or just raw checks? 
+    // We'll use a small shake timer as cooldown to prevent instant death in 1 frame
+    if(shakeTime <= 0) {
+        boosty.health--;
+        shakeTime = 0.5; // Trauma
+        updateUI();
+        
+        if (boosty.health <= 0) {
+            explodeBoosty();
+        }
+    }
+}
+
+function explodeBoosty() {
+    gameOver = true;
+    document.getElementById("status").innerText = "BOOSTY HAS EXPLODED!";
+    document.getElementById("status").style.color = "red";
+    spawnExplosion(boosty.x, boosty.y);
+    // Hide Boosty
+    boosty.w = 0; 
+}
+
+function updateUI() {
+    const fill = document.getElementById("health-fill");
+    const pct = (boosty.health / MAX_HEALTH) * 100;
+    fill.style.width = pct + "%";
+    if(pct < 30) fill.style.background = "red";
+    else if(pct < 60) fill.style.background = "orange";
+}
+
+/**
+ * RENDERING
+ */
+function drawRect(x, y, w, h, color) {
+    gl.uniform2f(translationLocation, x, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform4fv(colorLocation, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function render() {
+    // Resize canvas
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.clearColor(0.15, 0.15, 0.15, 1.0); // Road color background
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(program);
+    gl.enableVertexAttribArray(positionLocation);
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+
+    // Shake Effect
+    let shakeX = 0, shakeY = 0;
+    if(shakeTime > 0) {
+        shakeX = (Math.random() - 0.5) * 20;
+        shakeY = (Math.random() - 0.5) * 20;
+    }
+
+    // 1. Draw Buildings
+    for (let b of buildings) {
+        drawRect(b.x + shakeX, b.y + shakeY, b.w, b.h, b.color);
+    }
+
+    // 2. Draw Traffic
+    for (let car of traffic) {
+        drawRect(car.x + shakeX, car.y + shakeY, car.w, car.h, car.color);
+    }
+
+    // 3. Draw Boosty (The Truck)
+    if (boosty.health > 0) {
+        // Cab
+        drawRect(boosty.x + shakeX, boosty.y + shakeY, boosty.w, boosty.h, boosty.color);
+        // Tank (Gas)
+        drawRect(boosty.x + 5 + shakeX, boosty.y + 5 + shakeY, boosty.w - 10, boosty.h - 20, [1.0, 1.0, 1.0, 0.5]);
+    }
+
+    // 4. Draw Particles
+    for (let p of particles) {
+        if (p.life > 0) {
+            drawRect(p.x, p.y, p.w, p.h, p.color);
+        }
+    }
+}
+
+// Game Loop
+function loop(timestamp) {
+    let dt = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+    if(dt > 0.1) dt = 0.1; // Cap delta time
+
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
