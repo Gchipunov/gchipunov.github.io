@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse UUID Sim-Scanner</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --terminal-green: #00ff41;
+            --terminal-dim: #008f11;
+            --panel-bg: #2d2d2d;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--terminal-green);
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .scanner-device {
+            background-color: var(--panel-bg);
+            border: 2px solid var(--terminal-dim);
+            padding: 2rem;
+            width: 500px;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+            border-radius: 8px;
+        }
+
+        h2 {
+            text-transform: uppercase;
+            border-bottom: 1px dashed var(--terminal-dim);
+            padding-bottom: 10px;
+            margin-top: 0;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        .control-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.8rem;
+            color: #aaa;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            background-color: #000;
+            border: 1px solid var(--terminal-dim);
+            color: var(--terminal-green);
+            padding: 10px;
+            font-family: inherit;
+            font-size: 1.1rem;
+            box-sizing: border-box;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--terminal-green);
+            box-shadow: 0 0 5px var(--terminal-dim);
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 1.5rem;
+        }
+
+        button {
+            flex: 1;
+            background-color: var(--terminal-dim);
+            color: #000;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-weight: bold;
+            font-family: inherit;
+            text-transform: uppercase;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--terminal-green);
+        }
+
+        .output-screen {
+            background-color: #000;
+            border: 1px solid var(--terminal-dim);
+            padding: 15px;
+            min-height: 50px;
+            word-break: break-all;
+            position: relative;
+        }
+
+        .status-light {
+            width: 10px;
+            height: 10px;
+            background-color: #333;
+            border-radius: 50%;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        
+        .status-light.active {
+            background-color: var(--terminal-green);
+            box-shadow: 0 0 5px var(--terminal-green);
+        }
+
+        .note {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+
+<div class="scanner-device">
+    <h2>WMS Scanner v2.0</h2>
+
+    <div class="control-group">
+        <label>WAREHOUSE LOCATION (e.g. C-22.3D)</label>
+        <input type="text" id="inputLocation" placeholder="Enter Location ID" value="C-22.3D">
+    </div>
+
+    <div class="buttons">
+        <button onclick="encodeLocation()">Generatec QR Data</button>
+    </div>
+
+    <div class="control-group">
+        <label>SCANNED UUID DATA</label>
+        <input type="text" id="inputUUID" placeholder="d4...-....-....">
+    </div>
+
+    <div class="buttons">
+        <button onclick="decodeUUID()">Reverse Lookup</button>
+    </div>
+
+    <div class="output-screen">
+        <div class="status-light" id="status"></div>
+        <div id="resultOutput">> SYSTEM READY...</div>
+    </div>
+    
+    <div class="note">
+        * Logic: Bidirectional XOR Cipher (Key: 0x96).
+        <br>
+        * Matches 'B' (0x42) to 'd4' start byte.
+    </div>
+</div>
+
+<script>
+    // The "Magic Key" acts as a mask. 
+    // 0x96 is chosen because 0x42 ('B') XOR 0x96 = 0xD4 (Your target start byte)
+    const CIPHER_KEY = 0x96; 
+    
+    // Standard UUID suffix to maintain the "look" of the system if data is short
+    // Note: We will overwrite the beginning of this with our data
+    const BASE_TEMPLATE = "00000000-a245-2197-b8ab-ef9fd0658f44";
+
+    function encodeLocation() {
+        const loc = document.getElementById('inputLocation').value.toUpperCase();
+        
+        if (!loc) {
+            log("Error: Please enter a location.");
+            return;
+        }
+
+        // 1. Convert string to hex bytes AND apply XOR mask
+        let hexStr = "";
+        for (let i = 0; i < loc.length; i++) {
+            let charCode = loc.charCodeAt(i);
+            // XOR operation hides the letter inside a different number
+            let maskedCode = charCode ^ CIPHER_KEY; 
+            // Convert to hex and pad with 0 if needed
+            hexStr += maskedCode.toString(16).padStart(2, '0');
+        }
+
+        // 2. Pad the result to ensure we have enough hex digits for a UUID (32 digits)
+        // We fill the rest with the "System Template" so it looks authentic
+        // Remove dashes from template for easier merging
+        const cleanTemplate = BASE_TEMPLATE.replace(/-/g, '');
+        
+        // If our string is shorter than the template, append the rest of the template
+        let finalHex = hexStr;
+        if (hexStr.length < 32) {
+            finalHex += cleanTemplate.substring(hexStr.length);
+        }
+        
+        // 3. Format as UUID (8-4-4-4-12)
+        const uuid = formatAsUUID(finalHex);
+
+        document.getElementById('inputUUID').value = uuid;
+        log("GENERATED: " + uuid);
+        flashStatus();
+    }
+
+    function decodeUUID() {
+        let uuid = document.getElementById('inputUUID').value;
+        
+        if (!uuid) {
+            log("Error: Please enter UUID data.");
+            return;
+        }
+
+        // 1. Clean the UUID (remove dashes)
+        const cleanHex = uuid.replace(/-/g, '');
+
+        // 2. Convert Hex back to String using XOR mask
+        let resultStr = "";
+        
+        // We scan 2 characters at a time (1 byte)
+        for (let i = 0; i < cleanHex.length; i += 2) {
+            let hexByte = cleanHex.substring(i, i+2);
+            let charCode = parseInt(hexByte, 16);
+            
+            // Reverse the XOR to get original letter
+            let originalCode = charCode ^ CIPHER_KEY;
+            
+            // Filter: Only keep printable ASCII characters (A-Z, 0-9, -, .)
+            // This stops the decoder when it hits the "random filler" data at the end
+            if (originalCode >= 32 && originalCode <= 126) {
+                resultStr += String.fromCharCode(originalCode);
+            } else {
+                // If we hit non-readable junk (the filler), stop reading
+                // Note: In a strict system you might want a length header, 
+                // but for this game, stopping at non-printable works well.
+                break; 
+            }
+        }
+
+        document.getElementById('inputLocation').value = resultStr;
+        log("LOCATION FOUND: " + resultStr);
+        flashStatus();
+    }
+
+    function formatAsUUID(hex) {
+        // Ensures the string fits the 8-4-4-4-12 structure
+        const p1 = hex.substring(0, 8);
+        const p2 = hex.substring(8, 12);
+        const p3 = hex.substring(12, 16);
+        const p4 = hex.substring(16, 20);
+        const p5 = hex.substring(20, 32);
+        return `${p1}-${p2}-${p3}-${p4}-${p5}`;
+    }
+
+    function log(msg) {
+        document.getElementById('resultOutput').innerText = "> " + msg;
+    }
+
+    function flashStatus() {
+        const light = document.getElementById('status');
+        light.classList.add('active');
+        setTimeout(() => light.classList.remove('active'), 200);
+    }
+</script>
+
+</body>
+</html>
