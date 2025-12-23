@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Candle Simulation</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #aaa;
+            font-family: sans-serif;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h2>WebGL Candle</h2>
+        <p>Simulation running...<br>Watch the wax drip and the height decrease.</p>
+    </div>
+    <div id="canvas-container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- CONFIGURATION ---
+        const CONFIG = {
+            candleRadius: 2,
+            candleHeight: 12,
+            color: 0xEAE2CF, // Creamy wax color
+            burnSpeed: 0.003, // How fast height decreases
+            dripFrequency: 0.02, // Chance per frame to spawn a drip
+            flameHeight: 2.5
+        };
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050505);
+        scene.fog = new THREE.FogExp2(0x050505, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(15, 10, 15);
+        camera.lookAt(0, 4, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5); // Soft white light
+        scene.add(ambientLight);
+
+        // The Flame Light (Dynamic)
+        const flameLight = new THREE.PointLight(0xffaa33, 1, 20);
+        flameLight.castShadow = true;
+        flameLight.shadow.bias = -0.0001;
+        scene.add(flameLight);
+
+        // --- OBJECTS ---
+
+        // 1. Floor
+        const planeGeometry = new THREE.PlaneGeometry(100, 100);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+        const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+        plane.rotation.x = -Math.PI / 2;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // 2. The Candle Body
+        // We move geometry up so pivot point is at the bottom (0,0,0) making scaling easier
+        const candleGeo = new THREE.CylinderGeometry(CONFIG.candleRadius, CONFIG.candleRadius, CONFIG.candleHeight, 32);
+        candleGeo.translate(0, CONFIG.candleHeight / 2, 0); 
+        const candleMat = new THREE.MeshStandardMaterial({ 
+            color: CONFIG.color, 
+            roughness: 0.3,
+            subsurfaceScattering: true, // Pseudo-SSS via logic
+        });
+        const candle = new THREE.Mesh(candleGeo, candleMat);
+        candle.castShadow = true;
+        candle.receiveShadow = true;
+        scene.add(candle);
+
+        // 3. The Wick
+        const wickGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
+        const wickMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const wick = new THREE.Mesh(wickGeo, wickMat);
+        scene.add(wick);
+
+        // 4. The Flame (Custom Shader)
+        // Using a shader allows us to animate vertices for "wind" and gradient colors
+        const flameVertexShader = `
+            uniform float time;
+            varying vec2 vUv;
+            varying float vElevation;
+
+            // Simple noise function
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+            vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+            float snoise(vec3 v) {
+                const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
+                const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
+                // First corner
+                vec3 i  = floor(v + dot(v, C.yyy) );
+                vec3 x0 = v - i + dot(i, C.xxx) ;
+                // Other corners
+                vec3 g = step(x0.yzx, x0.xyz);
+                vec3 l = 1.0 - g;
+                vec3 i1 = min( g.xyz, l.zxy );
+                vec3 i2 = max( g.xyz, l.zxy );
+                vec3 x1 = x0 - i1 + C.xxx;
+                vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y
+                vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y
+                // Permutations
+                i = mod289(i);
+                vec4 p = permute( permute( permute(
+                            i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                        + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+                        + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+                float n_ = 0.142857142857; // 1.0/7.0
+                vec3  ns = n_ * D.wyz - D.xzx;
+                vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)
+                vec4 x_ = floor(j * ns.z);
+                vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)
+                vec4 x = x_ *ns.x + ns.yyyy;
+                vec4 y = y_ *ns.x + ns.yyyy;
+                vec4 h = 1.0 - abs(x) - abs(y);
+                vec4 b0 = vec4( x.xy, y.xy );
+                vec4 b1 = vec4( x.zw, y.zw );
+                vec4 s0 = floor(b0)*2.0 + 1.0;
+                vec4 s1 = floor(b1)*2.0 + 1.0;
+                vec4 sh = -step(h, vec4(0.0));
+                vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+                vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+                vec3 p0 = vec3(a0.xy,h.x);
+                vec3 p1 = vec3(a0.zw,h.y);
+                vec3 p2 = vec3(a1.xy,h.z);
+                vec3 p3 = vec3(a1.zw,h.w);
+                //Normalise gradients
+                vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+                p0 *= norm.x;
+                p1 *= norm.y;
+                p2 *= norm.z;
+                p3 *= norm.w;
+                // Mix final noise value
+                vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+                m = m * m;
+                return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+            }
+
+            void main() {
+                vUv = uv;
+                
+                // Shape deformation
+                vec3 pos = position;
+                
+                // Add noise based on height (y) and time
+                float noiseVal = snoise(vec3(pos.x * 2.0, pos.y * 3.0 + time * 2.0, time));
+                
+                // Distort mostly the top part
+                float distortion = smoothstep(0.0, 1.0, uv.y) * 0.3;
+                pos.x += noiseVal * distortion;
+                pos.z += noiseVal * distortion;
+                
+                vElevation = pos.y; // pass to fragment for color gradient
+
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            }
+        `;
+
+        const flameFragmentShader = `
+            varying vec2 vUv;
+            
+            void main() {
+                // Gradient Colors
+                vec3 colorBase = vec3(0.0, 0.2, 1.0); // Blue base
+                vec3 colorMid = vec3(1.0, 0.5, 0.0);  // Orange middle
+                vec3 colorTip = vec3(1.0, 1.0, 0.8);  // Yellow/White tip
+                
+                // Mix based on vertical UV
+                vec3 finalColor = mix(colorBase, colorMid, smoothstep(0.0, 0.4, vUv.y));
+                finalColor = mix(finalColor, colorTip, smoothstep(0.4, 0.8, vUv.y));
+                
+                // Shape Mask (make it look like a flame, not a square)
+                // Distance from center on XZ plane
+                float dist = abs(vUv.x - 0.5) * 2.0; 
+                // Taper at the top
+                float shape = 1.0 - smoothstep(0.0, 1.0, dist + vUv.y * 0.5); 
+                
+                if (shape < 0.1) discard; // Transparency cutout
+
+                gl_FragColor = vec4(finalColor, 0.9);
+            }
+        `;
+
+        const flameGeo = new THREE.PlaneGeometry(1.5, CONFIG.flameHeight, 20, 20);
+        // Translate slightly so pivot is at bottom
+        flameGeo.translate(0, CONFIG.flameHeight/2, 0); 
+        
+        const flameMat = new THREE.ShaderMaterial({
+            vertexShader: flameVertexShader,
+            fragmentShader: flameFragmentShader,
+            uniforms: {
+                time: { value: 0 }
+            },
+            side: THREE.DoubleSide,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const flame = new THREE.Mesh(flameGeo, flameMat);
+        // Make the flame billboard (always face camera)
+        // We will update rotation in loop
+        scene.add(flame);
+
+
+        // 5. Particle System (Embers)
+        const particleCount = 50;
+        const particleGeo = new THREE.BufferGeometry();
+        const pPos = new Float32Array(particleCount * 3);
+        const pLife = new Float32Array(particleCount);
+        
+        for(let i=0; i<particleCount; i++) {
+            pPos[i*3] = (Math.random() - 0.5) * 1.5; // X
+            pPos[i*3+1] = Math.random() * 5 + 10; // Y start high
+            pPos[i*3+2] = (Math.random() - 0.5) * 1.5; // Z
+            pLife[i] = Math.random();
+        }
+        
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+        
+        const particleMat = new THREE.PointsMaterial({
+            color: 0xffaa00,
+            size: 0.15,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+        
+        const particles = new THREE.Points(particleGeo, particleMat);
+        scene.add(particles);
+
+        // 6. Wax Drip System
+        const drips = []; // Array to store active drip meshes
+
+        function spawnDrip(currentHeight) {
+            const dripGeo = new THREE.SphereGeometry(0.15, 8, 8);
+            const dripMat = new THREE.MeshStandardMaterial({ color: CONFIG.color });
+            const drip = new THREE.Mesh(dripGeo, dripMat);
+            
+            // Random angle around the candle
+            const angle = Math.random() * Math.PI * 2;
+            const r = CONFIG.candleRadius * 0.95; // Slightly inside rim
+            
+            drip.position.set(Math.cos(angle) * r, currentHeight, Math.sin(angle) * r);
+            
+            scene.add(drip);
+            drips.push({
+                mesh: drip,
+                angle: angle,
+                speed: 0,
+                active: true
+            });
+        }
+
+        // --- ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+        
+        // Initial state
+        let currentCandleHeight = CONFIG.candleHeight;
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const dt = clock.getDelta();
+            const elapsed = clock.getElapsedTime();
+
+            // 1. Shrink Candle
+            if (currentCandleHeight > 0.5) {
+                currentCandleHeight -= CONFIG.burnSpeed;
+                // Scale Y
+                candle.scale.y = currentCandleHeight / CONFIG.candleHeight;
+            }
+
+            // 2. Position Wick & Flame
+            const topY = currentCandleHeight;
+            wick.position.y = topY;
+            flame.position.y = topY + 0.5;
+            
+            // Billboard the flame
+            flame.lookAt(camera.position);
+
+            // Update Flame Shader
+            flameMat.uniforms.time.value = elapsed;
+
+            // 3. Dynamic Light Flicker
+            flameLight.position.y = topY + 1.5;
+            flameLight.intensity = 1.0 + Math.sin(elapsed * 10) * 0.1 + Math.sin(elapsed * 23) * 0.1;
+            flameLight.position.x = Math.sin(elapsed * 5) * 0.1;
+
+            // 4. Update Particles
+            const positions = particles.geometry.attributes.position.array;
+            for(let i=0; i<particleCount; i++) {
+                // Move up
+                positions[i*3+1] += dt * 2.0; // Y speed
+                
+                // Add wiggle
+                positions[i*3] += Math.sin(elapsed * 2.0 + i) * 0.01;
+                
+                // Reset if too high or faded
+                if(positions[i*3+1] > topY + 5.0) {
+                    positions[i*3+1] = topY + 1.0;
+                    positions[i*3] = (Math.random() - 0.5) * 1.0;
+                    positions[i*3+2] = (Math.random() - 0.5) * 1.0;
+                }
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+
+            // 5. Wax Drips Logic
+            // Chance to spawn
+            if (Math.random() < CONFIG.dripFrequency && currentCandleHeight > 1) {
+                spawnDrip(topY);
+            }
+
+            // Update existing drips
+            for (let i = drips.length - 1; i >= 0; i--) {
+                const d = drips[i];
+                if (!d.active) continue;
+
+                // Accelerate down
+                d.speed += 0.005; // gravity
+                d.mesh.position.y -= d.speed;
+
+                // Push slightly outward relative to candle center so it slides "on" the surface
+                const surfaceRadius = CONFIG.candleRadius;
+                
+                // Simple collision: If y > 0, keep x/z at radius
+                if (d.mesh.position.y > 0) {
+                    d.mesh.position.x = Math.cos(d.angle) * surfaceRadius;
+                    d.mesh.position.z = Math.sin(d.angle) * surfaceRadius;
+                } else {
+                    // Hit floor
+                    d.mesh.position.y = 0.15; // sit on floor
+                    d.active = false; // stop processing physics
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
