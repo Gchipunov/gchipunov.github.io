@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Simulation: Boiling Water vs Icy Windshield</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: #fff; font-family: sans-serif; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
+        h1 { margin: 0; font-size: 1.5rem; letter-spacing: 2px; }
+        p { margin-top: 5px; font-size: 0.9rem; opacity: 0.8; }
+        .warning { color: #ff4444; font-weight: bold; font-size: 0.8rem; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="instructions">
+        <h1>THERMAL SHOCK SIMULATION</h1>
+        <p>Move your mouse to pour boiling water.</p>
+        <div class="warning">⚠️ In real life, this would crack your windshield!</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- 1. SETUP SCENE ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x111111, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 5, 8);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 2);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        // --- 2. THE WINDSHIELD (Logic: Base Glass + Dynamic Ice Layer) ---
+        
+        // A. Dynamic Canvas for the "Melt Map"
+        // We will draw on this 2D canvas when particles hit, and use it as an alpha map for the ice.
+        const meltCanvas = document.createElement('canvas');
+        meltCanvas.width = 512;
+        meltCanvas.height = 256;
+        const meltCtx = meltCanvas.getContext('2d');
+        
+        // Fill with white (Ice) and some noise for realism
+        meltCtx.fillStyle = '#FFFFFF';
+        meltCtx.fillRect(0, 0, 512, 256);
+        
+        // Add "frost" noise to the canvas
+        for(let i=0; i<5000; i++) {
+            const x = Math.random() * 512;
+            const y = Math.random() * 256;
+            const w = Math.random() * 3;
+            meltCtx.fillStyle = `rgba(200, 230, 255, ${Math.random() * 0.5})`;
+            meltCtx.fillRect(x,y,w,w);
+        }
+
+        const meltTexture = new THREE.CanvasTexture(meltCanvas);
+        
+        // B. The Glass (Base Layer)
+        const glassGeo = new THREE.PlaneGeometry(10, 5);
+        const glassMat = new THREE.MeshPhysicalMaterial({
+            color: 0x112233,
+            metalness: 0.1,
+            roughness: 0.1,
+            transmission: 0.9,
+            thickness: 0.5,
+            transparent: true,
+            opacity: 0.7
+        });
+        const glassMesh = new THREE.Mesh(glassGeo, glassMat);
+        glassMesh.rotation.x = -Math.PI / 4; // Slanted like a windshield
+        scene.add(glassMesh);
+
+        // C. The Ice (Top Layer)
+        // We use the meltTexture as an alphaMap. White = Visible Ice, Black = Melted (Transparent)
+        const iceMat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.8,
+            metalness: 0.1,
+            alphaMap: meltTexture,
+            transparent: true,
+            opacity: 0.95
+        });
+        const iceMesh = new THREE.Mesh(glassGeo, iceMat);
+        iceMesh.position.y = 0.01; // Slightly above glass to prevent z-fighting
+        iceMesh.rotation.x = -Math.PI / 4;
+        scene.add(iceMesh);
+
+
+        // --- 3. PARTICLE SYSTEM (Boiling Water & Steam) ---
+        
+        const particleCount = 1500;
+        const particles = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const velocities = []; // Store velocity per particle
+        const types = [];      // 0 = Water, 1 = Steam
+
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = 0;
+            positions[i * 3 + 1] = -100; // Start hidden
+            positions[i * 3 + 2] = 0;
+            velocities.push({ x: 0, y: 0, z: 0 });
+            types.push(0);
+        }
+
+        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        // Shader for particles (to make water blue and steam white/faded)
+        const particleMaterial = new THREE.PointsMaterial({
+            color: 0x88ccff,
+            size: 0.15,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+
+        const particleSystem = new THREE.Points(particles, particleMaterial);
+        scene.add(particleSystem);
+
+        // --- 4. INTERACTION & ANIMATION LOOP ---
+
+        const mouse = new THREE.Vector2();
+        const raycaster = new THREE.Raycaster();
+        const planeTarget = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // Horizontal plane at y=0 for mouse tracking height
+        
+        // Helper to track mouse in 3D space
+        let pourPosition = new THREE.Vector3(0, 3, 0);
+
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Raycast against a virtual plane to find where the "kettle" is
+            raycaster.setFromCamera(mouse, camera);
+            const target = new THREE.Vector3();
+            raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), target);
+            
+            // Limit pour range
+            pourPosition.x = Math.max(-4, Math.min(4, target.x * 5));
+            pourPosition.y = 3; // Fixed height
+            pourPosition.z = Math.max(-2, Math.min(2, target.y)); 
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const posAttribute = particleSystem.geometry.attributes.position;
+            let needsMeltUpdate = false;
+
+            for (let i = 0; i < particleCount; i++) {
+                
+                // Get current position
+                let px = posAttribute.getX(i);
+                let py = posAttribute.getY(i);
+                let pz = posAttribute.getZ(i);
+
+                // --- SPAWNING ---
+                // If particle is "dead" (below floor), respawn at mouse position
+                if (py < -2) {
+                    // Randomize type: 80% Water, 20% Steam
+                    const isSteam = Math.random() > 0.8;
+                    types[i] = isSteam ? 1 : 0;
+
+                    // Spawn slightly randomized around cursor
+                    px = pourPosition.x + (Math.random() - 0.5) * 0.2;
+                    py = pourPosition.y; 
+                    pz = pourPosition.z + (Math.random() - 0.5) * 0.2; // pour Z is effectively controlling X/Y on screen due to camera
+
+                    // Reset velocity
+                    if (isSteam) {
+                        velocities[i] = { 
+                            x: (Math.random() - 0.5) * 0.05, 
+                            y: 0.02 + Math.random() * 0.02, // Rising
+                            z: (Math.random() - 0.5) * 0.05 
+                        };
+                    } else {
+                        // Water falls down
+                        velocities[i] = { 
+                            x: (Math.random() - 0.5) * 0.02, 
+                            y: -0.05 - Math.random() * 0.05, 
+                            z: (Math.random() - 0.5) * 0.02 
+                        };
+                    }
+                }
+
+                // --- PHYSICS UPDATE ---
+                
+                // Update Position
+                px += velocities[i].x;
+                py += velocities[i].y;
+                pz += velocities[i].z;
+
+                // Gravity/Steam Physics
+                if (types[i] === 0) {
+                    // Water accelerates down
+                    velocities[i].y -= 0.002; 
+                } else {
+                    // Steam slows down and dissipates
+                    velocities[i].x += (Math.random() - 0.5) * 0.005;
+                }
+
+                // --- COLLISION WITH WINDSHIELD ---
+                // Windshield plane equation logic (Rotation is -45deg, roughly y = z + offset logic)
+                // Since we rotated the mesh, we can do simple raycast or math. 
+                // Math approximation for speed: The plane is centered at 0,0,0 and rotated -45 deg on X.
+                // Normal is (0, 0.707, 0.707). Point on plane is (0,0,0).
+                // Distance = dot(point, normal).
+                
+                const cos45 = 0.707;
+                // Transform point to local plane space (undo rotation)
+                const localY = py * cos45 - pz * cos45;
+                const localZ = py * cos45 + pz * cos45; // Depth relative to plane surface
+
+                // Check impact: If near plane surface (localZ approx 0) and within bounds (width 10, height 5)
+                if (types[i] === 0 && Math.abs(localZ) < 0.1 && px > -5 && px < 5 && localY > -2.5 && localY < 2.5) {
+                    
+                    // MELT LOGIC
+                    // Map world coordinates to canvas coordinates (0-512, 0-256)
+                    const u = (px + 5) / 10; // 0 to 1
+                    const v = (localY + 2.5) / 5; // 0 to 1
+
+                    const cx = u * 512;
+                    const cy = (1 - v) * 256; // Flip Y for canvas
+
+                    // Draw a "hole" in the ice texture
+                    meltCtx.globalCompositeOperation = 'destination-out';
+                    meltCtx.beginPath();
+                    // Randomize size slightly for organic look
+                    const radius = 10 + Math.random() * 10;
+                    
+                    // Create a gradient to soften edges
+                    const grad = meltCtx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+                    grad.addColorStop(0, 'rgba(0,0,0,1)');
+                    grad.addColorStop(1, 'rgba(0,0,0,0)');
+                    
+                    meltCtx.fillStyle = grad;
+                    meltCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+                    meltCtx.fill();
+                    
+                    needsMeltUpdate = true;
+
+                    // Splash/Bounce
+                    velocities[i].y = 0.05; // Bounce up slightly
+                    velocities[i].z += 0.05; // Slide down glass
+                }
+
+                posAttribute.setXYZ(i, px, py, pz);
+            }
+
+            posAttribute.needsUpdate = true;
+
+            if (needsMeltUpdate) {
+                meltTexture.needsUpdate = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
