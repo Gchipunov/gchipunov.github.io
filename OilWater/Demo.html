@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Physics: Water vs Hot Oil</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 1.2rem; color: #ffaa00; }
+        p { margin: 5px 0; font-size: 0.9rem; color: #ccc; }
+        .instruction { color: #44aaff; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>Hot Oil Simulation</h1>
+    <p>Particles: <span id="count">0</span></p>
+    <p class="instruction">Left Click to POUR WATER</p>
+    <p>Watch the water sink, heat up, and flash-boil.</p>
+</div>
+
+<canvas id="glcanvas"></canvas>
+
+<script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    attribute vec4 a_color;
+    attribute float a_size;
+    
+    uniform vec2 u_resolution;
+    
+    varying vec4 v_color;
+    
+    void main() {
+        // Convert from pixel space to clip space -1 to +1
+        vec2 zeroToOne = a_position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        gl_PointSize = a_size;
+        v_color = a_color;
+    }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    varying vec4 v_color;
+    
+    void main() {
+        // Make particles round and soft
+        vec2 coord = gl_PointCoord - vec2(0.5);
+        float dist = length(coord);
+        
+        if (dist > 0.5) {
+            discard;
+        }
+        
+        // Simple radial gradient for "liquid" look
+        float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
+        gl_FragColor = vec4(v_color.rgb, v_color.a * alpha);
+    }
+</script>
+
+<script>
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl', { alpha: false });
+const uiCount = document.getElementById('count');
+
+// --- CONSTANTS & CONFIG ---
+const TYPE_OIL = 0;
+const TYPE_WATER = 1;
+const TYPE_STEAM = 2;
+
+const GRAVITY = 0.15;
+const DAMPING = 0.98; // Air resistance
+const PAN_WIDTH = 400;
+const PAN_HEIGHT = 300; // Height of the oil container walls
+
+// Physics parameters
+const OIL_TEMP = 200;       // Degrees C
+const WATER_START_TEMP = 20;
+const BOILING_POINT = 100;
+const HEAT_TRANSFER_RATE = 0.8; // How fast oil heats water
+const EXPLOSION_FORCE = 3.0;    // Expansion force of steam
+
+// Particle System
+const MAX_PARTICLES = 3000;
+let particleCount = 0;
+
+// Arrays for GPU (Float32Array is faster)
+// [x, y, vx, vy, type, temp, life]
+// We use parallel arrays for JS physics, then interleave for GPU upload
+const pX = new Float32Array(MAX_PARTICLES);
+const pY = new Float32Array(MAX_PARTICLES);
+const pVX = new Float32Array(MAX_PARTICLES);
+const pVY = new Float32Array(MAX_PARTICLES);
+const pType = new Uint8Array(MAX_PARTICLES);
+const pTemp = new Float32Array(MAX_PARTICLES);
+const pLife = new Float32Array(MAX_PARTICLES); // For steam fading
+
+// Spatial Grid for optimized collision (Cell size = interaction radius)
+const CELL_SIZE = 12;
+const GRID_WIDTH = 200; // Arbitrary grid dimension
+let grid = []; // Will store arrays of indices
+
+// Mouse Interaction
+let isPouring = false;
+let mouseX = 0;
+let mouseY = 0;
+
+// --- WEBGL SETUP ---
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vsSource = document.getElementById('vs').text;
+const fsSource = document.getElementById('fs').text;
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Attributes
+const posLoc = gl.getAttribLocation(program, "a_position");
+const colorLoc = gl.getAttribLocation(program, "a_color");
+const sizeLoc = gl.getAttribLocation(program, "a_size");
+const resLoc = gl.getUniformLocation(program, "u_resolution");
+
+// Buffers
+const vertexBuffer = gl.createBuffer();
+const colorBuffer = gl.createBuffer();
+const sizeBuffer = gl.createBuffer();
+
+// --- SIMULATION FUNCTIONS ---
+
+function init() {
+    resize();
+    
+    // Create initial Hot Oil Pool
+    const centerX = canvas.width / 2;
+    const bottomY = canvas.height - 50;
+    
+    // Fill "pan" with oil
+    for (let y = bottomY - 150; y < bottomY; y += 10) {
+        for (let x = centerX - 150; x < centerX + 150; x += 10) {
+            spawnParticle(x + Math.random()*5, y + Math.random()*5, TYPE_OIL);
+        }
+    }
+}
+
+function spawnParticle(x, y, type) {
+    if (particleCount >= MAX_PARTICLES) return;
+    
+    const i = particleCount;
+    pX[i] = x;
+    pY[i] = y;
+    
+    // Initial velocity jitter
+    pVX[i] = (Math.random() - 0.5) * 1;
+    pVY[i] = (Math.random() - 0.5) * 1;
+
+    pType[i] = type;
+    pLife[i] = 1.0;
+    
+    if (type === TYPE_OIL) {
+        pTemp[i] = OIL_TEMP;
+    } else if (type === TYPE_WATER) {
+        pTemp[i] = WATER_START_TEMP;
+        pVY[i] = 2; // Initial downward pour speed
+    } else {
+        pTemp[i] = 100;
+    }
+    
+    particleCount++;
+}
+
+function updatePhysics() {
+    // 1. Reset Grid
+    grid = {};
+    
+    const centerX = canvas.width / 2;
+    const panLeft = centerX - 200;
+    const panRight = centerX + 200;
+    const panBottom = canvas.height - 50;
+    
+    // 2. Integration & Boundary
+    for (let i = 0; i < particleCount; i++) {
+        // Skip dead steam
+        if (pType[i] === TYPE_STEAM && pLife[i] <= 0) continue;
+
+        // Gravity
+        if (pType[i] === TYPE_STEAM) {
+            pVY[i] -= 0.2; // Steam rises
+            pLife[i] -= 0.005; // Steam fades
+        } else {
+            pVY[i] += GRAVITY;
+        }
+
+        // Apply Velocity
+        pX[i] += pVX[i];
+        pY[i] += pVY[i];
+        
+        // Damping
+        pVX[i] *= DAMPING;
+        pVY[i] *= DAMPING;
+
+        // Container (Pan) Limits
+        // Floor
+        if (pY[i] > panBottom) {
+            pY[i] = panBottom;
+            pVY[i] *= -0.5; // Bounce
+            pVX[i] *= 0.9;  // Friction
+        }
+        
+        // Walls (Only for liquid, steam escapes)
+        if (pType[i] !== TYPE_STEAM) {
+            if (pX[i] < panLeft) {
+                pX[i] = panLeft;
+                pVX[i] *= -0.5;
+            } else if (pX[i] > panRight) {
+                pX[i] = panRight;
+                pVX[i] *= -0.5;
+            }
+        }
+        
+        // Add to Grid for collision
+        const gx = Math.floor(pX[i] / CELL_SIZE);
+        const gy = Math.floor(pY[i] / CELL_SIZE);
+        const key = gx + "," + gy;
+        if (!grid[key]) grid[key] = [];
+        grid[key].push(i);
+    }
+
+    // 3. Interactions (Fluid pressure + Heat Transfer)
+    // We iterate grid cells to find neighbors
+    for (let key in grid) {
+        const cell = grid[key];
+        const [gx, gy] = key.split(',').map(Number);
+        
+        // Check neighbor cells (3x3)
+        for (let nx = gx - 1; nx <= gx + 1; nx++) {
+            for (let ny = gy - 1; ny <= gy + 1; ny++) {
+                const nKey = nx + "," + ny;
+                const neighbors = grid[nKey];
+                if (!neighbors) continue;
+                
+                // Pairwise check
+                for (let a of cell) {
+                    for (let b of neighbors) {
+                        if (a === b) continue;
+                        if (pLife[a] <= 0 || pLife[b] <= 0) continue;
+                        
+                        const dx = pX[a] - pX[b];
+                        const dy = pY[a] - pY[b];
+                        const distSq = dx*dx + dy*dy;
+                        
+                        // Interaction Radius
+                        const minDist = CELL_SIZE; 
+                        
+                        if (distSq > 0 && distSq < minDist * minDist) {
+                            const dist = Math.sqrt(distSq);
+                            const overlap = minDist - dist;
+                            
+                            // Normal
+                            const nx = dx / dist;
+                            const ny = dy / dist;
+                            
+                            // --- PHYSICS: REPULSION (Pressure) ---
+                            // Steam pushes harder (explosive expansion)
+                            let force = 0.05 * overlap;
+                            if (pType[a] === TYPE_STEAM || pType[b] === TYPE_STEAM) {
+                                force *= EXPLOSION_FORCE; 
+                            }
+                            
+                            // Separation
+                            const moveX = nx * force;
+                            const moveY = ny * force;
+                            
+                            // Weighting: Steam moves Oil; Oil moves Water (Water sinks)
+                            // Simplified: Equal mass push
+                            pVX[a] += moveX;
+                            pVY[a] += moveY;
+                            pVX[b] -= moveX;
+                            pVY[b] -= moveY;
+                            
+                            // --- THERMODYNAMICS: HEAT TRANSFER ---
+                            // Only between Oil and Water
+                            if (pType[a] === TYPE_OIL && pType[b] === TYPE_WATER) {
+                                transferHeat(a, b);
+                            } else if (pType[a] === TYPE_WATER && pType[b] === TYPE_OIL) {
+                                transferHeat(b, a);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+function transferHeat(idxOil, idxWater) {
+    // Heat flows from Oil to Water
+    // 1. Heat up water
+    pTemp[idxWater] += HEAT_TRANSFER_RATE;
+    
+    // 2. Cool down oil (simulation of energy loss)
+    pTemp[idxOil] -= HEAT_TRANSFER_RATE * 0.1;
+    
+    // 3. Check for Phase Change (Boiling)
+    if (pTemp[idxWater] >= BOILING_POINT) {
+        flashBoil(idxWater);
+    }
+}
+
+function flashBoil(index) {
+    // Water turns to steam
+    pType[index] = TYPE_STEAM;
+    pLife[index] = 1.0;
+    // Reset temp so it doesn't boil again (it's already gas)
+    pTemp[index] = 100;
+    
+    // EXPLOSION IMPULSE
+    // Steam expands instantly. Apply a radial kick to the particle itself to make it jump
+    pVY[index] -= 5; // Pop up
+    pVX[index] += (Math.random() - 0.5) * 10; // Scatter
+}
+
+function render() {
+    // 1. Prepare Data arrays for GL
+    // We reconstruct arrays every frame because particles might die/change, 
+    // and dynamic draw for point sprites is cheap for <10k particles.
+    const posData = [];
+    const colorData = [];
+    const sizeData = [];
+    
+    let activeCount = 0;
+    
+    for (let i = 0; i < particleCount; i++) {
+        // Cleanup dead steam
+        if (pType[i] === TYPE_STEAM && pLife[i] <= 0) continue;
+        
+        // Recycle dead slot if we implemented a free list, 
+        // but for this simple demo we just skip rendering.
+        
+        posData.push(pX[i], pY[i]);
+        
+        // Colors
+        if (pType[i] === TYPE_OIL) {
+            // Hot Oil: Gold/Orange -> Redder if hotter
+            // Visual heat indication
+            const heatColor = Math.min(1.0, pTemp[i] / 250); 
+            colorData.push(1.0, 0.6 * heatColor, 0.1, 1.0); // R, G, B, A
+            sizeData.push(20.0);
+        } else if (pType[i] === TYPE_WATER) {
+            // Water: Blue, turns Cyan as it heats
+            const heatRatio = (pTemp[i] - 20) / 80;
+            colorData.push(0.2, 0.5 + (0.5*heatRatio), 1.0, 0.8);
+            sizeData.push(18.0);
+        } else if (pType[i] === TYPE_STEAM) {
+            // Steam: White, fades out
+            colorData.push(0.9, 0.9, 0.9, pLife[i]);
+            sizeData.push(40.0); // Steam is much bigger (expansion)
+        }
+        
+        activeCount++;
+    }
+    
+    uiCount.innerText = activeCount;
+
+    // 2. Upload to GPU
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(posData), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorData), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(colorLoc);
+    gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, 0, 0);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, sizeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sizeData), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(sizeLoc);
+    gl.vertexAttribPointer(sizeLoc, 1, gl.FLOAT, false, 0, 0);
+    
+    // 3. Draw
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    
+    // Clear with slight trail for motion blur feel
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    
+    // Additive blending for glowing liquids
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    
+    gl.drawArrays(gl.POINTS, 0, activeCount);
+}
+
+// --- MAIN LOOP ---
+
+function loop() {
+    if (isPouring) {
+        // Pour water at mouse position
+        for(let k=0; k<3; k++) { // pour rate
+            spawnParticle(mouseX + (Math.random()-0.5)*20, mouseY, TYPE_WATER);
+        }
+    }
+    
+    updatePhysics();
+    render();
+    requestAnimationFrame(loop);
+}
+
+// --- INPUTS ---
+
+window.addEventListener('resize', resize);
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+canvas.addEventListener('mousedown', e => {
+    isPouring = true;
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+});
+window.addEventListener('mouseup', () => isPouring = false);
+canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+});
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+    isPouring = true;
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+    e.preventDefault();
+}, {passive: false});
+window.addEventListener('touchend', () => isPouring = false);
+canvas.addEventListener('touchmove', e => {
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+    e.preventDefault();
+}, {passive: false});
+
+// Start
+init();
+loop();
+
+</script>
+</body>
+</html>
