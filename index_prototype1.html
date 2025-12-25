@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCHIPUNOV | Game Dev Studio</title>
+    <style>
+        :root {
+            --primary: #00f2ff;
+            --bg: #0a0a0c;
+            --card: #16161a;
+            --text: #e0e0e0;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* WebGL Background Canvas */
+        #bg-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }
+
+        header {
+            height: 60vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background: linear-gradient(to bottom, transparent, var(--bg));
+        }
+
+        header h1 {
+            font-size: 4rem;
+            margin: 0;
+            letter-spacing: 8px;
+            text-transform: uppercase;
+            color: var(--primary);
+            text-shadow: 0 0 20px rgba(0, 242, 255, 0.5);
+        }
+
+        header p {
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 15px;
+            background: var(--card);
+            border: 1px solid #333;
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        th {
+            background: #1f1f23;
+            text-align: left;
+            padding: 15px;
+            color: var(--primary);
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #25252b;
+        }
+
+        tr:hover {
+            background: #1c1c21;
+        }
+
+        .btn-demo {
+            display: inline-block;
+            padding: 6px 12px;
+            background: var(--primary);
+            color: black;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.8rem;
+            transition: 0.3s;
+        }
+
+        .btn-demo:hover {
+            background: white;
+            box-shadow: 0 0 15px var(--primary);
+        }
+
+        .timestamp {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .commit-msg {
+            color: #bbb;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="bg-canvas"></canvas>
+
+    <header>
+        <h1>GCHIPUNOV</h1>
+        <p>WebGL Engineering & Creative Game Development</p>
+    </header>
+
+    <div class="container">
+        <input type="text" id="searchInput" class="search-box" placeholder="Search projects (e.g. RTS, Physics, Water)...">
+        
+        <table id="repoTable">
+            <thead>
+                <tr>
+                    <th>Project Name</th>
+                    <th>Latest Update</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="repoBody">
+                </tbody>
+        </table>
+    </div>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute dreaming vec3 position;
+        void main() {
+            gl_Position = vec4(position, 1.0);
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform float u_time;
+        uniform vec2 u_resolution;
+
+        void main() {
+            vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+            float noise = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+            vec3 color = vec3(0.02, 0.02, 0.05);
+            if(noise > 0.996) color += vec3(0.0, 0.8, 1.0) * (sin(u_time + noise*100.0)*0.5+0.5);
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        // --- DATA SECTION ---
+        const rawData = [
+            ["2DScrollerWallJump", "Add files via upload", "2 weeks ago", "Demo.html"],
+            ["2PlayerSphereBattle", "Add files via upload", "2 weeks ago", "Demo.html"],
+            ["3DRipple", "Create Demo3.html", "4 months ago", "Demo3.html"],
+            ["AFlowerWebGL", "Create Demo2.html", "4 months ago", "Demo2.html"],
+            ["AIRTS", "Add initial HTML/JS Galactic Command", "3 weeks ago", "index.html"],
+            ["AmazonBoxes", "Create createboxes.js", "2 months ago", "Demo.html"],
+            ["AutoRigGLTF", "Create Demo.html", "3 months ago", "Demo.html"],
+            ["AxeLauncherPlatformer", "Create Demo.html", "last week", "Demo.html"],
+            ["BagSort", "Add Demo2.html Shipping Logistics", "3 weeks ago", "Demo2.html"],
+            ["BlueSphereGame", "Create Demo3.html", "4 months ago", "Demo3.html"],
+            ["BlueToothFPS", "WebGL FPS Bluetooth support", "2 weeks ago", "index.html"],
+            ["BoostyTruck", "Create Demo3.html", "5 days ago", "Demo3.html"],
+            ["Burning candle", "Create Demo.html", "2 days ago", "Demo.html"],
+            ["CARGAME", "Create game2.js", "4 months ago", "Demo.html"],
+            ["Caustic water", "Add Demo2.html water caustics", "last month", "Demo2.html"],
+            ["City drive", "Create Demo.html", "4 months ago", "Demo.html"],
+            ["ClimbPlatformer", "Create Demo2.html", "4 months ago", "Demo2.html"],
+            ["ConveyerGame", "Add JGK1.html Conveyor Game", "3 weeks ago", "JGK1.html"],
+            ["CubeCrack", "Create ArrayCollisionMatrix.js", "2 months ago", "Demo.html"],
+            ["DSGame", "Create Demo5.html", "3 weeks ago", "Demo5.html"],
+            ["DogBearRTS", "Faction Wars Logic", "3 weeks ago", "index.html"],
+            ["Drivefast", "Reckless City Driver", "3 weeks ago", "Demo2.html"],
+            ["E350Driver", "Drunk Plumber Simulator 2025", "last month", "Demo3.html"],
+            ["FPSGame", "Create Demo4.html", "last month", "Demo4.html"],
+            ["FallingSandDigger", "Create Demo2.html", "3 weeks ago", "Demo2.html"],
+            ["GrassShader", "Initial grass shader", "last month", "Demo.html"],
+            ["PoolPlatformer", "Swimming platformer demo", "2 weeks ago", "index.html"],
+            ["RobotArmWebGL", "Create Demo4.html", "last week", "Demo4.html"],
+            ["WebGLCarGame", "Car physics and controls", "last week", "Demo.html"],
+            ["XPBRSoftBody", "Add files via upload", "2 weeks ago", "Demo.html"],
+            ["Zombiefort", "3D Zombie Defense", "3 weeks ago", "index.html"]
+        ];
+
+        // --- WEBGL BACKGROUND ---
+        const canvas = document.getElementById('bg-canvas');
+        const gl = canvas.getContext('webgl');
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const vs = createShader(gl, gl.VERTEX_SHADER, `
+            attribute vec2 position;
+            void main() { gl_Position = vec4(position, 0.0, 1.0); }
+        `);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, `
+            precision mediump float;
+            uniform float u_time;
+            uniform vec2 u_res;
+            void main() {
+                vec2 uv = gl_FragCoord.xy / u_res;
+                float star = fract(sin(dot(uv, vec2(12.9898,78.233))) * 43758.5453);
+                vec3 color = vec3(0.05, 0.05, 0.1) * uv.y;
+                if (star > 0.998) color += vec3(0.0, 0.9, 1.0) * abs(sin(u_time + star));
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `);
+
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+        gl.linkProgram(prog); gl.useProgram(prog);
+
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+        const pos = gl.getAttribLocation(prog, "position");
+        gl.enableVertexAttribArray(pos);
+        gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+
+        const timeLoc = gl.getUniformLocation(prog, "u_time");
+        const resLoc = gl.getUniformLocation(prog, "u_res");
+
+        function render(time) {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.uniform1f(timeLoc, time * 0.001);
+            gl.uniform2f(resLoc, canvas.width, canvas.height);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+
+        // --- TABLE LOGIC ---
+        const repoBody = document.getElementById('repoBody');
+        const searchInput = document.getElementById('searchInput');
+
+        function displayTable(data) {
+            repoBody.innerHTML = '';
+            data.forEach(item => {
+                const [name, msg, time, file] = item;
+                const url = `https://gchipunov.github.io/${name}/${file}`;
+                
+                const row = `
+                    <tr>
+                        <td><strong>${name}</strong></td>
+                        <td class="commit-msg">${msg}</td>
+                        <td class="timestamp">${time}</td>
+                        <td><a href="${url}" target="_blank" class="btn-demo">Launch Demo</a></td>
+                    </tr>
+                `;
+                repoBody.innerHTML += row;
+            });
+        }
+
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            const filtered = rawData.filter(item => 
+                item[0].toLowerCase().includes(term) || 
+                item[1].toLowerCase().includes(term)
+            );
+            displayTable(filtered);
+        });
+
+        displayTable(rawData);
+    </script>
+</body>
+</html>
