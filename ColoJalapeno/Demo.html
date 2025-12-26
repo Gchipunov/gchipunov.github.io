@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Rotating Jalapeño</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">WebGL Procedural Jalapeño</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- 1. SETUP SCENE ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222); // Dark grey background
+        
+        // Fog to blend deep distance
+        scene.fog = new THREE.Fog(0x222222, 10, 25);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 0, 12);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. LIGHTING ---
+        // Ambient light for base visibility
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        // Directional light (Key Light) - creates the shine
+        const mainLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        mainLight.position.set(5, 10, 7);
+        scene.add(mainLight);
+
+        // Backlight (Rim Light) - highlights the edge
+        const backLight = new THREE.DirectionalLight(0x44ff44, 0.5);
+        backLight.position.set(-5, 0, -10);
+        scene.add(backLight);
+
+        // --- 3. CREATE THE PEPPER MESH ---
+        
+        // Create a group to hold the body and the stem
+        const pepperGroup = new THREE.Group();
+
+        // A. THE BODY (Green Part)
+        // We define a 2D profile (half-silhouette) of the pepper
+        const points = [];
+        const height = 6;
+        const segments = 20;
+        
+        // Generate a tapered profile: Wide at top (y=height), pointy at bottom (y=0)
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments; // 0 to 1
+            const y = t * height;   // 0 to 6
+            
+            // Math to create the tear-drop shape
+            // radius is roughly sine wave based but clamped at the tip
+            let radius = Math.sin(t * Math.PI * 0.85) * 1.2;
+            
+            // Flatten the top slightly (the "shoulder" of the pepper)
+            if (t > 0.9) radius *= 0.9;
+
+            points.push(new THREE.Vector2(radius, y - height/2));
+        }
+
+        // LatheGeometry spins the profile around the Y axis to make a 3D shape
+        const bodyGeo = new THREE.LatheGeometry(points, 32);
+
+        // BEND THE GEOMETRY
+        // Real peppers aren't straight cylinders. We modify the vertex positions directly.
+        const positionAttribute = bodyGeo.attributes.position;
+        const vertex = new THREE.Vector3();
+
+        for (let i = 0; i < positionAttribute.count; i++) {
+            vertex.fromBufferAttribute(positionAttribute, i);
+            
+            // Simple curve formula: shift X based on Y height squared
+            // This gives it the "J" curve
+            const bendFactor = 0.15;
+            vertex.x += (vertex.y * vertex.y) * bendFactor * Math.sign(vertex.y);
+            
+            positionAttribute.setXYZ(i, vertex.x, vertex.y, vertex.z);
+        }
+        
+        // Re-calculate normals so lighting works on the new curved shape
+        bodyGeo.computeVertexNormals();
+
+        // Material: Shiny Green
+        const bodyMat = new THREE.MeshPhongMaterial({
+            color: 0x2e8b00,      // Jalapeno Green
+            emissive: 0x0a2200,   // Slight inner glow
+            specular: 0x555555,   // Shiny reflection
+            shininess: 60,        // High gloss (waxy skin)
+            flatShading: false
+        });
+
+        const pepperBody = new THREE.Mesh(bodyGeo, bodyMat);
+        pepperGroup.add(pepperBody);
+
+        // B. THE STEM (Darker cap)
+        const stemGeo = new THREE.CylinderGeometry(0.3, 0.4, 1.5, 12);
+        
+        // Position stem at the top of the bent body
+        // We need to match the bend we applied earlier roughly
+        stemGeo.translate(0.8, 3.2, 0); 
+        stemGeo.rotateZ(-0.3); // Tilt it slightly to match the curve
+
+        const stemMat = new THREE.MeshLambertMaterial({ color: 0x1a3300 }); // Darker, matte green
+        const stem = new THREE.Mesh(stemGeo, stemMat);
+        pepperGroup.add(stem);
+
+        // Add the whole group to the scene
+        // Rotate slightly to show the curve nicely initially
+        pepperGroup.rotation.z = Math.PI / 6;
+        scene.add(pepperGroup);
+
+        // --- 4. ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate the pepper
+            pepperGroup.rotation.y += 0.015;
+            
+            // Slight bobbing motion
+            pepperGroup.position.y = Math.sin(Date.now() * 0.002) * 0.2;
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
