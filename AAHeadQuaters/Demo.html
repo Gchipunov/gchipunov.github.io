@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Military Base WebGL</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="info">HQ Command Base<br>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+        scene.fog = new THREE.Fog(0x87CEEB, 20, 100); // Distance fog
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(30, 20, 30);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // Enable shadows
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. Lighting ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6); // Soft white light
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(-20, 50, -20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- 3. Ground ---
+        const planeGeometry = new THREE.PlaneGeometry(200, 200);
+        const planeMaterial = new THREE.MeshStandardMaterial({ color: 0x3b5e3b }); // Dark Green
+        const ground = new THREE.Mesh(planeGeometry, planeMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- 4. Structures ---
+
+        // A. Headquarters (Main Building)
+        function createHQ() {
+            const hqGroup = new THREE.Group();
+            
+            // Main block
+            const geometry = new THREE.BoxGeometry(10, 6, 8);
+            const material = new THREE.MeshStandardMaterial({ color: 0x708090 }); // Slate Grey
+            const building = new THREE.Mesh(geometry, material);
+            building.position.y = 3;
+            building.castShadow = true;
+            building.receiveShadow = true;
+            hqGroup.add(building);
+
+            // Roof antenna
+            const antGeo = new THREE.CylinderGeometry(0.1, 0.1, 4);
+            const antMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const antenna = new THREE.Mesh(antGeo, antMat);
+            antenna.position.set(2, 8, 0);
+            hqGroup.add(antenna);
+
+            hqGroup.position.set(0, 0, 0);
+            scene.add(hqGroup);
+        }
+        createHQ();
+
+        // B. Radar Station (Animated)
+        let radarDish;
+        function createRadar() {
+            const radarGroup = new THREE.Group();
+
+            // Tower Base
+            const baseGeo = new THREE.CylinderGeometry(1, 2, 8);
+            const baseMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = 4;
+            base.castShadow = true;
+            radarGroup.add(base);
+
+            // Pivot point for the dish
+            const pivot = new THREE.Group();
+            pivot.position.y = 8;
+            radarGroup.add(pivot);
+
+            // The Dish (Cone geometry)
+            const dishGeo = new THREE.ConeGeometry(2.5, 1, 32, 1, true);
+            const dishMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, side: THREE.DoubleSide });
+            radarDish = new THREE.Mesh(dishGeo, dishMat);
+            radarDish.rotation.x = Math.PI / 2; // Face sideways
+            radarDish.position.z = 1; // Offset slightly
+            radarDish.castShadow = true;
+            
+            // Add dish to pivot
+            pivot.add(radarDish);
+
+            radarGroup.position.set(-15, 0, -10);
+            scene.add(radarGroup);
+            
+            // Return the pivot so we can rotate it later
+            return pivot;
+        }
+        const radarPivot = createRadar();
+
+        // C. Bunker (Dome)
+        function createBunker() {
+            const bunkerGroup = new THREE.Group();
+            
+            // Dome
+            const domeGeo = new THREE.SphereGeometry(5, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const domeMat = new THREE.MeshStandardMaterial({ color: 0x556B2F }); // Olive Drab
+            const dome = new THREE.Mesh(domeGeo, domeMat);
+            dome.castShadow = true;
+            dome.receiveShadow = true;
+            bunkerGroup.add(dome);
+
+            // Entrance
+            const doorGeo = new THREE.BoxGeometry(3, 2.5, 2);
+            const doorMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            const door = new THREE.Mesh(doorGeo, doorMat);
+            door.position.set(0, 1.25, 4);
+            bunkerGroup.add(door);
+
+            bunkerGroup.position.set(15, 0, -5);
+            scene.add(bunkerGroup);
+        }
+        createBunker();
+
+        // D. Crane
+        function createCrane() {
+            const craneGroup = new THREE.Group();
+
+            // Vertical Shaft
+            const shaftGeo = new THREE.BoxGeometry(1, 15, 1);
+            const yellowMat = new THREE.MeshStandardMaterial({ color: 0xffcc00 }); // Safety Yellow
+            const shaft = new THREE.Mesh(shaftGeo, yellowMat);
+            shaft.position.y = 7.5;
+            shaft.castShadow = true;
+            craneGroup.add(shaft);
+
+            // Horizontal Arm
+            const armGeo = new THREE.BoxGeometry(10, 1, 1);
+            const arm = new THREE.Mesh(armGeo, yellowMat);
+            arm.position.set(2, 14.5, 0);
+            arm.castShadow = true;
+            craneGroup.add(arm);
+
+            // Cable
+            const cableGeo = new THREE.CylinderGeometry(0.05, 0.05, 6);
+            const cableMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const cable = new THREE.Mesh(cableGeo, cableMat);
+            cable.position.set(6, 11, 0);
+            craneGroup.add(cable);
+
+            // Hook/Load
+            const loadGeo = new THREE.BoxGeometry(2, 2, 2);
+            const loadMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Brown Box
+            const load = new THREE.Mesh(loadGeo, loadMat);
+            load.position.set(6, 7, 0); // Bottom of cable
+            load.castShadow = true;
+            craneGroup.add(load);
+
+            craneGroup.position.set(-10, 0, 15);
+            craneGroup.rotation.y = Math.PI / 4; // Angle the crane slightly
+            scene.add(craneGroup);
+        }
+        createCrane();
+
+        // E. Supply Depot
+        function createSupplies() {
+            const boxGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+            const boxMat = new THREE.MeshStandardMaterial({ color: 0xCD853F }); // Wood color
+            
+            // Create a stack of random boxes
+            for (let i = 0; i < 10; i++) {
+                const box = new THREE.Mesh(boxGeo, boxMat);
+                // Random positions within a small area
+                box.position.set(
+                    10 + (Math.random() * 6 - 3), 
+                    0.75 + (Math.random() > 0.5 ? 1.5 : 0), // Some stacked on top
+                    10 + (Math.random() * 6 - 3)
+                );
+                box.castShadow = true;
+                box.receiveShadow = true;
+                scene.add(box);
+            }
+        }
+        createSupplies();
+
+        // --- 5. Controls & Animation ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // Smooth motion
+        
+        // Window Resize Handling
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate the Radar
+            if (radarPivot) {
+                radarPivot.rotation.y += 0.02; // Spin speed
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
