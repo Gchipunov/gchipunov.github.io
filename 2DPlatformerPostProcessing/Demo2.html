@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL 2D XPBR Platformer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        canvas { width: 100vw; height: 100vh; display: block; image-rendering: pixelated; }
+        #ui { position: absolute; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; pointer-events: none; }
+        .btn { width: 70px; height: 70px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 50%; pointer-events: auto; touch-action: manipulation; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; -webkit-user-select: none; }
+        .btn:active { background: rgba(255,255,255,0.5); }
+        .controls-left { display: flex; gap: 20px; }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+    <div class="controls-left">
+        <div class="btn" id="btnLeft">←</div>
+        <div class="btn" id="btnRight">→</div>
+    </div>
+    <div class="btn" id="btnJump">JUMP</div>
+</div>
+
+<script>
+/** SHADER SOURCES **/
+const vsSource = `
+    attribute vec2 aPosition;
+    uniform vec2 uResolution;
+    varying vec2 vPos;
+    void main() {
+        vPos = aPosition;
+        vec2 zeroToOne = aPosition / uResolution;
+        gl_Position = vec4((zeroToOne * 2.0 - 1.0) * vec2(1, -1), 0, 1);
+    }`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 uColor;
+    uniform vec2 uLightPos;
+    varying vec2 vPos;
+    void main() {
+        float d = distance(vPos, uLightPos);
+        float glow = 0.5 / (d * 0.01);
+        gl_FragColor = uColor + vec4(vec3(glow * 0.2), 0.0);
+    }`;
+
+const postVsSource = `
+    attribute vec2 aPosition;
+    varying vec2 vTexCoord;
+    void main() {
+        vTexCoord = aPosition * 0.5 + 0.5;
+        gl_Position = vec4(aPosition, 0.0, 1.0);
+    }`;
+
+const postFsSource = `
+    precision mediump float;
+    varying vec2 vTexCoord;
+    uniform sampler2D uTexture;
+    uniform vec2 uVelocity; 
+    
+    void main() {
+        vec2 uv = vTexCoord;
+        
+        // 1. Motion Blur (Directional sampling based on player velocity)
+        vec4 color = vec4(0.0);
+        float samples = 8.0;
+        vec2 blurVec = uVelocity * 0.002;
+        for(float i=0.0; i<8.0; i++) {
+            color += texture2D(uTexture, uv - (blurVec * i));
+        }
+        color /= samples;
+
+        // 2. Simple Bloom (Brightness extraction and spread)
+        vec4 bloom = texture2D(uTexture, uv);
+        bloom += texture2D(uTexture, uv + vec2(0.005, 0.005));
+        bloom += texture2D(uTexture, uv + vec2(-0.005, -0.005));
+        color += max(vec4(0.0), bloom - 0.5) * 0.6;
+
+        // 3. CRT Scanlines & Vignette
+        float scanline = sin(uv.y * 600.0) * 0.05;
+        color.rgb -= scanline;
+        float vignette = 1.0 - length(uv - 0.5) * 0.7;
+        
+        gl_FragColor = vec4(color.rgb * vignette, 1.0);
+    }`;
+
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl');
+
+function createProgram(gl, vs, fs) {
+    const p = gl.createProgram();
+    const s1 = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(s1, vs); gl.compileShader(s1);
+    const s2 = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(s2, fs); gl.compileShader(s2);
+    gl.attachShader(p, s1); gl.attachShader(p, s2); gl.linkProgram(p);
+    return p;
+}
+
+const mainProg = createProgram(gl, vsSource, fsSource);
+const postProg = createProgram(gl, postVsSource, postFsSource);
+const posBuf = gl.createBuffer();
+
+const player = { x: 100, y: 300, w: 30, h: 30, vx: 0, vy: 0, grounded: false };
+const platforms = [
+    { x: 0, y: 550, w: 2000, h: 50, type: 'rect' },
+    { x: 150, y: 450, w: 120, h: 20, type: 'rect' },
+    { x: 350, y: 350, w: 120, h: 20, type: 'rect' },
+    { x: 500, y: 400, x1: 500, y1: 550, x2: 700, y2: 550, x3: 700, y3: 400, type: 'ramp' } // Triangle Ramp
+];
+
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+// Mobile controls
+const touch = { left: false, right: false, jump: false };
+const bindTouch = (id, prop) => {
+    const el = document.getElementById(id);
+    el.ontouchstart = (e) => { e.preventDefault(); touch[prop] = true; };
+    el.ontouchend = (e) => { e.preventDefault(); touch[prop] = false; };
+};
+bindTouch('btnLeft', 'left'); bindTouch('btnRight', 'right'); bindTouch('btnJump', 'jump');
+
+// FB for Post-processing
+const targetTexture = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, targetTexture);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1024, 1024, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+const fb = gl.createFramebuffer();
+gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTexture, 0);
+
+function drawShape(verts, color) {
+    gl.useProgram(mainProg);
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(mainProg, "aPosition");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(gl.getUniformLocation(mainProg, "uResolution"), 800, 600);
+    gl.uniform2f(gl.getUniformLocation(mainProg, "uLightPos"), player.x + 15, player.y + 15);
+    gl.uniform4fv(gl.getUniformLocation(mainProg, "uColor"), color);
+    gl.drawArrays(gl.TRIANGLES, 0, verts.length / 2);
+}
+
+function update() {
+    // Input
+    if (keys['ArrowLeft'] || touch.left) player.vx = -6;
+    else if (keys['ArrowRight'] || touch.right) player.vx = 6;
+    else player.vx *= 0.85;
+
+    if ((keys['Space'] || touch.jump) && player.grounded) {
+        player.vy = -13;
+        player.grounded = false;
+    }
+
+    player.vy += 0.7;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Collisions
+    player.grounded = false;
+    platforms.forEach(p => {
+        if (p.type === 'rect') {
+            if (player.x < p.x + p.w && player.x + player.w > p.x &&
+                player.y + player.h > p.y && player.y + player.h < p.y + p.vy + 10) {
+                player.y = p.y - player.h; player.vy = 0; player.grounded = true;
+            }
+        } else if (p.type === 'ramp') {
+            // Simplified Triangle Hypotenuse Collision
+            if (player.x + player.w > p.x1 && player.x < p.x2) {
+                let relX = (player.x + player.w/2 - p.x1) / (p.x2 - p.x1);
+                relX = Math.max(0, Math.min(1, relX));
+                let groundY = p.y1 + (p.y2 - p.y1) * relX; // Linear interpolation for ramp
+                if (player.y + player.h > groundY - 20) {
+                    player.y = groundY - player.h; player.vy = 0; player.grounded = true;
+                }
+            }
+        }
+    });
+
+    // Render Game to Texture
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.viewport(0, 0, 1024, 1024);
+    gl.clearColor(0.05, 0.05, 0.1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    platforms.forEach(p => {
+        if(p.type === 'rect') drawShape([p.x, p.y, p.x+p.w, p.y, p.x, p.y+p.h, p.x, p.y+p.h, p.x+p.w, p.y, p.x+p.w, p.y+p.h], [0.1, 0.4, 0.8, 1]);
+        else drawShape([p.x1, p.y1, p.x2, p.y2, p.x1, p.y2], [0.4, 0.1, 0.6, 1]);
+    });
+    drawShape([player.x, player.y, player.x+player.w, player.y, player.x, player.y+player.h, player.x, player.y+player.h, player.x+player.w, player.y, player.x+player.w, player.y+player.h], [1, 0.8, 0.2, 1]);
+
+    // Apply Post-Processing
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(postProg);
+    gl.uniform2f(gl.getUniformLocation(postProg, "uVelocity"), player.vx, player.vy);
+    
+    const quad = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+    const pPosLoc = gl.getAttribLocation(postProg, "aPosition");
+    gl.enableVertexAttribArray(pPosLoc);
+    gl.vertexAttribPointer(pPosLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.bindTexture(gl.TEXTURE_2D, targetTexture);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    requestAnimationFrame(update);
+}
+
+window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+window.onresize();
+update();
+</script>
+</body>
+</html>
