@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raw WebGL Jalapeño</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #info {
+            position: absolute; top: 10px; width: 100%; text-align: center;
+            color: white; font-family: sans-serif; pointer-events: none; opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Raw WebGL Procedural Jalapeño (Fixed)</div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
+
+        varying vec3 vNormal;
+        varying vec3 vPos;
+
+        void main() {
+            // Calculate world position
+            vec4 worldPos = uModel * vec4(aPosition, 1.0);
+            vPos = worldPos.xyz;
+
+            // Transform normal (simplified: assumes uniform scaling)
+            vNormal = (uModel * vec4(aNormal, 0.0)).xyz;
+
+            gl_Position = uProjection * uView * worldPos;
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+
+        varying vec3 vNormal;
+        varying vec3 vPos;
+
+        uniform vec3 uColor;
+        
+        // Simple lighting constants
+        const vec3 lightDir = vec3(0.5, 1.0, 0.7); // Directional light
+        const vec3 viewPos = vec3(0.0, 0.0, 12.0); 
+
+        void main() {
+            vec3 normal = normalize(vNormal);
+            vec3 light = normalize(lightDir);
+            vec3 view = normalize(viewPos - vPos);
+
+            // Ambient
+            vec3 ambient = uColor * 0.3;
+
+            // Diffuse
+            float diff = max(dot(normal, light), 0.0);
+            vec3 diffuse = uColor * diff * 1.2;
+
+            // Specular (Phong)
+            vec3 reflectDir = reflect(-light, normal);
+            float spec = pow(max(dot(view, reflectDir), 0.0), 32.0); // 32 = shininess
+            vec3 specular = vec3(0.4) * spec; // White-ish highlight
+
+            gl_FragColor = vec4(ambient + diffuse + specular, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) { alert("WebGL not supported"); }
+
+        // --- 1. MATH HELPERS (Raw Matrix Math) ---
+        const Mat4 = {
+            identity: () => [
+                1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+            ],
+            perspective: (fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2);
+                const nf = 1 / (near - far);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (far + near) * nf, -1,
+                    0, 0, (2 * far * near) * nf, 0
+                ];
+            },
+            translate: (m, x, y, z) => {
+                const out = [...m];
+                out[12] = m[0]*x + m[4]*y + m[8]*z + m[12];
+                out[13] = m[1]*x + m[5]*y + m[9]*z + m[13];
+                out[14] = m[2]*x + m[6]*y + m[10]*z + m[14];
+                out[15] = m[3]*x + m[7]*y + m[11]*z + m[15];
+                return out;
+            },
+            rotateY: (m, angle) => {
+                const c = Math.cos(angle);
+                const s = Math.sin(angle);
+                const out = new Float32Array(16);
+                const a = m;
+                out[0] = a[0]*c + a[8]*s; out[1] = a[1]*c + a[9]*s; out[2] = a[2]*c + a[10]*s; out[3] = a[3]*c + a[11]*s;
+                out[4] = a[4]; out[5] = a[5]; out[6] = a[6]; out[7] = a[7];
+                out[8] = a[0]*-s + a[8]*c; out[9] = a[1]*-s + a[9]*c; out[10] = a[2]*-s + a[10]*c; out[11] = a[3]*-s + a[11]*c;
+                out[12] = a[12]; out[13] = a[13]; out[14] = a[14]; out[15] = a[15];
+                return out;
+            },
+             rotateZ: (m, angle) => {
+                const c = Math.cos(angle);
+                const s = Math.sin(angle);
+                const out = new Float32Array(16);
+                const a = m;
+                out[0] = a[0]*c + a[4]*s; out[1] = a[1]*c + a[5]*s; out[2] = a[2]*c + a[6]*s; out[3] = a[3]*c + a[7]*s;
+                out[4] = a[0]*-s + a[4]*c; out[5] = a[1]*-s + a[5]*c; out[6] = a[2]*-s + a[6]*c; out[7] = a[3]*-s + a[7]*c;
+                out[8]=a[8]; out[9]=a[9]; out[10]=a[10]; out[11]=a[11];
+                out[12]=a[12]; out[13]=a[13]; out[14]=a[14]; out[15]=a[15];
+                return out;
+            }
+        };
+
+        // --- 2. SHADER COMPILATION ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader Error:", gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vsSource = document.getElementById('vertex-shader').text;
+        const fsSource = document.getElementById('fragment-shader').text;
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error("Program link failed:", gl.getProgramInfoLog(program));
+        }
+
+        // --- 3. GEOMETRY GENERATION ---
+        function computeNormals(vertices, indices) {
+            const normals = new Float32Array(vertices.length); 
+            for(let i=0; i<normals.length; i++) normals[i] = 0;
+
+            for (let i = 0; i < indices.length; i += 3) {
+                const i1 = indices[i]*3, i2 = indices[i+1]*3, i3 = indices[i+2]*3;
+                const v1 = [vertices[i1], vertices[i1+1], vertices[i1+2]];
+                const v2 = [vertices[i2], vertices[i2+1], vertices[i2+2]];
+                const v3 = [vertices[i3], vertices[i3+1], vertices[i3+2]];
+
+                const e1 = [v2[0]-v1[0], v2[1]-v1[1], v2[2]-v1[2]];
+                const e2 = [v3[0]-v1[0], v3[1]-v1[1], v3[2]-v1[2]];
+
+                const nx = e1[1]*e2[2] - e1[2]*e2[1];
+                const ny = e1[2]*e2[0] - e1[0]*e2[2];
+                const nz = e1[0]*e2[1] - e1[1]*e2[0];
+
+                normals[i1]+=nx; normals[i1+1]+=ny; normals[i1+2]+=nz;
+                normals[i2]+=nx; normals[i2+1]+=ny; normals[i2+2]+=nz;
+                normals[i3]+=nx; normals[i3+1]+=ny; normals[i3+2]+=nz;
+            }
+
+            for (let i=0; i<normals.length; i+=3) {
+                const x=normals[i], y=normals[i+1], z=normals[i+2];
+                const len = Math.sqrt(x*x + y*y + z*z);
+                if(len > 0) { normals[i]/=len; normals[i+1]/=len; normals[i+2]/=len; }
+            }
+            return normals;
+        }
+
+        function createPepperMesh() {
+            const verts = [];
+            const indices = [];
+            
+            // --- A. BODY (Lathe) ---
+            const segments = 20; 
+            const slices = 32;   
+            const height = 6;
+            
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments; 
+                const yRaw = t * height;
+                let radius = Math.sin(t * Math.PI * 0.85) * 1.2;
+                if (t > 0.9) radius *= 0.9;
+                let y = yRaw - height / 2;
+
+                for (let j = 0; j <= slices; j++) {
+                    const phi = (j / slices) * Math.PI * 2;
+                    let x = Math.cos(phi) * radius;
+                    let z = Math.sin(phi) * radius;
+
+                    // Bend Modifier (The "J" Curve)
+                    const bendFactor = 0.15;
+                    const bend = (y * y) * bendFactor * (y > 0 ? 1 : -1);
+                    x += bend;
+
+                    verts.push(x, y, z);
+                }
+            }
+
+            for (let i = 0; i < segments; i++) {
+                for (let j = 0; j < slices; j++) {
+                    const a = i * (slices + 1) + j;
+                    const b = (i + 1) * (slices + 1) + j;
+                    const c = (i + 1) * (slices + 1) + (j + 1);
+                    const d = i * (slices + 1) + (j + 1);
+                    indices.push(a, b, d);
+                    indices.push(b, c, d);
+                }
+            }
+
+            return { 
+                vertices: new Float32Array(verts), 
+                indices: new Uint16Array(indices),
+                color: [0.18, 0.54, 0.0] // Green
+            };
+        }
+
+        function createStemMesh() {
+            const verts = [];
+            const indices = [];
+            const slices = 12;
+            const h = 1.5;
+            const rTop = 0.3;
+            const rBot = 0.4;
+            
+            // Position manually to match bent body
+            const bodyTopBend = (3*3) * 0.15; 
+            const offsetX = bodyTopBend + 0.8; 
+            const offsetY = 3.2;
+
+            for(let i=0; i<=1; i++) { 
+                const yLoc = i * h;
+                const r = i===0 ? rBot : rTop;
+                for(let j=0; j<=slices; j++) {
+                    const phi = (j/slices) * Math.PI * 2;
+                    let x = Math.cos(phi) * r;
+                    let y = yLoc; 
+                    let z = Math.sin(phi) * r;
+
+                    // Rotate/Tilt stem
+                    const rotZ = -0.3;
+                    const cosR = Math.cos(rotZ), sinR = Math.sin(rotZ);
+                    const tx = x * cosR - y * sinR;
+                    const ty = x * sinR + y * cosR;
+                    
+                    verts.push(tx + offsetX, ty + offsetY, z);
+                }
+            }
+
+            for(let j=0; j<slices; j++) {
+                const a = j;
+                const b = j + (slices+1);
+                const c = j + (slices+1) + 1;
+                const d = j + 1;
+                indices.push(a,b,d, b,c,d);
+            }
+
+            return {
+                vertices: new Float32Array(verts),
+                indices: new Uint16Array(indices),
+                color: [0.1, 0.2, 0.0] // Dark Green
+            };
+        }
+
+        const bodyData = createPepperMesh();
+        const stemData = createStemMesh();
+        bodyData.normals = computeNormals(bodyData.vertices, bodyData.indices);
+        stemData.normals = computeNormals(stemData.vertices, stemData.indices);
+
+        // --- 4. BUFFER SETUP ---
+        function createBuffers(data) {
+            const vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+            gl.bufferData(gl.ARRAY_BUFFER, data.vertices, gl.STATIC_DRAW);
+
+            const nbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, nbo);
+            gl.bufferData(gl.ARRAY_BUFFER, data.normals, gl.STATIC_DRAW);
+
+            const ibo = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data.indices, gl.STATIC_DRAW);
+
+            return { vbo, nbo, ibo, count: data.indices.length, color: data.color };
+        }
+
+        const bodyBuffers = createBuffers(bodyData);
+        const stemBuffers = createBuffers(stemData);
+
+        // --- 5. RENDER LOOP ---
+        const locPos = gl.getAttribLocation(program, 'aPosition');
+        const locNorm = gl.getAttribLocation(program, 'aNormal');
+        const locModel = gl.getUniformLocation(program, 'uModel');
+        const locView = gl.getUniformLocation(program, 'uView');
+        const locProj = gl.getUniformLocation(program, 'uProjection');
+        const locColor = gl.getUniformLocation(program, 'uColor');
+
+        gl.useProgram(program);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clearColor(0.13, 0.13, 0.13, 1.0); 
+
+        function drawMesh(buffers, modelMat) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vbo);
+            gl.vertexAttribPointer(locPos, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(locPos);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.nbo);
+            gl.vertexAttribPointer(locNorm, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(locNorm);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.ibo);
+
+            gl.uniformMatrix4fv(locModel, false, modelMat);
+            gl.uniform3fv(locColor, buffers.color);
+
+            gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
+        }
+
+        let time = 0;
+
+        function animate() {
+            time += 0.015;
+            
+            // Resize logic
+            if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+                canvas.width = canvas.clientWidth;
+                canvas.height = canvas.clientHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Matrix Setup
+            const aspect = canvas.width / canvas.height;
+            const projMat = Mat4.perspective(45 * Math.PI/180, aspect, 0.1, 100);
+            const viewMat = Mat4.translate(Mat4.identity(), 0, 0, -12);
+
+            // --- THE FIX: SEND MATRICES TO SHADER ---
+            gl.uniformMatrix4fv(locProj, false, projMat);
+            gl.uniformMatrix4fv(locView, false, viewMat);
+            // ----------------------------------------
+
+            // Model Rotation & Bobbing
+            let modelMat = Mat4.identity();
+            modelMat = Mat4.rotateZ(modelMat, Math.PI / 6); 
+            modelMat = Mat4.rotateY(modelMat, time);
+            
+            const bob = Math.sin(Date.now() * 0.002) * 0.2;
+            modelMat[13] += bob; 
+
+            drawMesh(bodyBuffers, modelMat);
+            drawMesh(stemBuffers, modelMat);
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+    </script>
+</body>
+</html>
