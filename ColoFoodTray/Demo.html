@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Chow Hall Tray</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h3>Standard Issue Chow Tray</h3>
+        <p>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</p>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x333333); // Dark table color
+        scene.fog = new THREE.Fog(0x333333, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 10, 10);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(5, 10, 5);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // --- MATERIALS ---
+        const trayMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x8899a6, // Stainless steel / Aluminum look
+            roughness: 0.3, 
+            metalness: 0.8 
+        });
+
+        const foodMeatMaterial = new THREE.MeshStandardMaterial({ color: 0x5e3a28, roughness: 0.9 });
+        const foodPeasMaterial = new THREE.MeshStandardMaterial({ color: 0x4da836, roughness: 0.5 });
+        const foodPotatoMaterial = new THREE.MeshStandardMaterial({ color: 0xfdf5c9, roughness: 0.8 });
+        const gravyMaterial = new THREE.MeshStandardMaterial({ color: 0x4a2c18, roughness: 0.4, transparent: true, opacity: 0.9 });
+        const jelloMaterial = new THREE.MeshPhysicalMaterial({ 
+            color: 0xff0000, 
+            transmission: 0.9, 
+            opacity: 1, 
+            roughness: 0.0, 
+            ior: 1.5, 
+            thickness: 1.0 
+        });
+
+        // --- BUILD THE TRAY ---
+        const trayGroup = new THREE.Group();
+
+        // Helper to create tray walls/base
+        function createBox(w, h, d, x, y, z) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, trayMaterial);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // 1. Tray Base
+        trayGroup.add(createBox(6, 0.2, 4, 0, 0, 0));
+
+        // 2. Outer Rims
+        const rimHeight = 0.5;
+        const rimY = 0.25;
+        trayGroup.add(createBox(6, rimHeight, 0.2, 0, rimY, -1.9)); // Top
+        trayGroup.add(createBox(6, rimHeight, 0.2, 0, rimY, 1.9));  // Bottom
+        trayGroup.add(createBox(0.2, rimHeight, 4, -2.9, rimY, 0)); // Left
+        trayGroup.add(createBox(0.2, rimHeight, 4, 2.9, rimY, 0));  // Right
+
+        // 3. Dividers (The classic 3-compartment layout)
+        // Vertical divider roughly in the middle
+        trayGroup.add(createBox(0.2, rimHeight, 4, 0.5, rimY, 0)); 
+        // Horizontal divider on the right side
+        trayGroup.add(createBox(2.4, rimHeight, 0.2, 1.8, rimY, 0)); 
+
+        scene.add(trayGroup);
+
+        // --- ADD THE FOOD ---
+
+        // 1. Mystery Meat (Left Large Compartment)
+        const meatGeo = new RoundedBoxGeometry(1.5, 0.6, 2.5, 4, 0.1);
+        const meat = new THREE.Mesh(meatGeo, foodMeatMaterial);
+        meat.position.set(-1.2, 0.4, 0);
+        meat.castShadow = true;
+        meat.receiveShadow = true;
+        // Grill marks (simple thin boxes)
+        for(let i=0; i<3; i++){
+            const mark = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.02, 0.1), new THREE.MeshBasicMaterial({color:0x221100}));
+            mark.position.set(0, 0.31, -0.5 + (i*0.5));
+            meat.add(mark);
+        }
+        trayGroup.add(meat);
+
+        // 2. Green Peas (Top Right Compartment)
+        // Using InstancedMesh for performance
+        const peaGeo = new THREE.SphereGeometry(0.12, 8, 8);
+        const peaCount = 40;
+        const peasMesh = new THREE.InstancedMesh(peaGeo, foodPeasMaterial, peaCount);
+        const dummy = new THREE.Object3D();
+        
+        for (let i = 0; i < peaCount; i++) {
+            // Random scatter in top right sector
+            dummy.position.set(
+                1.0 + Math.random() * 1.5,
+                0.2 + Math.random() * 0.2,
+                -1.0 + Math.random() * 1.5
+            );
+            dummy.rotation.set(Math.random(), Math.random(), Math.random());
+            dummy.updateMatrix();
+            peasMesh.setMatrixAt(i, dummy.matrix);
+        }
+        peasMesh.castShadow = true;
+        peasMesh.receiveShadow = true;
+        trayGroup.add(peasMesh);
+
+        // 3. Mashed Potatoes (Bottom Right Compartment)
+        const potatoGroup = new THREE.Group();
+        const potatoGeo = new THREE.SphereGeometry(0.4, 16, 16);
+        const potato1 = new THREE.Mesh(potatoGeo, foodPotatoMaterial);
+        const potato2 = new THREE.Mesh(potatoGeo, foodPotatoMaterial);
+        potato1.scale.set(1.2, 0.8, 1.2);
+        potato2.scale.set(1.0, 0.9, 1.0);
+        potato1.position.set(0, 0, 0);
+        potato2.position.set(0.3, 0.1, 0.2);
+        
+        // Gravy Pool
+        const gravyGeo = new THREE.CylinderGeometry(0.3, 0.4, 0.05, 16);
+        const gravy = new THREE.Mesh(gravyGeo, gravyMaterial);
+        gravy.position.set(0.1, 0.35, 0.1);
+        
+        potatoGroup.add(potato1);
+        potatoGroup.add(potato2);
+        potatoGroup.add(gravy);
+        potatoGroup.position.set(1.8, 0.3, 1.0);
+        potatoGroup.castShadow = true;
+        trayGroup.add(potatoGroup);
+
+        // 4. Jello Cube (Sitting on the tray edge or in a corner)
+        const jelloGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+        const jello = new THREE.Mesh(jelloGeo, jelloMaterial);
+        jello.position.set(-2.2, 0.45, -1.2); // Top left corner of main area
+        jello.castShadow = true;
+        trayGroup.add(jello);
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
