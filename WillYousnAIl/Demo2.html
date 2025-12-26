@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon WebGL Platformer - Mobile</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* Mobile UI */
+        #ui {
+            position: absolute; bottom: 20px; left: 0; right: 0;
+            display: flex; justify-content: space-between; padding: 0 30px;
+            pointer-events: none; /* Let clicks pass through to buttons */
+        }
+        .btn {
+            width: 70px; height: 70px; background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #00ccff; border-radius: 15px;
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-weight: bold; font-size: 24px;
+            pointer-events: auto; user-select: none;
+        }
+        .btn:active { background: rgba(0, 204, 255, 0.4); transform: scale(0.95); }
+        .dpad { display: flex; gap: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="dpad">
+        <div class="btn" id="leftBtn">←</div>
+        <div class="btn" id="rightBtn">→</div>
+    </div>
+    <div class="btn" id="jumpBtn">↑</div>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script type="x-shader/x-vertex" id="vs">
+    attribute vec2 position;
+    void main() { gl_Position = vec4(position, 0.0, 1.0); }
+</script>
+
+<script type="x-shader/x-fragment" id="fs">
+    precision highp float;
+    uniform vec2 resolution;
+    uniform vec4 rects[15]; // Expanded to hold player trails
+    uniform int rectCount;
+
+    float sdBox(vec2 p, vec2 b) {
+        vec2 d = abs(p) - b;
+        return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+    }
+
+    void main() {
+        vec2 uv = gl_FragCoord.xy / resolution.xy;
+        vec2 aspect = vec2(resolution.x / resolution.y, 1.0);
+        vec2 p = (uv * 2.0 - 1.0) * aspect;
+
+        vec3 finalColor = vec3(0.01, 0.01, 0.03); 
+
+        for (int i = 0; i < 15; i++) {
+            if (i >= rectCount) break;
+            
+            vec2 rPos = (rects[i].xy * 2.0 - 1.0) * aspect;
+            vec2 rSize = rects[i].zw * aspect;
+
+            float d = sdBox(p - rPos, rSize);
+            
+            // Differentiate colors: Platforms (0-3) vs Player/Trail (4+)
+            vec3 neonColor = (i < 4) ? vec3(0.0, 0.8, 1.0) : vec3(1.0, 0.0, 0.5);
+            
+            // Fade trails
+            float alpha = (i > 4) ? 1.0 - (float(i-4) / 10.0) : 1.0;
+            
+            float glow = 0.006 / (abs(d) + 0.015);
+            
+            if (d < 0.0) {
+                finalColor += neonColor * 0.8 * alpha;
+            } else {
+                finalColor += neonColor * glow * 1.8 * alpha;
+            }
+        }
+
+        gl_FragColor = vec4(finalColor, 1.0);
+    }
+</script>
+
+<script>
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+// Shader compilation helper
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(program, "position");
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+// Game Logic
+const rects = [
+    { x: 0.5, y: 0.1, w: 0.8, h: 0.05 }, 
+    { x: 0.3, y: 0.4, w: 0.12, h: 0.015 },
+    { x: 0.7, y: 0.5, w: 0.12, h: 0.015 },
+    { x: 0.5, y: 0.7, w: 0.12, h: 0.015 }
+];
+
+const player = { x: 0.1, y: 0.3, vx: 0, vy: 0, w: 0.015, h: 0.015, onGround: false };
+const trails = Array(10).fill({x: 0.1, y: 0.3, w: 0.015, h: 0.015});
+
+// Input handling (Desktop + Mobile)
+const input = { left: false, right: false, jump: false };
+window.onkeydown = e => { 
+    if(e.code === 'ArrowLeft') input.left = true;
+    if(e.code === 'ArrowRight') input.right = true;
+    if(e.code === 'Space' || e.code === 'ArrowUp') input.jump = true;
+};
+window.onkeyup = e => {
+    if(e.code === 'ArrowLeft') input.left = false;
+    if(e.code === 'ArrowRight') input.right = false;
+    if(e.code === 'Space' || e.code === 'ArrowUp') input.jump = false;
+};
+
+// Mobile Touch Events
+const bindTouch = (id, key) => {
+    const el = document.getElementById(id);
+    el.ontouchstart = (e) => { e.preventDefault(); input[key] = true; };
+    el.ontouchend = (e) => { e.preventDefault(); input[key] = false; };
+};
+bindTouch('leftBtn', 'left');
+bindTouch('rightBtn', 'right');
+bindTouch('jumpBtn', 'jump');
+
+function updatePhysics() {
+    if (input.left) player.vx -= 0.0008;
+    if (input.right) player.vx += 0.0008;
+    if (input.jump && player.onGround) {
+        player.vy = 0.014;
+        player.onGround = false;
+    }
+
+    player.vx *= 0.92;
+    player.vy -= 0.0006;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Collisions
+    player.onGround = false;
+    rects.slice(0, 4).forEach(r => {
+        if (player.x + player.w > r.x - r.w && player.x - player.w < r.x + r.w &&
+            player.y + player.h > r.y - r.h && player.y - player.h < r.y + r.h) {
+            if (player.vy < 0) {
+                player.y = r.y + r.h + player.h;
+                player.vy = 0;
+                player.onGround = true;
+            }
+        }
+    });
+
+    // Screen bounds
+    if (player.x < 0) player.x = 0;
+    if (player.x > 1) player.x = 1;
+
+    // Update trails (shift positions)
+    trails.unshift({x: player.x, y: player.y, w: player.w, h: player.h});
+    trails.pop();
+}
+
+function render(time) {
+    updatePhysics();
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    gl.uniform2f(gl.getUniformLocation(program, "resolution"), canvas.width, canvas.height);
+    
+    // Combine platforms + player + trails into one array for the shader
+    const allObjects = [...rects, {x: player.x, y: player.y, w: player.w, h: player.h}, ...trails];
+    const flatData = new Float32Array(allObjects.flatMap(o => [o.x, o.y, o.w, o.h]));
+    
+    gl.uniform4fv(gl.getUniformLocation(program, "rects"), flatData);
+    gl.uniform1i(gl.getUniformLocation(program, "rectCount"), allObjects.length);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
