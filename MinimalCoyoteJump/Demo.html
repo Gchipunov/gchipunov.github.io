@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Coyote Jump</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+<script id="vs" type="f">
+    attribute vec2 pos;
+    uniform vec2 offset;
+    uniform vec2 scale;
+    void main() {
+        gl_Position = vec4((pos * scale + offset), 0, 1);
+    }
+</script>
+
+<script id="fs" type="f">
+    precision mediump float;
+    uniform vec4 color;
+    void main() {
+        gl_FragColor = color;
+    }
+</script>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl');
+
+    function createShader(gl, type, source) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, source);
+        gl.compileShader(s);
+        return s;
+    }
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+    gl.attachShader(prog, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+    const posLoc = gl.getAttribLocation(prog, 'pos');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    const offsetLoc = gl.getUniformLocation(prog, 'offset');
+    const scaleLoc = gl.getUniformLocation(prog, 'scale');
+    const colorLoc = gl.getUniformLocation(prog, 'color');
+
+    // Game State
+    let player = { x: -0.8, y: 0, vx: 0, vy: 0, w: 0.05, h: 0.08 };
+    const platforms = [
+        { x: -0.8, y: -0.5, w: 0.3, h: 0.05 },
+        { x: 0,    y: -0.2, w: 0.3, h: 0.05 },
+        { x: 0.7,  y: 0.2,  w: 0.3, h: 0.05 }
+    ];
+
+    let keys = {};
+    let coyoteFrames = 0;
+    const COYOTE_MAX = 10; // Number of frames you can jump after falling
+
+    window.onkeydown = e => keys[e.code] = true;
+    window.onkeyup = e => keys[e.code] = false;
+
+    function update() {
+        // Movement
+        if (keys['ArrowLeft']) player.vx = -0.01;
+        else if (keys['ArrowRight']) player.vx = 0.01;
+        else player.vx *= 0.8;
+
+        player.vy -= 0.001; // Gravity
+        player.x += player.vx;
+        player.y += player.vy;
+
+        let onGround = false;
+        platforms.forEach(p => {
+            if (player.x + player.w > p.x - p.w && player.x - player.w < p.x + p.w &&
+                player.y - player.h < p.y + p.h && player.y + player.h > p.y - p.h && player.vy < 0) {
+                player.y = p.y + p.h + player.h;
+                player.vy = 0;
+                onGround = true;
+            }
+        });
+
+        if (onGround) {
+            coyoteFrames = COYOTE_MAX;
+        } else {
+            coyoteFrames--;
+        }
+
+        // Jump (Check coyote frames instead of just onGround)
+        if (keys['Space'] && coyoteFrames > 0) {
+            player.vy = 0.025;
+            coyoteFrames = 0; 
+        }
+
+        // Reset if fall
+        if (player.y < -1.1) { player.x = -0.8; player.y = 0; player.vy = 0; }
+    }
+
+    function drawRect(x, y, w, h, color) {
+        gl.uniform2f(offsetLoc, x, y);
+        gl.uniform2f(scaleLoc, w, h);
+        gl.uniform4fv(colorLoc, color);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function loop() {
+        update();
+        gl.clearColor(0.1, 0.1, 0.1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Draw Platforms
+        platforms.forEach(p => drawRect(p.x, p.y, p.w, p.h, [0.3, 0.7, 0.3, 1]));
+        
+        // Draw Player
+        drawRect(player.x, player.y, player.w, player.h, [0.9, 0.3, 0.3, 1]);
+
+        requestAnimationFrame(loop);
+    }
+
+    loop();
+</script>
+</body>
+</html>
