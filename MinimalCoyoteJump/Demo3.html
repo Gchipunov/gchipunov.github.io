@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Coyote Jump - Camera & Ability</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+        .btn {
+            width: 70px;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid #fff;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            user-select: none;
+            pointer-events: auto;
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.5); }
+        .group { display: flex; gap: 10px; }
+
+        /* Ability Toggle Style */
+        #ability-ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 8px;
+            color: white;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="ability-ui">
+        <label><input type="checkbox" id="coyoteToggle" checked> Coyote Jump Ability</label>
+    </div>
+
+    <canvas id="canvas"></canvas>
+    
+    <div id="ui">
+        <div class="group">
+            <div class="btn" id="btnLeft">←</div>
+            <div class="btn" id="btnRight">→</div>
+        </div>
+        <div class="btn" id="btnJump">JUMP</div>
+    </div>
+
+<script id="vs" type="f">
+    attribute vec2 pos;
+    uniform vec2 offset;
+    uniform vec2 scale;
+    uniform vec2 camera; // Camera translation
+    void main() {
+        // Position - Camera = Relative View
+        gl_Position = vec4((pos * scale + offset - camera), 0, 1);
+    }
+</script>
+
+<script id="fs" type="f">
+    precision mediump float;
+    uniform vec4 color;
+    void main() {
+        gl_FragColor = color;
+    }
+</script>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl');
+    const coyoteToggle = document.getElementById('coyoteToggle');
+
+    function createShader(gl, type, source) {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, source);
+        gl.compileShader(s);
+        return s;
+    }
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+    gl.attachShader(prog, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+    const posLoc = gl.getAttribLocation(prog, 'pos');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    const offsetLoc = gl.getUniformLocation(prog, 'offset');
+    const scaleLoc = gl.getUniformLocation(prog, 'scale');
+    const colorLoc = gl.getUniformLocation(prog, 'color');
+    const cameraLoc = gl.getUniformLocation(prog, 'camera');
+
+    // Game State
+    let player = { x: 0, y: 0.5, vx: 0, vy: 0, w: 0.05, h: 0.08 };
+    let camera = { x: 0, y: 0 };
+    
+    const platforms = [
+        { x: 0,    y: -0.8, w: 2.0, h: 0.1 }, // Main Ground Platform
+        { x: -0.8, y: -0.4, w: 0.3, h: 0.05 },
+        { x: 0.5,  y: -0.1, w: 0.3, h: 0.05 },
+        { x: 1.5,  y: 0.3,  w: 0.3, h: 0.05 }
+    ];
+
+    let keys = {};
+    let coyoteFrames = 0;
+    const COYOTE_MAX = 12;
+
+    window.onkeydown = e => keys[e.code] = true;
+    window.onkeyup = e => keys[e.code] = false;
+
+    const bindTouch = (id, keyName) => {
+        const el = document.getElementById(id);
+        const start = (e) => { e.preventDefault(); keys[keyName] = true; };
+        const end = (e) => { e.preventDefault(); keys[keyName] = false; };
+        el.addEventListener('touchstart', start, {passive: false});
+        el.addEventListener('touchend', end, {passive: false});
+        el.addEventListener('mousedown', start);
+        el.addEventListener('mouseup', end);
+    };
+
+    bindTouch('btnLeft', 'ArrowLeft');
+    bindTouch('btnRight', 'ArrowRight');
+    bindTouch('btnJump', 'Space');
+
+    function update() {
+        // Horizontal Movement
+        if (keys['ArrowLeft']) player.vx = -0.01;
+        else if (keys['ArrowRight']) player.vx = 0.01;
+        else player.vx *= 0.85;
+
+        // Physics
+        player.vy -= 0.0012; 
+        player.x += player.vx;
+        player.y += player.vy;
+
+        // Platform Collisions
+        let onGround = false;
+        platforms.forEach(p => {
+            if (player.x + player.w > p.x - p.w && player.x - player.w < p.x + p.w &&
+                player.y - player.h < p.y + p.h && player.y + player.h > p.y - p.h && player.vy < 0) {
+                player.y = p.y + p.h + player.h;
+                player.vy = 0;
+                onGround = true;
+            }
+        });
+
+        // Coyote Jump Logic (Controlled by Ability Feature Toggle)
+        if (onGround) {
+            coyoteFrames = COYOTE_MAX;
+        } else {
+            coyoteFrames--;
+        }
+
+        const canJump = coyoteToggle.checked ? (coyoteFrames > 0) : onGround;
+
+        if (keys['Space'] && canJump) {
+            player.vy = 0.028;
+            coyoteFrames = 0; 
+            onGround = false; // Force leave ground state for non-coyote mode
+        }
+
+        // Camera Follow (Smooth interpolation)
+        camera.x += (player.x - camera.x) * 0.1;
+        camera.y += (player.y - camera.y) * 0.1;
+
+        // Reset if fall too deep
+        if (player.y < -2.0) { player.x = 0; player.y = 0.5; player.vy = 0; }
+    }
+
+    function drawRect(x, y, w, h, color) {
+        gl.uniform2f(offsetLoc, x, y);
+        gl.uniform2f(scaleLoc, w, h);
+        gl.uniform2f(cameraLoc, camera.x, camera.y);
+        gl.uniform4fv(colorLoc, color);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function loop() {
+        update();
+        gl.clearColor(0.1, 0.1, 0.1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Render Platforms
+        platforms.forEach((p, i) => {
+            // Give ground a different color
+            const col = i === 0 ? [0.4, 0.4, 0.5, 1] : [0.3, 0.7, 0.3, 1];
+            drawRect(p.x, p.y, p.w, p.h, col);
+        });
+
+        // Render Player
+        drawRect(player.x, player.y, player.w, player.h, [0.9, 0.3, 0.3, 1]);
+
+        requestAnimationFrame(loop);
+    }
+
+    loop();
+</script>
+</body>
+</html>
