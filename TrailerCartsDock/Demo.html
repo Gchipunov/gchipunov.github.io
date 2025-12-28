@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Warehouse Go-Kart Unloading</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        <h2>Warehouse Dock Simulation</h2>
+        <p>Receiving Go-Karts | Left Click to Rotate | Scroll to Zoom</p>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xaaccff);
+        scene.fog = new THREE.Fog(0xaaccff, 10, 100);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(15, 12, 15);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5); // Soft white light
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+        dirLight.position.set(-10, 20, -10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        scene.add(dirLight);
+
+        // --- 2. Environment Construction (Warehouse & Trailer) ---
+        
+        // Materials
+        const concreteMat = new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.8 });
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee });
+        const trailerMat = new THREE.MeshStandardMaterial({ color: 0xcdcdcd, metalness: 0.2 });
+        const darkMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+        // Warehouse Floor
+        const floor = new THREE.Mesh(new THREE.BoxGeometry(40, 1, 40), concreteMat);
+        floor.position.y = -0.5;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Warehouse Wall with Dock Door hole
+        // We make this by creating two side walls and a top lintel
+        const wallGroup = new THREE.Group();
+        
+        const leftWall = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 1), wallMat);
+        leftWall.position.set(-10, 5, -5); 
+        leftWall.castShadow = true; leftWall.receiveShadow = true;
+        
+        const rightWall = new THREE.Mesh(new THREE.BoxGeometry(20, 10, 1), wallMat);
+        rightWall.position.set(10, 5, -5);
+        rightWall.castShadow = true; rightWall.receiveShadow = true;
+
+        const topWall = new THREE.Mesh(new THREE.BoxGeometry(10, 4, 1), wallMat); // Above door
+        topWall.position.set(0, 8, -5);
+        topWall.castShadow = true; topWall.receiveShadow = true;
+
+        wallGroup.add(leftWall, rightWall, topWall);
+        scene.add(wallGroup);
+
+        // The Trailer (Outside the dock)
+        // Positioned behind the wall (z < -5)
+        const trailerGroup = new THREE.Group();
+        trailerGroup.position.set(0, 0, -5); // Attached to dock
+
+        // Trailer Floor
+        const tFloor = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.5, 12), trailerMat);
+        tFloor.position.set(0, 0.25, -6); // Extends back
+        tFloor.receiveShadow = true;
+        
+        // Trailer Walls/Roof
+        const tShellGeo = new THREE.BoxGeometry(3.7, 4, 12);
+        // We invert normals or use double side to see inside? simpler to just build walls.
+        // Let's just make a box and put it there, open facing the warehouse.
+        const tRoof = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.2, 12), trailerMat);
+        tRoof.position.set(0, 4, -6);
+        tRoof.castShadow = true;
+
+        const tSideL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4, 12), trailerMat);
+        tSideL.position.set(-1.85, 2, -6);
+        tSideL.castShadow = true;
+
+        const tSideR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4, 12), trailerMat);
+        tSideR.position.set(1.85, 2, -6);
+        tSideR.castShadow = true;
+
+        const tBack = new THREE.Mesh(new THREE.BoxGeometry(3.7, 4, 0.2), trailerMat);
+        tBack.position.set(0, 2, -12);
+        tBack.castShadow = true;
+
+        // Trailer Wheels
+        const tWheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+        tWheelGeo.rotateZ(Math.PI / 2);
+        const tWheel1 = new THREE.Mesh(tWheelGeo, darkMat); tWheel1.position.set(1.5, -0.5, -9);
+        const tWheel2 = new THREE.Mesh(tWheelGeo, darkMat); tWheel2.position.set(-1.5, -0.5, -9);
+        
+        trailerGroup.add(tFloor, tRoof, tSideL, tSideR, tBack, tWheel1, tWheel2);
+        scene.add(trailerGroup);
+
+
+        // --- 3. The Go-Kart Factory ---
+
+        function createGoKart() {
+            const kartGroup = new THREE.Group();
+
+            // Materials
+            const bodyColor = new THREE.Color().setHSL(Math.random(), 0.8, 0.5); // Random colors
+            const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor });
+            const blackMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const seatMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const silverMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8 });
+
+            // Chassis
+            const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 2), bodyMat);
+            chassis.position.y = 0.4;
+            chassis.castShadow = true;
+            kartGroup.add(chassis);
+
+            // Bumpers
+            const bumperF = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 0.2), silverMat);
+            bumperF.position.set(0, 0.3, 1);
+            kartGroup.add(bumperF);
+
+            // Seat
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.6, 0.1), seatMat);
+            seat.position.set(0, 0.8, -0.4);
+            seat.rotation.x = -0.2;
+            seat.castShadow = true;
+            kartGroup.add(seat);
+
+            const seatBottom = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), seatMat);
+            seatBottom.position.set(0, 0.5, -0.4);
+            kartGroup.add(seatBottom);
+
+            // Steering Wheel
+            const col = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6), blackMat);
+            col.position.set(0, 0.8, 0.3);
+            col.rotation.x = -0.5;
+            kartGroup.add(col);
+            
+            const wheelTorus = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.04, 8, 16), blackMat);
+            wheelTorus.position.set(0, 1.05, 0.15);
+            wheelTorus.rotation.x = -0.5;
+            kartGroup.add(wheelTorus);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.2, 24);
+            wheelGeo.rotateZ(Math.PI / 2);
+
+            const wFL = new THREE.Mesh(wheelGeo, blackMat); wFL.position.set(0.7, 0.25, 0.8);
+            const wFR = new THREE.Mesh(wheelGeo, blackMat); wFR.position.set(-0.7, 0.25, 0.8);
+            const wBL = new THREE.Mesh(wheelGeo, blackMat); wBL.position.set(0.7, 0.25, -0.8);
+            const wBR = new THREE.Mesh(wheelGeo, blackMat); wBR.position.set(-0.7, 0.25, -0.8);
+            
+            kartGroup.add(wFL, wFR, wBL, wBR);
+
+            return kartGroup;
+        }
+
+
+        // --- 4. Animation Logic ---
+
+        const karts = [];
+        const spawnInterval = 120; // Frames between spawns
+        let frameCount = 0;
+
+        function spawnKart() {
+            const kart = createGoKart();
+            // Start position: Deep inside the trailer
+            kart.position.set(0, 0, -15); 
+            // Rotation: Facing forward (Positive Z is "forward" for our geometry logic roughly)
+            // Actually, based on logic: Geometry was built along Z. 
+            // Trailer is at Z = -5 to -17. Warehouse is Z > -5.
+            // We want kart to move +Z.
+            scene.add(kart);
+            
+            // Add custom properties for animation state
+            kart.userData = {
+                phase: 'unloading', // unloading -> turning -> parking
+                speed: 0.1,
+                turnProgress: 0
+            };
+            
+            karts.push(kart);
+        }
+
+        // --- 5. Render Loop ---
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            frameCount++;
+            if (frameCount % spawnInterval === 0) {
+                spawnKart();
+            }
+
+            // Update Karts
+            for (let i = karts.length - 1; i >= 0; i--) {
+                const k = karts[i];
+                
+                if (k.userData.phase === 'unloading') {
+                    // Drive straight out of trailer
+                    k.position.z += k.userData.speed;
+                    
+                    // Once sufficiently inside warehouse
+                    if (k.position.z > 2) {
+                        k.userData.phase = 'turning';
+                    }
+                } 
+                else if (k.userData.phase === 'turning') {
+                    // Turn Right
+                    k.userData.turnProgress += 0.02;
+                    k.rotation.y -= 0.03; 
+                    k.position.z += k.userData.speed * Math.cos(k.rotation.y);
+                    k.position.x += k.userData.speed * Math.sin(k.rotation.y); // Actually -sin because of rotation direction
+
+                    // Simple movement vector based on rotation
+                    const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), k.rotation.y);
+                    k.position.add(forward.multiplyScalar(k.userData.speed));
+
+                    // If off screen or far away, remove
+                    if (k.position.x > 20 || k.position.z > 20) {
+                        scene.remove(k);
+                        karts.splice(i, 1);
+                    }
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        spawnKart();
+        animate();
+
+    </script>
+</body>
+</html>
