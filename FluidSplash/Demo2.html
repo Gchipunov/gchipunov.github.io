@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Lake Splash - Fixed - https://gemini.google.com/app/32e012621a4ddc34</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        canvas { width: 100vw; height: 100vh; display: block; cursor: crosshair; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; text-shadow: 1px 1px 2px black; }
+    </style>
+</head>
+<body>
+    <div id="ui">A rock falls every few seconds.<br>Click to throw your own!</div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        varying vec2 v_uv;
+        void main() {
+            v_uv = a_position * 0.5 + 0.5;
+            gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs-sim" type="x-shader/x-fragment">
+        precision highp float;
+        uniform sampler2D u_texture;
+        uniform vec2 u_texelSize;
+        uniform vec3 u_mouse; // x, y, strength
+        varying vec2 v_uv;
+
+        void main() {
+            // Sample neighbors
+            float l = texture2D(u_texture, v_uv - vec2(u_texelSize.x, 0.0)).r;
+            float r = texture2D(u_texture, v_uv + vec2(u_texelSize.x, 0.0)).r;
+            float t = texture2D(u_texture, v_uv + vec2(0.0, u_texelSize.y)).r;
+            float b = texture2D(u_texture, v_uv - vec2(0.0, u_texelSize.y)).r;
+            
+            vec2 current = texture2D(u_texture, v_uv).rg;
+            float height = current.r;
+            float velocity = current.g;
+
+            // Wave Equation: Acceleration is based on the difference between average neighbor height and current height
+            float accel = (l + r + t + b) * 0.25 - height;
+            velocity += accel;
+            velocity *= 0.99; // Low damping for "liquid" feel
+            height += velocity;
+
+            // Splash / Rock impact
+            float dist = distance(v_uv, u_mouse.xy);
+            if (u_mouse.z > 0.0) {
+                float impact = smoothstep(u_mouse.z, 0.0, dist);
+                height += impact * 0.5;
+            }
+
+            gl_FragColor = vec4(height, velocity, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs-render" type="x-shader/x-fragment">
+        precision highp float;
+        uniform sampler2D u_texture;
+        uniform vec2 u_texelSize;
+        varying vec2 v_uv;
+
+        void main() {
+            float h = texture2D(u_texture, v_uv).r;
+            
+            // Calculate Normals for lighting
+            float dx = texture2D(u_texture, v_uv + vec2(u_texelSize.x, 0.0)).r - h;
+            float dy = texture2D(u_texture, v_uv + vec2(0.0, u_texelSize.y)).r - h;
+            vec3 normal = normalize(vec3(-dx * 50.0, -dy * 50.0, 1.0));
+            
+            // Sky/Sun Reflection
+            vec3 lightDir = normalize(vec3(0.2, 0.5, 0.8));
+            float reflection = dot(normal, lightDir);
+            float specular = pow(max(reflection, 0.0), 120.0);
+            
+            // Deep water blue
+            vec3 waterColor = vec3(0.05, 0.15, 0.25);
+            // Mix color based on ripples and specular highlight
+            vec3 finalColor = mix(waterColor, vec3(0.4, 0.7, 0.9), h * 2.0 + 0.1);
+            finalColor += specular * 0.8;
+
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        // EXTENSION REQUIRED FOR FLUID MATH
+        const ext = gl.getExtension('OES_texture_float');
+        const linear = gl.getExtension('OES_texture_float_linear');
+        if (!ext) alert("Your browser doesn't support floating point textures!");
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(shader));
+            return shader;
+        }
+
+        function createProgram(gl, vsSrc, fsSrc) {
+            const p = gl.createProgram();
+            gl.attachShader(p, createShader(gl, gl.VERTEX_SHADER, vsSrc));
+            gl.attachShader(p, createShader(gl, gl.FRAGMENT_SHADER, fsSrc));
+            gl.linkProgram(p);
+            return p;
+        }
+
+        const simProg = createProgram(gl, document.getElementById('vs').text, document.getElementById('fs-sim').text);
+        const renderProg = createProgram(gl, document.getElementById('vs').text, document.getElementById('fs-render').text);
+
+        const quadBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+        function createFloatTexture(w, h) {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            // Use FLOAT instead of UNSIGNED_BYTE
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.FLOAT, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return tex;
+        }
+
+        let width, height, texA, texB, fb;
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            texA = createFloatTexture(width, height);
+            texB = createFloatTexture(width, height);
+            fb = gl.createFramebuffer();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        let mouse = { x: 0.5, y: 0.5, active: 0 };
+        let rockTimer = 0;
+
+        canvas.addEventListener('mousedown', e => {
+            mouse.x = e.clientX / width;
+            mouse.y = 1.0 - (e.clientY / height);
+            mouse.active = 0.03; // Impact radius
+        });
+        canvas.addEventListener('mouseup', () => mouse.active = 0);
+
+        function render() {
+            rockTimer++;
+            // Auto-drop a rock every 3 seconds
+            if (rockTimer % 180 === 0) {
+                mouse.x = Math.random();
+                mouse.y = Math.random();
+                mouse.active = 0.04;
+            } else if (rockTimer % 180 === 5) {
+                // Turn off impact shortly after hit
+                if (mouse.active > 0 && !gl.canvas.onmousedown) mouse.active = 0;
+            }
+
+            // SIMULATION PASS
+            gl.useProgram(simProg);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texB, 0);
+            gl.viewport(0, 0, width, height);
+            
+            gl.bindTexture(gl.TEXTURE_2D, texA);
+            gl.uniform2f(gl.getUniformLocation(simProg, "u_texelSize"), 1/width, 1/height);
+            gl.uniform3f(gl.getUniformLocation(simProg, "u_mouse"), mouse.x, mouse.y, mouse.active);
+
+            const posLoc = gl.getAttribLocation(simProg, "a_position");
+            gl.enableVertexAttribArray(posLoc);
+            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // RENDER PASS
+            gl.useProgram(renderProg);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.bindTexture(gl.TEXTURE_2D, texB);
+            gl.uniform2f(gl.getUniformLocation(renderProg, "u_texelSize"), 1/width, 1/height);
+            
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Ping-pong textures
+            let temp = texA;
+            texA = texB;
+            texB = temp;
+
+            requestAnimationFrame(render);
+        }
+
+        render();
+    </script>
+</body>
+</html>
