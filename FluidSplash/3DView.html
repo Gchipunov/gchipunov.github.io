@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D WebGL Lake - Rotating Camera</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050508; font-family: sans-serif; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #8af; pointer-events: none; text-shadow: 1px 1px 2px black; }
+    </style>
+</head>
+<body>
+    <div id="ui">3D Lake View<br>Simulation running on GPU<br>Click anywhere to splash</div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vs-sim" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        varying vec2 v_uv;
+        void main() {
+            v_uv = a_position * 0.5 + 0.5;
+            gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs-sim" type="x-shader/x-fragment">
+        precision highp float;
+        uniform sampler2D u_texture;
+        uniform vec2 u_texelSize;
+        uniform vec3 u_mouse;
+        varying vec2 v_uv;
+        void main() {
+            float l = texture2D(u_texture, v_uv - vec2(u_texelSize.x, 0.0)).r;
+            float r = texture2D(u_texture, v_uv + vec2(u_texelSize.x, 0.0)).r;
+            float t = texture2D(u_texture, v_uv + vec2(0.0, u_texelSize.y)).r;
+            float b = texture2D(u_texture, v_uv - vec2(0.0, u_texelSize.y)).r;
+            vec2 current = texture2D(u_texture, v_uv).rg;
+            float velocity = current.g + ((l + r + t + b) * 0.25 - current.r);
+            velocity *= 0.992; 
+            float height = current.r + velocity;
+            float dist = distance(v_uv, u_mouse.xy);
+            if (u_mouse.z > 0.0) height += smoothstep(u_mouse.z, 0.0, dist) * 0.3;
+            gl_FragColor = vec4(height, velocity, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="vs-render" type="x-shader/x-vertex">
+        attribute vec2 a_gridPos;
+        uniform sampler2D u_simTex;
+        uniform mat4 u_mvp;
+        varying float v_height;
+        varying vec2 v_uv;
+        void main() {
+            v_uv = a_gridPos * 0.5 + 0.5;
+            v_height = texture2D(u_simTex, v_uv).r;
+            // Elevate the vertex based on simulation height
+            vec3 pos = vec3(a_gridPos.x, v_height * 0.5, a_gridPos.y);
+            gl_Position = u_mvp * vec4(pos, 1.0);
+        }
+    </script>
+
+    <script id="fs-render" type="x-shader/x-fragment">
+        precision highp float;
+        varying float v_height;
+        varying vec2 v_uv;
+        uniform vec2 u_texelSize;
+        uniform sampler2D u_simTex;
+        void main() {
+            float h = v_height;
+            float dx = texture2D(u_simTex, v_uv + vec2(u_texelSize.x, 0.0)).r - h;
+            float dy = texture2D(u_simTex, v_uv + vec2(0.0, u_texelSize.y)).r - h;
+            vec3 normal = normalize(vec3(-dx * 40.0, 1.0, -dy * 40.0));
+            vec3 light = normalize(vec3(1.0, 1.0, 0.8));
+            float spec = pow(max(dot(normal, light), 0.0), 50.0);
+            vec3 color = mix(vec3(0.02, 0.1, 0.2), vec3(0.3, 0.6, 1.0), h * 2.0 + 0.3);
+            gl_FragColor = vec4(color + spec * 0.6, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+        gl.getExtension('OES_texture_float');
+        gl.getExtension('OES_texture_float_linear');
+
+        function createShader(gl, type, src) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src); gl.compileShader(s);
+            return s;
+        }
+        function createProg(gl, vsId, fsId) {
+            const p = gl.createProgram();
+            gl.attachShader(p, createShader(gl, gl.VERTEX_SHADER, document.getElementById(vsId).text));
+            gl.attachShader(p, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById(fsId).text));
+            gl.linkProgram(p); return p;
+        }
+
+        const simProg = createProg(gl, 'vs-sim', 'fs-sim');
+        const renderProg = createProg(gl, 'vs-render', 'fs-render');
+
+        // Fullscreen Quad for Simulation
+        const quadBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+
+        // 3D Grid for Lake Surface
+        const gridRes = 256;
+        const gridData = [];
+        for(let y=0; y<gridRes; y++) {
+            for(let x=0; x<gridRes; x++) {
+                const x0 = -1 + (x/gridRes)*2, x1 = -1 + ((x+1)/gridRes)*2;
+                const y0 = -1 + (y/gridRes)*2, y1 = -1 + ((y+1)/gridRes)*2;
+                gridData.push(x0,y0, x1,y0, x0,y1, x0,y1, x1,y0, x1,y1);
+            }
+        }
+        const gridBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, gridBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(gridData), gl.STATIC_DRAW);
+
+        function createTex(w, h) {
+            const t = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.FLOAT, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return t;
+        }
+
+        let w = canvas.width = window.innerWidth, h = canvas.height = window.innerHeight;
+        let tA = createTex(512, 512), tB = createTex(512, 512), fb = gl.createFramebuffer();
+        let mouse = {x:0.5, y:0.5, a:0}, time = 0;
+
+        window.onmousedown = e => { mouse.x = e.clientX/w; mouse.y = 1-e.clientY/h; mouse.a = 0.04; };
+        window.onmouseup = () => mouse.a = 0;
+
+        function render() {
+            time += 0.01;
+            if(Math.sin(time*2) > 0.99) { mouse.x = Math.random(); mouse.y = Math.random(); mouse.a = 0.03; }
+            else if (mouse.a > 0 && !window.onmousedown) mouse.a -= 0.001;
+
+            // 1. Sim Pass
+            gl.useProgram(simProg);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tB, 0);
+            gl.viewport(0, 0, 512, 512);
+            gl.bindTexture(gl.TEXTURE_2D, tA);
+            gl.uniform2f(gl.getUniformLocation(simProg, "u_texelSize"), 1/512, 1/512);
+            gl.uniform3f(gl.getUniformLocation(simProg, "u_mouse"), mouse.x, mouse.y, mouse.a);
+            gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+            const pLoc = gl.getAttribLocation(simProg, "a_position");
+            gl.enableVertexAttribArray(pLoc); gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // 2. Render Pass
+            gl.useProgram(renderProg);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, w, h);
+            gl.clearColor(0,0,0.05,1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.enable(gl.DEPTH_TEST);
+
+            // Camera Math
+            const eye = [Math.sin(time*0.5)*2.5, 1.2, Math.cos(time*0.5)*2.5];
+            const mvp = getMVP(eye);
+            gl.uniformMatrix4fv(gl.getUniformLocation(renderProg, "u_mvp"), false, mvp);
+            gl.uniform2f(gl.getUniformLocation(renderProg, "u_texelSize"), 1/512, 1/512);
+            gl.bindTexture(gl.TEXTURE_2D, tB);
+            
+            gl.bindBuffer(gl.ARRAY_BUFFER, gridBuf);
+            const gLoc = gl.getAttribLocation(renderProg, "a_gridPos");
+            gl.enableVertexAttribArray(gLoc); gl.vertexAttribPointer(gLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, gridRes * gridRes * 6);
+
+            [tA, tB] = [tB, tA];
+            requestAnimationFrame(render);
+        }
+
+        function getMVP(eye) {
+            const aspect = w/h, zNear = 0.1, zFar = 100, fov = 45 * Math.PI / 180;
+            const f = 1.0 / Math.tan(fov / 2);
+            const proj = [f/aspect,0,0,0, 0,f,0,0, 0,0,(zFar+zNear)/(zNear-zFar),-1, 0,0,(2*zFar*zNear)/(zNear-zFar),0];
+            
+            // Basic LookAt Camera
+            const z = normalize(eye), x = normalize(cross([0,1,0], z)), y = cross(z, x);
+            const view = [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -dot(x,eye),-dot(y,eye),-dot(z,eye),1];
+            return multiply(proj, view);
+        }
+
+        // Simple Math Helpers
+        function normalize(v) { const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); return [v[0]/l, v[1]/l, v[2]/l]; }
+        function cross(a,b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+        function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+        function multiply(a,b) {
+            const out = new Float32Array(16);
+            for(let i=0; i<4; i++) for(let j=0; j<4; j++) {
+                out[i*4+j] = a[i*4+0]*b[0*4+j] + a[i*4+1]*b[1*4+j] + a[i*4+2]*b[2*4+j] + a[i*4+3]*b[3*4+j];
+            }
+            return out;
+        }
+
+        render();
+    </script>
+</body>
+</html>
