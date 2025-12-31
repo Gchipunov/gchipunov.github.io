@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Platformer Main Menu</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background: #000; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        .ui-overlay {
+            position: absolute;
+            top: 50%;
+            left: 10%;
+            transform: translateY(-50%);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        h1 { font-size: 5rem; margin: 0; letter-spacing: 5px; color: #ffeb3b; }
+        p { font-size: 1.5rem; opacity: 0.8; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-overlay">
+        <h1>NEON NEBULA</h1>
+        <p>Press Start to Explore</p>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec2 position;
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+
+        // Helper for smooth hills
+        float hash(float n) { return fract(sin(n) * 43758.5453123); }
+        float noise(float x) {
+            float i = floor(x);
+            float f = fract(x);
+            return mix(hash(i), hash(i + 1.0), smoothstep(0.0, 1.0, f));
+        }
+
+        void main() {
+            vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+            uv.x *= u_resolution.x / u_resolution.y; // Fix aspect ratio
+
+            // 1. Sky Gradient (Bright Pinks and Purples)
+            vec3 skyTop = vec3(0.1, 0.2, 0.8);
+            vec3 skyBottom = vec3(1.0, 0.4, 0.6);
+            vec3 color = mix(skyBottom, skyTop, uv.y);
+
+            // 2. Animated Sun
+            float sunDist = length(uv - vec2(0.8, 0.75));
+            float sun = smoothstep(0.2, 0.19, sunDist);
+            color = mix(color, vec3(1.0, 0.9, 0.2), sun);
+
+            // 3. Layered Hills (Parallax Effect)
+            for(float i = 1.0; i <= 4.0; i++) {
+                float speed = i * 0.2;
+                float height = 0.5 - (i * 0.1);
+                float wave = noise(uv.x * (i * 1.5) + u_time * speed) * 0.2 + height;
+                
+                // Hill colors getting darker/bluer as they come forward
+                vec3 hillColor = mix(vec3(0.2, 0.8, 0.5), vec3(0.05, 0.1, 0.3), i / 4.0);
+                
+                if(uv.y < wave) {
+                    color = hillColor;
+                }
+            }
+
+            // 4. Subtle Scanlines for "Game" feel
+            color *= 0.9 + 0.1 * sin(gl_FragCoord.y * 1.5);
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // Set up geometry (fullscreen quad)
+        const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+        const positionLoc = gl.getAttribLocation(program, "position");
+        gl.enableVertexAttribArray(positionLoc);
+        gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+        const resLoc = gl.getUniformLocation(program, "u_resolution");
+        const timeLoc = gl.getUniformLocation(program, "u_time");
+
+        function render(time) {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+
+            gl.uniform2f(resLoc, canvas.width, canvas.height);
+            gl.uniform1f(timeLoc, time * 0.001);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
