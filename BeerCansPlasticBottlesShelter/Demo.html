@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Shelter Builder - WebGL</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: white;
+            background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px;
+            pointer-events: none;
+        }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 10px; height: 10px;
+            background: white; border-radius: 50%; transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h2>Shelter Builder</h2>
+        <p>WASD to Move | Mouse to Look</p>
+        <p><strong>Click</strong> to Loot Cans/Bottles</p>
+        <p>Press <strong>'P'</strong> to Place Item</p>
+        <hr>
+        <p>Inventory: <span id="inv-count">0</span> items</p>
+    </div>
+    <div id="crosshair"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+        // --- Setup Scene ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb); // Sky blue
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lights ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+        sunLight.position.set(10, 20, 10);
+        scene.add(sunLight);
+
+        // --- Ground ---
+        const groundGeo = new THREE.PlaneGeometry(100, 100);
+        const groundMat = new THREE.MeshLambertMaterial({ color: 0x3b5323 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // --- Game State ---
+        let inventory = [];
+        const itemsInWorld = [];
+        const controls = new PointerLockControls(camera, document.body);
+
+        // --- Item Factories ---
+        function createCan(x, z) {
+            const geometry = new THREE.CylinderGeometry(0.1, 0.1, 0.3, 16);
+            const material = new THREE.MeshPhongMaterial({ color: 0xff0000, shininess: 100 });
+            const can = new THREE.Mesh(geometry, material);
+            can.position.set(x, 0.15, z);
+            can.userData = { type: 'can' };
+            scene.add(can);
+            itemsInWorld.push(can);
+        }
+
+        function createBottle(x, z) {
+            const geometry = new THREE.CylinderGeometry(0.05, 0.08, 0.4, 12);
+            const material = new THREE.MeshPhongMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.7 });
+            const bottle = new THREE.Mesh(geometry, material);
+            bottle.position.set(x, 0.2, z);
+            bottle.userData = { type: 'bottle' };
+            scene.add(bottle);
+            itemsInWorld.push(bottle);
+        }
+
+        // Spawn some random trash
+        for(let i=0; i<20; i++) {
+            createCan(Math.random()*20-10, Math.random()*20-10);
+            createBottle(Math.random()*20-10, Math.random()*20-10);
+        }
+
+        // --- Interaction ---
+        document.addEventListener('click', () => {
+            if (!controls.isLocked) {
+                controls.lock();
+            } else {
+                lootItem();
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if(e.code === 'KeyP') placeItem();
+        });
+
+        const raycaster = new THREE.Raycaster();
+        function lootItem() {
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(itemsInWorld);
+            
+            if (intersects.length > 0 && intersects[0].distance < 3) {
+                const object = intersects[0].object;
+                inventory.push(object.userData.type);
+                scene.remove(object);
+                itemsInWorld.splice(itemsInWorld.indexOf(object), 1);
+                updateUI();
+            }
+        }
+
+        function placeItem() {
+            if (inventory.length === 0) return;
+            
+            const type = inventory.pop();
+            const spawnPos = new THREE.Vector3();
+            camera.getWorldDirection(spawnPos);
+            spawnPos.multiplyScalar(2).add(camera.position); // Place 2 units in front
+            
+            if (type === 'can') createCan(spawnPos.x, spawnPos.z);
+            else createBottle(spawnPos.x, spawnPos.z);
+            
+            updateUI();
+        }
+
+        function updateUI() {
+            document.getElementById('inv-count').innerText = inventory.length;
+        }
+
+        // --- Movement Logic ---
+        const move = { fwd: false, bwd: false, lft: false, rgt: false };
+        document.addEventListener('keydown', (e) => {
+            if(e.code === 'KeyW') move.fwd = true;
+            if(e.code === 'KeyS') move.bwd = true;
+            if(e.code === 'KeyA') move.lft = true;
+            if(e.code === 'KeyD') move.rgt = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            if(e.code === 'KeyW') move.fwd = false;
+            if(e.code === 'KeyS') move.bwd = false;
+            if(e.code === 'KeyA') move.lft = false;
+            if(e.code === 'KeyD') move.rgt = false;
+        });
+
+        const velocity = new THREE.Vector3();
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls.isLocked) {
+                const delta = 0.1;
+                if(move.fwd) controls.moveForward(delta);
+                if(move.bwd) controls.moveForward(-delta);
+                if(move.lft) controls.moveRight(-delta);
+                if(move.rgt) controls.moveRight(delta);
+            }
+            renderer.render(scene, camera);
+        }
+        
+        camera.position.y = 1.6; // Human height
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
