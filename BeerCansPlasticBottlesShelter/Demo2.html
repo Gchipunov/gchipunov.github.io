@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Shelter Builder Pro - WebGL</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: white;
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px;
+            pointer-events: none; border: 1px solid #444;
+        }
+        #hotbar {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 10px;
+        }
+        .slot {
+            width: 80px; height: 80px; border: 2px solid #555; border-radius: 5px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: white; font-size: 12px; background: #222;
+        }
+        .slot.active { border-color: #00ffcc; background: #333; box-shadow: 0 0 10px #00ffcc; }
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+            background: white; border-radius: 50%; transform: translate(-50%, -50%);
+            mix-blend-mode: difference;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h2 style="margin:0 0 10px 0;">Shelter Builder</h2>
+        <p><b>WASD</b> Move | <b>Mouse</b> Look</p>
+        <p><b>Click</b> Loot | <b>P</b> Place</p>
+        <p><b>1 / 2</b> Select Item</p>
+    </div>
+
+    <div id="hotbar">
+        <div id="slot-can" class="slot active">
+            <span>[1] CAN</span>
+            <strong id="count-can">0</strong>
+        </div>
+        <div id="slot-bottle" class="slot">
+            <span>[2] BOTTLE</span>
+            <strong id="count-bottle">0</strong>
+        </div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+        // --- Scene Config ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new PointerLockControls(camera, document.body);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+        sun.position.set(5, 10, 7);
+        scene.add(sun);
+
+        // --- Ground ---
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshLambertMaterial({ color: 0x4a6741 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // --- Game State ---
+        let inventory = { can: 0, bottle: 0 };
+        let selectedType = 'can'; // Default selection
+        const itemsInWorld = [];
+
+        // --- Item Creators ---
+        function getItemMesh(type, isGhost = false) {
+            let geo, mat;
+            if (type === 'can') {
+                geo = new THREE.CylinderGeometry(0.1, 0.1, 0.3, 12);
+                mat = new THREE.MeshPhongMaterial({ color: 0xff4444 });
+            } else {
+                geo = new THREE.CylinderGeometry(0.06, 0.08, 0.4, 12);
+                mat = new THREE.MeshPhongMaterial({ color: 0x44ffff, transparent: true, opacity: 0.6 });
+            }
+            if (isGhost) {
+                mat.transparent = true;
+                mat.opacity = 0.4;
+            }
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.userData.type = type;
+            return mesh;
+        }
+
+        function spawnItem(type, x, y, z) {
+            const item = getItemMesh(type);
+            item.position.set(x, y, z);
+            scene.add(item);
+            itemsInWorld.push(item);
+        }
+
+        // Initial Scatter
+        for(let i=0; i<30; i++) {
+            const type = Math.random() > 0.5 ? 'can' : 'bottle';
+            spawnItem(type, Math.random()*20-10, 0.2, Math.random()*20-10);
+        }
+
+        // --- Ghost Preview ---
+        const ghost = getItemMesh('can', true);
+        scene.add(ghost);
+
+        // --- Input Handling ---
+        document.addEventListener('click', () => {
+            if (!controls.isLocked) controls.lock();
+            else lootItem();
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === '1') selectSlot('can');
+            if (e.key === '2') selectSlot('bottle');
+            if (e.code === 'KeyP') placeItem();
+        });
+
+        function selectSlot(type) {
+            selectedType = type;
+            document.querySelectorAll('.slot').forEach(s => s.classList.remove('active'));
+            document.getElementById(`slot-${type}`).classList.add('active');
+            
+            // Update ghost visual
+            scene.remove(ghost);
+            const newGhost = getItemMesh(type, true);
+            ghost.geometry = newGhost.geometry;
+            ghost.material = newGhost.material;
+            scene.add(ghost);
+        }
+
+        const raycaster = new THREE.Raycaster();
+        function lootItem() {
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(itemsInWorld);
+            if (intersects.length > 0 && intersects[0].distance < 3) {
+                const obj = intersects[0].object;
+                inventory[obj.userData.type]++;
+                scene.remove(obj);
+                itemsInWorld.splice(itemsInWorld.indexOf(obj), 1);
+                updateUI();
+            }
+        }
+
+        function placeItem() {
+            if (inventory[selectedType] > 0) {
+                inventory[selectedType]--;
+                spawnItem(selectedType, ghost.position.x, ghost.position.y, ghost.position.z);
+                updateUI();
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('count-can').innerText = inventory.can;
+            document.getElementById('count-bottle').innerText = inventory.bottle;
+        }
+
+        // --- Core Loop ---
+        const move = { fwd: false, bwd: false, lft: false, rgt: false };
+        const onKey = (val) => (e) => {
+            if(e.code === 'KeyW') move.fwd = val;
+            if(e.code === 'KeyS') move.bwd = val;
+            if(e.code === 'KeyA') move.lft = val;
+            if(e.code === 'KeyD') move.rgt = val;
+        };
+        document.addEventListener('keydown', onKey(true));
+        document.addEventListener('keyup', onKey(false));
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls.isLocked) {
+                const speed = 0.12;
+                if(move.fwd) controls.moveForward(speed);
+                if(move.bwd) controls.moveForward(-speed);
+                if(move.lft) controls.moveRight(-speed);
+                if(move.rgt) controls.moveRight(speed);
+
+                // Update Ghost Position
+                const dir = new THREE.Vector3();
+                camera.getWorldDirection(dir);
+                ghost.position.copy(camera.position).add(dir.multiplyScalar(2));
+                ghost.position.y = Math.max(ghost.position.y, 0.2); // Don't bury in ground
+            }
+            renderer.render(scene, camera);
+        }
+
+        camera.position.y = 1.6;
+        updateUI();
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
