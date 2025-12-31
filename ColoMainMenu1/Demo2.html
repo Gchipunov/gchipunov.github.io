@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Nebula - Gem Edition</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background: #000; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        .ui-overlay {
+            position: absolute;
+            top: 50%;
+            left: 10%;
+            transform: translateY(-50%);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-shadow: 0 4px 15px rgba(0,0,0,0.8);
+            pointer-events: none;
+            z-index: 10;
+        }
+        h1 { font-size: 5rem; margin: 0; letter-spacing: 8px; color: #00f2ff; text-transform: uppercase; }
+        p { font-size: 1.5rem; opacity: 0.9; color: #ff007b; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-overlay">
+        <h1>GEM HUNTER</h1>
+        <p>Press Start to Collect</p>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec2 position;
+        void main() {
+            gl_Position = vec4(position, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision highp float;
+        uniform vec2 u_resolution;
+        uniform float u_time;
+
+        // Random functions
+        float hash(float n) { return fract(sin(n) * 43758.5453123); }
+        vec2 hash2(vec2 p) {
+            p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+            return fract(sin(p) * 43758.5453123);
+        }
+        
+        float noise(float x) {
+            float i = floor(x);
+            float f = fract(x);
+            return mix(hash(i), hash(i + 1.0), smoothstep(0.0, 1.0, f));
+        }
+
+        // Diamond Shape Function (SDF)
+        float sdDiamond(vec2 p, float size) {
+            vec2 q = abs(p);
+            return (q.x + q.y) - size;
+        }
+
+        void main() {
+            vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+            float aspect = u_resolution.x / u_resolution.y;
+            vec2 p = uv;
+            p.x *= aspect;
+
+            // 1. Sky Gradient
+            vec3 skyTop = vec3(0.05, 0.0, 0.2);
+            vec3 skyBottom = vec3(0.4, 0.1, 0.5);
+            vec3 color = mix(skyBottom, skyTop, uv.y);
+
+            // 2. Parallax Hills
+            for(float i = 1.0; i <= 4.0; i++) {
+                float speed = i * 0.15;
+                float wave = noise(p.x * (i * 1.2) + u_time * speed) * 0.2 + (0.5 - i * 0.12);
+                vec3 hillColor = mix(vec3(0.1, 0.0, 0.3), vec3(0.0, 0.9, 0.8), 1.0 - i/4.0);
+                if(uv.y < wave) {
+                    color = mix(hillColor, vec3(0.0), uv.y * 0.5); // Add depth shading
+                }
+            }
+
+            // 3. Rubies and Diamonds Grid
+            vec2 gemUV = p * 6.0; // Scale the world for gems
+            gemUV.x += u_time * 0.5; // Make them move with the world
+            vec2 gId = floor(gemUV);
+            vec2 gFrac = fract(gemUV) - 0.5;
+
+            // Unique random value for each grid cell
+            vec2 rand = hash2(gId);
+            
+            // Only draw a gem if the random value is high (sparsity)
+            if(rand.x > 0.6) {
+                float size = 0.1 + rand.y * 0.15;
+                // Wobble animation
+                gFrac += sin(u_time * 2.0 + rand.x * 10.0) * 0.1;
+                
+                float dist = sdDiamond(gFrac, size);
+                
+                if(dist < 0.0) {
+                    // Unpredictable Color Logic
+                    // Use time + cell ID to create a shifting hue
+                    float hueShift = fract(u_time * 0.5 + rand.x);
+                    
+                    vec3 ruby = vec3(1.0, 0.0, 0.2);
+                    vec3 diamond = vec3(0.4, 0.8, 1.0);
+                    vec3 gold = vec3(1.0, 0.8, 0.0);
+                    
+                    // Cycle colors unpredictably
+                    vec3 gemColor = ruby;
+                    if(hueShift > 0.33) gemColor = diamond;
+                    if(hueShift > 0.66) gemColor = gold;
+
+                    // Add a "shimmer" effect
+                    float shimmer = sin(u_time * 5.0 + rand.y * 20.0) * 0.5 + 0.5;
+                    gemColor += shimmer * 0.4;
+
+                    color = mix(color, gemColor, smoothstep(0.0, -0.02, dist));
+                }
+            }
+
+            // 4. CRT Post-processing
+            color *= 0.95 + 0.05 * sin(gl_FragCoord.y * 2.0);
+            
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+            }
+            return shader;
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+        const positionLoc = gl.getAttribLocation(program, "position");
+        gl.enableVertexAttribArray(positionLoc);
+        gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+        const resLoc = gl.getUniformLocation(program, "u_resolution");
+        const timeLoc = gl.getUniformLocation(program, "u_time");
+
+        function render(time) {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.uniform2f(resLoc, canvas.width, canvas.height);
+            gl.uniform1f(timeLoc, time * 0.001);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
