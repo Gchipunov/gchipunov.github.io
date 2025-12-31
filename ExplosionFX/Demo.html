@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL VFX: Explosion, Fire, Smoke, Dust & Debris</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        varying vec2 v_uv;
+        uniform vec2 u_offset;
+        uniform float u_scale;
+        uniform float u_time;
+
+        void main() {
+            v_uv = a_position * 0.5 + 0.5;
+            // Simple positioning logic
+            gl_Position = vec4((a_position * u_scale) + u_offset, 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fs-fire" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_uv;
+        uniform float u_time;
+        void main() {
+            float n = fract(sin(dot(v_uv ,vec2(12.9898,78.233))) * 43758.5453);
+            float mask = 1.0 - length(v_uv - 0.5) * 2.0;
+            vec3 color = vec3(1.0, 0.4, 0.1) * (mask + n * 0.2);
+            gl_FragColor = vec4(color, mask);
+        }
+    </script>
+
+    <script id="fs-explosion" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_uv;
+        uniform float u_time;
+        void main() {
+            float d = length(v_uv - 0.5);
+            float pulse = abs(sin(u_time * 5.0)) * 0.5;
+            float mask = smoothstep(0.5, 0.2, d + pulse);
+            gl_FragColor = vec4(vec3(1.0, 0.9, 0.5) * mask, mask);
+        }
+    </script>
+
+    <script id="fs-dust" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_uv;
+        void main() {
+            float mask = smoothstep(0.5, 0.0, length(v_uv - 0.5));
+            gl_FragColor = vec4(0.6, 0.5, 0.4, mask * 0.3);
+        }
+    </script>
+
+    <script id="fs-debris" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_uv;
+        void main() {
+            float mask = step(0.4, 1.0 - length(v_uv - 0.5)) * step(v_uv.x, 0.6);
+            gl_FragColor = vec4(0.1, 0.1, 0.1, mask);
+        }
+    </script>
+
+    <script id="fs-smoke" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec2 v_uv;
+        uniform float u_time;
+        void main() {
+            float d = length(v_uv - 0.5);
+            float noise = sin(v_uv.x * 10.0 + u_time) * 0.1;
+            float mask = smoothstep(0.4 + noise, 0.1, d);
+            gl_FragColor = vec4(vec3(0.1), mask * 0.8);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const gl = canvas.getContext('webgl');
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        function createProgram(gl, vsSource, fsSource) {
+            const program = gl.createProgram();
+            gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+            gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+            gl.linkProgram(program);
+            return program;
+        }
+
+        const vsSource = document.getElementById('vs').text;
+        const systems = [
+            { name: 'fire', fs: 'fs-fire', pos: [-0.5, 0.5], scale: 0.3 },
+            { name: 'explosion', fs: 'fs-explosion', pos: [0.5, 0.5], scale: 0.4 },
+            { name: 'dust', fs: 'fs-dust', pos: [-0.5, -0.5], scale: 0.3 },
+            { name: 'debris', fs: 'fs-debris', pos: [0.5, -0.5], scale: 0.1 },
+            { name: 'smoke', fs: 'fs-smoke', pos: [0.0, 0.0], scale: 0.5 }
+        ];
+
+        // Initialize Shaders and Buffers
+        systems.forEach(s => {
+            s.program = createProgram(gl, vsSource, document.getElementById(s.fs).text);
+            s.vbo = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, s.vbo);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+        });
+
+        function render(time) {
+            time *= 0.001;
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            systems.forEach(s => {
+                gl.useProgram(s.program);
+                
+                const posLoc = gl.getAttribLocation(s.program, "a_position");
+                gl.bindBuffer(gl.ARRAY_BUFFER, s.vbo);
+                gl.enableVertexAttribArray(posLoc);
+                gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+                gl.uniform2f(gl.getUniformLocation(s.program, "u_offset"), s.pos[0], s.pos[1]);
+                gl.uniform1f(gl.getUniformLocation(s.program, "u_scale"), s.scale);
+                gl.uniform1f(gl.getUniformLocation(s.program, "u_time"), time);
+
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            });
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+
+        window.onresize = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        };
+        window.onresize();
+    </script>
+</body>
+</html>
