@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Skater: 20k Unit Level</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: white;
+            pointer-events: none;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>WebGL Skater: Marathon Level</h1>
+    <p>Length: 20,000 Units</p>
+    <p>Controls: Arrow Keys to Move | Space to Ollie</p>
+</div>
+<canvas id="gameCanvas"></canvas>
+
+<script id="vertex-shader-2d" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    uniform float u_rotation;
+
+    void main() {
+        // Rotate
+        vec2 rotatedPosition = vec2(
+             a_position.x * cos(u_rotation) - a_position.y * sin(u_rotation),
+             a_position.x * sin(u_rotation) + a_position.y * cos(u_rotation)
+        );
+
+        // Scale
+        vec2 scaledPosition = rotatedPosition * u_scale;
+
+        // Translate
+        vec2 position = scaledPosition + u_translation;
+
+        // Pixel to Clip Space
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+
+        gl_Position = vec4(clipSpace, 0, 1);
+    }
+</script>
+
+<script id="fragment-shader-2d" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+/** * WEBGL SETUP 
+ */
+const canvas = document.getElementById("gameCanvas");
+const gl = canvas.getContext("webgl");
+
+if (!gl) { alert("WebGL not supported"); }
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShaderSource = document.getElementById("vertex-shader-2d").text;
+const fragmentShaderSource = document.getElementById("fragment-shader-2d").text;
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+// Locations
+const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+const translationLocation = gl.getUniformLocation(program, "u_translation");
+const scaleLocation = gl.getUniformLocation(program, "u_scale");
+const rotationLocation = gl.getUniformLocation(program, "u_rotation");
+
+// 1. Rect Buffer
+const rectBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, rectBuffer);
+const rectPositions = [
+  -0.5, -0.5,  0.5, -0.5, -0.5,  0.5,
+  -0.5,  0.5,  0.5, -0.5,  0.5,  0.5,
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rectPositions), gl.STATIC_DRAW);
+
+// 2. Triangle Buffer
+const triangleBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+const trianglePositions = [
+    -0.5, -0.5,  // Bottom Left
+     0.5, -0.5,  // Bottom Right
+     0.5,  0.5   // Top Right
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(trianglePositions), gl.STATIC_DRAW);
+
+
+/**
+ * GAME CONSTANTS
+ */
+const GRAVITY = 0.6;
+const FRICTION = 0.96;
+const ACCEL = 0.8;
+const JUMP_FORCE = 14;
+const MAX_SPEED = 18; // Fast speed for a long level!
+
+const LEVEL_LENGTH = 20000;
+const groundY = 50;
+
+// Camera
+let cameraX = 0;
+
+const keys = { left: false, right: false, space: false };
+
+const player = {
+    x: 100,
+    y: 300,
+    width: 40,
+    height: 10,
+    vx: 0,
+    vy: 0,
+    rotation: 0,
+    onGround: false,
+    color: [1, 0.5, 0, 1]
+};
+
+// --- LEVEL GENERATION ---
+const obstacles = [];
+
+function createLevel() {
+    // Colors
+    const colWedge = [0.3, 0.3, 0.8, 1];
+    const colPlat = [0.8, 0.3, 0.3, 1];
+
+    // 1. Add 10 Platforms distributed roughly evenly
+    // We start a bit in to give the player room
+    for (let i = 0; i < 10; i++) {
+        // Spread them out every ~1800 units, with some randomness
+        let px = 1500 + (i * 1800) + Math.random() * 500;
+        let pw = 200 + Math.random() * 300; // Width between 200 and 500
+        let ph = 100 + Math.random() * 150; // Height between 100 and 250
+        
+        obstacles.push({ type: 'platform', x: px, w: pw, h: ph, color: colPlat });
+    }
+
+    // 2. Add 5 Wedges (Ramps)
+    // We place these in the gaps between platforms roughly
+    for (let i = 0; i < 5; i++) {
+        let wx = 800 + (i * 3500) + Math.random() * 500;
+        let ww = 300 + Math.random() * 200;
+        let wh = 150 + Math.random() * 200; // Steepness varies
+
+        // Ensure we don't overlap too badly with existing obstacles (simple check)
+        // Since the map is huge (20k), manual spacing logic usually suffices for this demo
+        obstacles.push({ type: 'wedge', x: wx, w: ww, h: wh, color: colWedge });
+    }
+
+    // Sort obstacles by X position so physics feels consistent
+    obstacles.sort((a, b) => a.x - b.x);
+}
+
+// Initialize Level
+createLevel();
+
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Input
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'ArrowLeft') keys.left = true;
+    if (e.code === 'ArrowRight') keys.right = true;
+    if (e.code === 'Space') {
+        if (!keys.space && player.onGround) {
+            player.vy = JUMP_FORCE;
+            player.onGround = false;
+        }
+        keys.space = true;
+    }
+});
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'ArrowLeft') keys.left = false;
+    if (e.code === 'ArrowRight') keys.right = false;
+    if (e.code === 'Space') keys.space = false;
+});
+
+/**
+ * TERRAIN PHYSICS
+ */
+function getTerrainInfo(px) {
+    let height = groundY;
+    let angle = 0;
+
+    for (let obs of obstacles) {
+        let endX = obs.x + obs.w;
+
+        // Optimization: Since sorted, if obs.x is way ahead, we can stop
+        // (Optional, but good for 20k level with many items)
+        if (obs.x > px + 1000) break; 
+
+        if (px > obs.x && px <= endX) {
+            if (obs.type === 'wedge') {
+                let ratio = (px - obs.x) / obs.w;
+                height = Math.max(height, groundY + (ratio * obs.h));
+                angle = Math.atan2(obs.h, obs.w);
+            } 
+            else if (obs.type === 'platform') {
+                height = Math.max(height, groundY + obs.h);
+                angle = 0;
+            }
+        }
+    }
+    return { height, angle };
+}
+
+function update() {
+    let prevX = player.x;
+    let prevY = player.y;
+
+    if (keys.left) player.vx -= ACCEL;
+    if (keys.right) player.vx += ACCEL;
+    
+    if(player.vx > MAX_SPEED) player.vx = MAX_SPEED;
+    if(player.vx < -MAX_SPEED) player.vx = -MAX_SPEED;
+    player.vx *= FRICTION;
+
+    player.x += player.vx;
+    player.y += player.vy;
+    player.vy -= GRAVITY;
+
+    // Terrain Collision
+    let terrain = getTerrainInfo(player.x);
+    let targetFloorY = terrain.height;
+    let targetAngle = terrain.angle;
+
+    // Wall Check (Teleport prevention)
+    const STEP_HEIGHT = 20; 
+    let prevFeetY = prevY - (player.height / 2);
+
+    if (targetFloorY > prevFeetY + STEP_HEIGHT) {
+        player.x = prevX;
+        player.vx = 0;
+        let corrected = getTerrainInfo(player.x);
+        targetFloorY = corrected.height;
+        targetAngle = corrected.angle;
+    }
+
+    // Floor Snap
+    let feetY = player.y - (player.height / 2);
+    if (feetY < targetFloorY) {
+        player.y = targetFloorY + (player.height / 2);
+        player.vy = 0;
+        player.onGround = true;
+        player.rotation = targetAngle;
+    } else {
+        player.onGround = false;
+        player.rotation *= 0.95; 
+    }
+
+    // Boundaries
+    if (player.x < 0) { player.x = 0; player.vx = 0; }
+    if (player.x > LEVEL_LENGTH) { player.x = LEVEL_LENGTH; player.vx = 0; }
+
+    // Camera Logic (Follow Player)
+    let targetCamX = player.x - canvas.width / 3; // Keep player on left-third
+    if (targetCamX < 0) targetCamX = 0;
+    if (targetCamX > LEVEL_LENGTH - canvas.width) targetCamX = LEVEL_LENGTH - canvas.width;
+    cameraX += (targetCamX - cameraX) * 0.1;
+}
+
+/**
+ * RENDER
+ */
+function drawRect(x, y, w, h, rotation, color) {
+    let screenX = x - cameraX;
+    // Culling
+    if (screenX + w < 0 || screenX - w > canvas.width) return;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, rectBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(translationLocation, screenX, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform1f(rotationLocation, rotation);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function drawTriangle(x, y, w, h, rotation, color) {
+    let screenX = x - cameraX;
+    if (screenX + w < 0 || screenX - w > canvas.width) return;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(translationLocation, screenX, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform1f(rotationLocation, rotation);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function draw() {
+    update();
+
+    gl.clearColor(0.2, 0.2, 0.2, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+    gl.enableVertexAttribArray(positionAttributeLocation);
+
+    // 1. Draw Infinite Floor
+    // Since Rect max size depends on GPU, we draw a rect covering the screen bottom
+    drawRect(cameraX + canvas.width/2, groundY/2, canvas.width, groundY, 0, [0.3, 0.3, 0.3, 1]);
+
+    // 2. Draw Obstacles
+    for (let obs of obstacles) {
+        if (obs.type === 'wedge') {
+            let wX = obs.x + (obs.w / 2);
+            let wY = groundY + (obs.h / 2);
+            drawTriangle(wX, wY, obs.w, obs.h, 0, obs.color);
+        } else {
+            let pX = obs.x + (obs.w / 2);
+            let pY = groundY + obs.h - 5; 
+            drawRect(pX, pY, obs.w, 10, 0, obs.color);
+            let supportH = obs.h - 10;
+            drawRect(pX, groundY + supportH/2, obs.w, supportH, 0, [0.2, 0.2, 0.2, 1]); 
+        }
+    }
+
+    // 3. Draw Player
+    drawRect(player.x, player.y, player.width, player.height, player.rotation, player.color);
+    
+    // Wheels
+    drawRect(player.x - Math.cos(player.rotation)*15, player.y - Math.sin(player.rotation)*15, 6, 6, player.rotation, [1,1,1,1]);
+    drawRect(player.x + Math.cos(player.rotation)*15, player.y + Math.sin(player.rotation)*15, 6, 6, player.rotation, [1,1,1,1]);
+
+    requestAnimationFrame(draw);
+}
+
+draw();
+
+</script>
+</body>
+</html>
