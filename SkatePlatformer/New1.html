@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Skateboard Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: white;
+            pointer-events: none;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>WebGL Skater</h1>
+    <p>Controls: Arrow Keys to Move | Space to Ollie (Jump)</p>
+</div>
+<canvas id="gameCanvas"></canvas>
+
+<script id="vertex-shader-2d" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    uniform float u_rotation; // in radians
+
+    void main() {
+        // Rotate the position
+        vec2 rotatedPosition = vec2(
+             a_position.x * cos(u_rotation) - a_position.y * sin(u_rotation),
+             a_position.x * sin(u_rotation) + a_position.y * cos(u_rotation)
+        );
+
+        // Scale
+        vec2 scaledPosition = rotatedPosition * u_scale;
+
+        // Translate (in pixels)
+        vec2 position = scaledPosition + u_translation;
+
+        // Convert from pixels to 0.0->1.0
+        vec2 zeroToOne = position / u_resolution;
+
+        // Convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+
+        // Convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+
+        gl_Position = vec4(clipSpace, 0, 1);
+    }
+</script>
+
+<script id="fragment-shader-2d" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+/** * WEBGL BOILERPLATE SETUP 
+ */
+const canvas = document.getElementById("gameCanvas");
+const gl = canvas.getContext("webgl");
+
+if (!gl) { alert("WebGL not supported"); }
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShaderSource = document.getElementById("vertex-shader-2d").text;
+const fragmentShaderSource = document.getElementById("fragment-shader-2d").text;
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+}
+
+// Location Variables
+const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+const translationLocation = gl.getUniformLocation(program, "u_translation");
+const scaleLocation = gl.getUniformLocation(program, "u_scale");
+const rotationLocation = gl.getUniformLocation(program, "u_rotation");
+
+// --- 1. RECTANGLE BUFFER ---
+const rectBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, rectBuffer);
+const rectPositions = [
+  -0.5, -0.5,
+   0.5, -0.5,
+  -0.5,  0.5,
+  -0.5,  0.5,
+   0.5, -0.5,
+   0.5,  0.5,
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rectPositions), gl.STATIC_DRAW);
+
+// --- 2. TRIANGLE BUFFER (For the Wedge) ---
+const triangleBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+// A Right-Angled Triangle (Ramp up to the right)
+// Fits within the -0.5 to 0.5 box
+const trianglePositions = [
+    -0.5, -0.5,  // Bottom Left
+     0.5, -0.5,  // Bottom Right
+     0.5,  0.5   // Top Right
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(trianglePositions), gl.STATIC_DRAW);
+
+
+/**
+ * GAME ENGINE & PHYSICS
+ */
+
+const GRAVITY = 0.6;
+const FRICTION = 0.96;
+const ACCEL = 1.2;
+const JUMP_FORCE = 12;
+
+const keys = { left: false, right: false, space: false };
+
+const player = {
+    x: 100,
+    y: 300,
+    width: 40,
+    height: 10,
+    vx: 0,
+    vy: 0,
+    rotation: 0,
+    onGround: false,
+    color: [1, 0.5, 0, 1]
+};
+
+const groundY = 50;
+const wedge = {
+    xStart: 400,
+    width: 200,
+    height: 100, 
+    color: [0.3, 0.3, 0.8, 1]
+};
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'ArrowLeft') keys.left = true;
+    if (e.code === 'ArrowRight') keys.right = true;
+    if (e.code === 'Space') {
+        if (!keys.space && player.onGround) {
+            player.vy = JUMP_FORCE;
+            player.onGround = false;
+        }
+        keys.space = true;
+    }
+});
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'ArrowLeft') keys.left = false;
+    if (e.code === 'ArrowRight') keys.right = false;
+    if (e.code === 'Space') keys.space = false;
+});
+
+function update() {
+    if (keys.left) player.vx -= ACCEL;
+    if (keys.right) player.vx += ACCEL;
+    player.vx *= FRICTION;
+    
+    player.x += player.vx;
+    player.y += player.vy;
+    player.vy -= GRAVITY;
+
+    // Collision Detection
+    let currentFloor = groundY;
+    let slopeAngle = 0;
+
+    const wedgeEnd = wedge.xStart + wedge.width;
+    
+    if (player.x > wedge.xStart && player.x < wedgeEnd) {
+        let ratio = (player.x - wedge.xStart) / wedge.width;
+        let wedgeH = ratio * wedge.height;
+        currentFloor = groundY + wedgeH;
+        slopeAngle = Math.atan2(wedge.height, wedge.width);
+    } 
+    else if (player.x >= wedgeEnd) {
+        if(player.x < wedgeEnd + 200) {
+            currentFloor = groundY + wedge.height;
+            slopeAngle = 0;
+        }
+    }
+
+    if (player.y - (player.height/2) < currentFloor) {
+        player.y = currentFloor + (player.height/2);
+        player.vy = 0;
+        player.onGround = true;
+        player.rotation = slopeAngle;
+    } else {
+        player.onGround = false;
+        player.rotation = player.rotation * 0.9;
+    }
+
+    if (player.x < 0) { player.x = 0; player.vx *= -0.5; }
+    if (player.x > canvas.width) { player.x = canvas.width; player.vx *= -0.5; }
+}
+
+/**
+ * RENDER HELPERS
+ */
+function drawRect(x, y, w, h, rotation, color) {
+    // 1. Bind Rect Buffer
+    gl.bindBuffer(gl.ARRAY_BUFFER, rectBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+    // 2. Set Uniforms
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(translationLocation, x, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform1f(rotationLocation, rotation);
+
+    // 3. Draw
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+// --- NEW FUNCTION: DRAW TRIANGLE ---
+function drawTriangle(x, y, w, h, rotation, color) {
+    // 1. Bind Triangle Buffer
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+    // 2. Set Uniforms
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(translationLocation, x, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform1f(rotationLocation, rotation);
+
+    // 3. Draw (3 vertices)
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function draw() {
+    update();
+
+    gl.clearColor(0.2, 0.2, 0.2, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(program);
+    gl.enableVertexAttribArray(positionAttributeLocation);
+
+    // 1. Draw Floor
+    drawRect(canvas.width/2, groundY/2, canvas.width, groundY, 0, [0.3, 0.3, 0.3, 1]);
+  // 1. Draw Floor 2
+    drawRect(canvas.width, groundY/2, canvas.width+ canvas.width, groundY, 0, [0.1, 0.6, 0.3, 1]);
+
+    // 2. Draw Wedge using drawTriangle
+    let wX = wedge.xStart + (wedge.width / 2);
+    let wY = groundY + (wedge.height / 2);
+    
+    // We draw the triangle at the center of the wedge area.
+    // The vertex logic (-0.5 to 0.5) combined with the scale handles the shape.
+    drawTriangle(wX, wY, wedge.width, wedge.height, 0, wedge.color);
+    
+    // 3. Draw Platform after wedge
+    drawRect(wedge.xStart + wedge.width + 100, groundY + wedge.height - 5, 200, 10, 0, wedge.color);
+
+    // 4. Draw Player
+    drawRect(player.x, player.y, player.width, player.height, player.rotation, player.color);
+    
+    // Draw Wheels
+    drawRect(player.x - Math.cos(player.rotation)*15, player.y - Math.sin(player.rotation)*15, 6, 6, player.rotation, [1,1,1,1]);
+    drawRect(player.x + Math.cos(player.rotation)*15, player.y + Math.sin(player.rotation)*15, 6, 6, player.rotation, [1,1,1,1]);
+
+    requestAnimationFrame(draw);
+}
+
+draw();
+
+</script>
+</body>
+</html>
