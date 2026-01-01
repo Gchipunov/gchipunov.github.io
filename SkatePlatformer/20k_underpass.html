@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Skater: Underpass Update</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: monospace; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: white;
+            pointer-events: none;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 4px;
+        }
+        #debug {
+            position: absolute;
+            top: 20px; right: 20px;
+            width: 280px;
+            background: rgba(0, 20, 0, 0.85);
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            box-shadow: 0 0 10px rgba(0,255,0,0.2);
+            pointer-events: none;
+        }
+        #debug h3 { margin: 0 0 5px 0; border-bottom: 1px solid #0f0; font-size: 14px; text-transform: uppercase; }
+        .d-row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+        .d-val { font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>WebGL Skater: Underpass Physics</h1>
+    <p>Controls: Arrow Keys | Space</p>
+    <p style="color: #aaa; font-size: 0.8em;">Note: You can now walk UNDER platforms!</p>
+</div>
+
+<div id="debug">
+    <h3>Player Matrix</h3>
+    <div class="d-row"><span>Pos:</span> <span id="d-pos" class="d-val">0.0, 0.0</span></div>
+    <div class="d-row"><span>Vel:</span> <span id="d-vel" class="d-val">0.0, 0.0</span></div>
+    <h3>Energy</h3>
+    <div class="d-row"><span>Kinetic:</span> <span id="d-ke" class="d-val">0</span></div>
+    <div class="d-row"><span>Status:</span> <span id="d-state" class="d-val">Ground</span></div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script id="vertex-shader-2d" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    uniform float u_rotation;
+    void main() {
+        vec2 rotatedPosition = vec2(
+             a_position.x * cos(u_rotation) - a_position.y * sin(u_rotation),
+             a_position.x * sin(u_rotation) + a_position.y * cos(u_rotation)
+        );
+        vec2 scaledPosition = rotatedPosition * u_scale;
+        vec2 position = scaledPosition + u_translation;
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace, 0, 1);
+    }
+</script>
+
+<script id="fragment-shader-2d" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+/** WEBGL SETUP */
+const canvas = document.getElementById("gameCanvas");
+const gl = canvas.getContext("webgl");
+if (!gl) { alert("WebGL not supported"); }
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById("vertex-shader-2d").text));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById("fragment-shader-2d").text));
+gl.linkProgram(program);
+
+const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+const translationLocation = gl.getUniformLocation(program, "u_translation");
+const scaleLocation = gl.getUniformLocation(program, "u_scale");
+const rotationLocation = gl.getUniformLocation(program, "u_rotation");
+
+const rectBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, rectBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5,-0.5, 0.5,-0.5, -0.5,0.5, -0.5,0.5, 0.5,-0.5, 0.5,0.5]), gl.STATIC_DRAW);
+
+const triangleBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-0.5,-0.5, 0.5,-0.5, 0.5,0.5]), gl.STATIC_DRAW);
+
+/** CONSTANTS */
+const GRAVITY = 0.6;
+const FRICTION = 0.96;
+const INPUT_ACCEL = 0.8; 
+const JUMP_FORCE = 14;
+const MAX_SPEED = 25;
+const LEVEL_LENGTH = 20000;
+const groundY = 50;
+let cameraX = 0;
+const keys = { left: false, right: false, space: false };
+
+/** PLAYER MATRIX */
+const player = {
+    matrixPos: { x: 100, y: 300 },
+    matrixVel: { x: 0, y: 0 },
+    matrixAcc: { x: 0, y: 0 },
+    mass: 50,
+    inertia: 0,
+    spin: 0,
+    kineticEnergy: 0,
+    width: 40, height: 10,
+    rotation: 0, onGround: false,
+    color: [1, 0.5, 0, 1]
+};
+player.inertia = player.mass * (Math.pow(player.width, 2) + Math.pow(player.height, 2)) / 12;
+
+/** LEVEL GENERATION */
+const obstacles = [];
+function createLevel() {
+    const colWedge = [0.3, 0.3, 0.8, 1];
+    const colPlat = [0.8, 0.3, 0.3, 1];
+
+    // Generate Floating Platforms
+    for (let i = 0; i < 15; i++) {
+        let px = 600 + (i * 1200) + Math.random() * 500;
+        let pw = 200 + Math.random() * 300; 
+        // Raise min-height to ensure player fits underneath comfortably
+        let ph = 140 + Math.random() * 150; 
+        obstacles.push({ type: 'platform', x: px, w: pw, h: ph, color: colPlat });
+    }
+    // Generate Wedges
+    for (let i = 0; i < 5; i++) {
+        let wx = 800 + (i * 3500) + Math.random() * 500;
+        let ww = 300 + Math.random() * 200;
+        let wh = 150 + Math.random() * 200; 
+        obstacles.push({ type: 'wedge', x: wx, w: ww, h: wh, color: colWedge });
+    }
+    obstacles.sort((a, b) => a.x - b.x);
+}
+createLevel();
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'ArrowLeft') keys.left = true;
+    if (e.code === 'ArrowRight') keys.right = true;
+    if (e.code === 'Space') {
+        if (!keys.space && player.onGround) {
+            player.matrixVel.y = JUMP_FORCE;
+            player.onGround = false;
+        }
+        keys.space = true;
+    }
+});
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'ArrowLeft') keys.left = false;
+    if (e.code === 'ArrowRight') keys.right = false;
+    if (e.code === 'Space') keys.space = false;
+});
+
+/** * TERRAIN PHYSICS (MODIFIED FOR UNDERPASS)
+ * Accepts py (player y) to determine if we are above or below a platform
+ */
+function getTerrainInfo(px, py) {
+    let height = groundY;
+    let angle = 0;
+
+    for (let obs of obstacles) {
+        if (obs.x > px + 1000) break; 
+        let endX = obs.x + obs.w;
+        if (px > obs.x && px <= endX) {
+            if (obs.type === 'wedge') {
+                // Wedges are solid from ground up
+                let ratio = (px - obs.x) / obs.w;
+                height = Math.max(height, groundY + (ratio * obs.h));
+                angle = Math.atan2(obs.h, obs.w);
+            } 
+            else if (obs.type === 'platform') {
+                let platTop = groundY + obs.h;
+                
+                // --- UNDERPASS LOGIC ---
+                // Only treat platform as "floor" if player feet are ABOVE it (or slightly inside top)
+                // If player is below, we ignore the platform, keeping height = groundY
+                
+                let feetY = py - (player.height / 2);
+                let tolerance = 15; // Allow snapping if we are slightly inside
+                
+                if (feetY >= platTop - tolerance) {
+                    // We are on top
+                    height = Math.max(height, platTop);
+                    angle = 0;
+                }
+                // Else: We are below, do nothing (height remains groundY)
+            }
+        }
+    }
+    return { height, angle };
+}
+
+function updateDebugTable() {
+    const fmt = (n) => n.toFixed(2);
+    document.getElementById('d-pos').innerText = `${fmt(player.matrixPos.x)}, ${fmt(player.matrixPos.y)}`;
+    document.getElementById('d-vel').innerText = `${fmt(player.matrixVel.x)}, ${fmt(player.matrixVel.y)}`;
+    document.getElementById('d-ke').innerText = fmt(player.kineticEnergy);
+    document.getElementById('d-state').innerText = player.onGround ? "ON GROUND" : "AIRBORNE";
+}
+
+function update() {
+    player.matrixAcc.x = 0;
+    player.matrixAcc.y = -GRAVITY;
+
+    if (keys.left) player.matrixAcc.x -= INPUT_ACCEL;
+    if (keys.right) player.matrixAcc.x += INPUT_ACCEL;
+
+    let prevRotation = player.rotation;
+    player.matrixVel.x += player.matrixAcc.x;
+    player.matrixVel.y += player.matrixAcc.y;
+    player.matrixVel.x *= FRICTION;
+
+    if(player.matrixVel.x > MAX_SPEED) player.matrixVel.x = MAX_SPEED;
+    if(player.matrixVel.x < -MAX_SPEED) player.matrixVel.x = -MAX_SPEED;
+
+    let prevX = player.matrixPos.x;
+    let prevY = player.matrixPos.y;
+    
+    player.matrixPos.x += player.matrixVel.x;
+    player.matrixPos.y += player.matrixVel.y;
+
+    // --- TERRAIN COLLISION ---
+    // Pass Current Y so we know if we are under or over
+    let terrain = getTerrainInfo(player.matrixPos.x, player.matrixPos.y);
+    let targetFloorY = terrain.height;
+    let targetAngle = terrain.angle;
+
+    // Wall Check
+    const STEP_HEIGHT = 20; 
+    let prevFeetY = prevY - (player.height / 2);
+
+    // If the floor suddenly jumped up higher than we can step, it's a wall.
+    // Note: Since getTerrainInfo ignores platforms above us, targetFloorY will be groundY
+    // when walking under a platform, so this check won't trigger wrongly.
+    if (targetFloorY > prevFeetY + STEP_HEIGHT) {
+        player.matrixPos.x = prevX;
+        player.matrixVel.x = 0;
+        // Re-calculate based on stopped position
+        let corrected = getTerrainInfo(player.matrixPos.x, player.matrixPos.y);
+        targetFloorY = corrected.height;
+        targetAngle = corrected.angle;
+    }
+
+    // Floor Snap
+    let feetY = player.matrixPos.y - (player.height / 2);
+    if (feetY < targetFloorY) {
+        player.matrixPos.y = targetFloorY + (player.height / 2);
+        player.matrixVel.y = 0;
+        player.onGround = true;
+        player.rotation = targetAngle;
+    } else {
+        player.onGround = false;
+        player.rotation *= 0.95; 
+    }
+
+    if (player.matrixPos.x < 0) { player.matrixPos.x = 0; player.matrixVel.x = 0; }
+    if (player.matrixPos.x > LEVEL_LENGTH) { player.matrixPos.x = LEVEL_LENGTH; player.matrixVel.x = 0; }
+
+    // Physics Props
+    player.spin = (player.rotation - prevRotation); 
+    let v2 = (player.matrixVel.x * player.matrixVel.x) + (player.matrixVel.y * player.matrixVel.y);
+    player.kineticEnergy = (0.5 * player.mass * v2) + (0.5 * player.inertia * (player.spin * player.spin));
+
+    // Camera
+    let targetCamX = player.matrixPos.x - canvas.width / 3;
+    if (targetCamX < 0) targetCamX = 0;
+    if (targetCamX > LEVEL_LENGTH - canvas.width) targetCamX = LEVEL_LENGTH - canvas.width;
+    cameraX += (targetCamX - cameraX) * 0.1;
+
+    updateDebugTable();
+}
+
+function drawRect(x, y, w, h, rotation, color) {
+    let screenX = x - cameraX;
+    if (screenX + w < 0 || screenX - w > canvas.width) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, rectBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(translationLocation, screenX, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform1f(rotationLocation, rotation);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function drawTriangle(x, y, w, h, rotation, color) {
+    let screenX = x - cameraX;
+    if (screenX + w < 0 || screenX - w > canvas.width) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, triangleBuffer);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.uniform4fv(colorLocation, color);
+    gl.uniform2f(translationLocation, screenX, y);
+    gl.uniform2f(scaleLocation, w, h);
+    gl.uniform1f(rotationLocation, rotation);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function draw() {
+    update();
+
+    gl.clearColor(0.2, 0.2, 0.2, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+    gl.enableVertexAttribArray(positionAttributeLocation);
+
+    drawRect(cameraX + canvas.width/2, groundY/2, canvas.width, groundY, 0, [0.3, 0.3, 0.3, 1]);
+
+    for (let obs of obstacles) {
+        if (obs.type === 'wedge') {
+            let wX = obs.x + (obs.w / 2);
+            let wY = groundY + (obs.h / 2);
+            drawTriangle(wX, wY, obs.w, obs.h, 0, obs.color);
+        } else {
+            // Platform Drawing Logic
+            let pX = obs.x + (obs.w / 2);
+            let topY = groundY + obs.h - 5; 
+            
+            // Draw Main Top Block
+            drawRect(pX, topY, obs.w, 10, 0, obs.color);
+            
+            // Draw "Floating Thickness" (darker block underneath)
+            // But NO PILLARS going to ground, so it looks like it floats
+            drawRect(pX, topY - 10, obs.w, 10, 0, [0.2, 0.1, 0.1, 1]); 
+        }
+    }
+
+    drawRect(player.matrixPos.x, player.matrixPos.y, player.width, player.height, player.rotation, player.color);
+    
+    let c = Math.cos(player.rotation);
+    let s = Math.sin(player.rotation);
+    let wx = player.width/2 - 5; 
+    let wy = -player.height/2 - 3;
+    let w1x = player.matrixPos.x - (wx*c - wy*s);
+    let w1y = player.matrixPos.y - (wx*s + wy*c);
+    let w2x = player.matrixPos.x + (wx*c + wy*s);
+    let w2y = player.matrixPos.y + (wx*s - wy*c);
+
+    drawRect(w1x, w1y, 6, 6, player.rotation, [1,1,1,1]);
+    drawRect(w2x, w2y, 6, 6, player.rotation, [1,1,1,1]);
+
+    requestAnimationFrame(draw);
+}
+
+draw();
+
+</script>
+</body>
+</html>
