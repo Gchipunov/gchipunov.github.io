@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Sonic Physics Engine</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; margin: 0 auto; background: #1a1a2e; } /* Dark blue bg to see black elements if any */
+        #ui { position: absolute; top: 10px; left: 10px; color: #00ffcc; font-weight: bold; pointer-events: none; text-shadow: 1px 1px 0 #000; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        Controls: Arrows to Move, SPACE to Jump<br>
+        Physics: 360&deg; Slopes & Loop-de-Loops<br>
+        <span id="debug">Initializing...</span>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/**
+ * 2D SONIC-STYLE PHYSICS ENGINE (WEBGL)
+ * Fixed version: Corrects Jump Direction (Up is Negative Y)
+ */
+
+// --- CONSTANTS & CONFIG ---
+const GRAVITY = 0.21875;
+const ACCELERATION = 0.046875;
+const FRICTION = 0.046875;
+const TOP_SPEED = 12;
+const JUMP_FORCE = 6.5;
+const SLOPE_FACTOR = 0.125; 
+
+// --- MATH UTILS ---
+const Deg2Rad = Math.PI / 180;
+const Rad2Deg = 180 / Math.PI;
+
+function clamp(val, min, max) { return Math.min(Math.max(val, min), max); }
+
+// --- WEBGL SETUP ---
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) {
+    alert("WebGL not supported in this browser.");
+}
+
+// Resize handling
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- SHADERS ---
+// Vertex Shader: Fixed to center the camera on the screen
+const vsSource = `
+    attribute vec2 aPosition;
+    uniform vec2 uResolution;
+    uniform vec2 uCamera;
+    uniform float uScale;
+    uniform mat3 uTransform;
+    
+    void main() {
+        // 1. Apply object Local Transform (Rotation/Position relative to world)
+        vec3 worldPos = uTransform * vec3(aPosition, 1.0);
+        
+        // 2. Apply Camera Transform
+        // We want uCamera to be the CENTER of the screen.
+        // So we offset by half the resolution.
+        vec2 halfRes = uResolution / 2.0;
+        vec2 cameraOffset = worldPos.xy - uCamera + halfRes;
+        
+        // 3. Normalize to Clip Space (0.0 to 1.0)
+        vec2 zeroToOne = cameraOffset / uResolution;
+        
+        // 4. Convert to NDC (-1.0 to 1.0) and Flip Y axis for 2D coords
+        vec2 clipSpace = (zeroToOne * 2.0 - 1.0) * vec2(1, -1);
+        
+        // 5. Correct Aspect Ratio (keep square things square)
+        if(uResolution.x > uResolution.y) {
+            clipSpace.x *= uResolution.y / uResolution.x;
+        } else {
+            clipSpace.y *= uResolution.x / uResolution.y;
+        }
+        
+        gl_Position = vec4(clipSpace * uScale, 0, 1);
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 uColor;
+    void main() {
+        gl_FragColor = uColor;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error("Shader Error:", gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error("Program Link Error:", gl.getProgramInfoLog(program));
+}
+
+gl.useProgram(program);
+
+// Buffer Setup
+const positionBuffer = gl.createBuffer();
+const aPosition = gl.getAttribLocation(program, 'aPosition');
+const uResolution = gl.getUniformLocation(program, 'uResolution');
+const uCamera = gl.getUniformLocation(program, 'uCamera');
+const uColor = gl.getUniformLocation(program, 'uColor');
+const uTransform = gl.getUniformLocation(program, 'uTransform');
+const uScale = gl.getUniformLocation(program, 'uScale');
+
+gl.enableVertexAttribArray(aPosition);
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+
+// --- RENDERING HELPERS ---
+function setTransform(x, y, rotation, scale) {
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    
+    // WebGL matrices are COLUMN-MAJOR.
+    // [ m00, m10, m20, 
+    //   m01, m11, m21, 
+    //   m02, m12, m22 ]
+    const m = [
+        c * scale,  s * scale,  0,  // Column 0
+        -s * scale, c * scale,  0,  // Column 1
+        x,          y,          1   // Column 2 (Translation)
+    ];
+    gl.uniformMatrix3fv(uTransform, false, m);
+}
+
+function drawRect(x, y, w, h, angle, color) {
+    const hw = w/2; const hh = h/2;
+    // Standard quad vertices centered at 0,0
+    const vertices = new Float32Array([
+        -hw, -hh,  
+         hw, -hh,  
+        -hw,  hh,
+        -hw,  hh,   
+         hw, -hh,   
+         hw,  hh
+    ]);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW); // Using STATIC_DRAW for demo, DYNAMIC usually better for moving stuff
+    setTransform(x, y, angle, 1.0);
+    gl.uniform4fv(uColor, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function drawLine(x1, y1, x2, y2, color) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const ang = Math.atan2(dy, dx);
+    // Draw line centered between points
+    drawRect(x1 + dx/2, y1 + dy/2, len, 4, ang, color); // Made lines thicker (4px)
+}
+
+// --- LEVEL GENERATION ---
+const levelLines = [];
+
+function addLine(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    levelLines.push({
+        x1, y1, x2, y2,
+        nx: -dy / len, ny: dx / len, // Normal vector
+        len,
+        angle: Math.atan2(dy, dx)
+    });
+}
+
+// Level Geometry
+addLine(-800, 200, -200, 200); // Start floor
+
+// Loop Generation
+const loopCenterX = 100;
+const loopRadius = 250;
+let prevX = -200, prevY = 200;
+
+for(let i = 0; i <= 360; i+=10) {
+    const rad = (i + 90) * Deg2Rad; 
+    const lx = loopCenterX + Math.cos(rad) * loopRadius;
+    const ly = (200 - loopRadius) + Math.sin(rad) * loopRadius;
+    if (i > 0) addLine(prevX, prevY, lx, ly);
+    prevX = lx; prevY = ly;
+}
+
+addLine(prevX, prevY, 1200, 200); // End floor
+addLine(1200, 200, 1200, -400);   // Wall
+
+// --- PHYSICS ENGINE ---
+const Player = {
+    x: -600, y: 150,
+    r: 15,
+    height: 40,
+    gSpeed: 0, xSpeed: 0, ySpeed: 0,
+    angle: 0,
+    mode: 'AIR',
+    input: { left: false, right: false, jump: false },
+    
+    reset: function() {
+        this.x = -600; this.y = 150;
+        this.xSpeed = 0; this.ySpeed = 0; this.gSpeed = 0;
+        this.mode = 'AIR';
+        this.angle = 0;
+    },
+
+    update: function() {
+        if (this.mode === 'GROUND') {
+            this.gSpeed -= SLOPE_FACTOR * Math.sin(this.angle);
+            if (this.input.left) {
+                if (this.gSpeed > 0) this.gSpeed -= FRICTION * 2;
+                else this.gSpeed -= ACCELERATION;
+            } else if (this.input.right) {
+                if (this.gSpeed < 0) this.gSpeed += FRICTION * 2;
+                else this.gSpeed += ACCELERATION;
+            } else {
+                this.gSpeed -= Math.min(Math.abs(this.gSpeed), FRICTION) * Math.sign(this.gSpeed);
+            }
+            this.gSpeed = clamp(this.gSpeed, -TOP_SPEED, TOP_SPEED);
+            this.xSpeed = this.gSpeed * Math.cos(this.angle);
+            this.ySpeed = this.gSpeed * Math.sin(this.angle);
+            this.x += this.xSpeed;
+            this.y += this.ySpeed;
+            
+            if (this.input.jump) {
+                this.mode = 'AIR';
+                // FIX: Up is negative Y, so we subtract
+                this.xSpeed -= JUMP_FORCE * Math.sin(this.angle);
+                this.ySpeed -= JUMP_FORCE * Math.cos(this.angle); 
+                this.angle = 0;
+                this.input.jump = false;
+            }
+            this.checkGroundCollision();
+        } else {
+            if (this.input.left && this.xSpeed > -TOP_SPEED) this.xSpeed -= ACCELERATION * 2;
+            if (this.input.right && this.xSpeed < TOP_SPEED) this.xSpeed += ACCELERATION * 2;
+            this.ySpeed += GRAVITY; 
+            this.x += this.xSpeed;
+            this.y += this.ySpeed;
+            this.angle *= 0.90;
+            this.checkLanding();
+        }
+    },
+    
+    checkGroundCollision: function() {
+        const sensorLen = 25;
+        const sx = this.x + Math.sin(this.angle) * sensorLen;
+        const sy = this.y + Math.cos(this.angle) * sensorLen;
+        
+        let bestDist = 999;
+        let bestLine = null;
+        
+        for(let l of levelLines) {
+            const px = this.x - l.x1;
+            const py = this.y - l.y1;
+            const segDx = l.x2 - l.x1;
+            const segDy = l.y2 - l.y1;
+            let t = (px * segDx + py * segDy) / (l.len * l.len);
+            
+            if (t >= -0.1 && t <= 1.1) {
+                const dist = Math.abs(px * l.nx + py * l.ny);
+                if (dist < 30 && dist < bestDist) {
+                    bestDist = dist;
+                    bestLine = l;
+                }
+            }
+        }
+        
+        if (bestLine) {
+            const vX = this.x - bestLine.x1;
+            const vY = this.y - bestLine.y1;
+            const d = (vX * (bestLine.x2 - bestLine.x1) + vY * (bestLine.y2 - bestLine.y1)) / bestLine.len;
+            this.x = bestLine.x1 + (bestLine.x2 - bestLine.x1) * (d / bestLine.len) - bestLine.nx * this.height/2;
+            this.y = bestLine.y1 + (bestLine.y2 - bestLine.y1) * (d / bestLine.len) - bestLine.ny * this.height/2;
+            this.angle = bestLine.angle;
+            
+            if (Math.abs(this.angle) > Math.PI/2 && Math.abs(this.gSpeed) < 2.5) {
+                this.mode = 'AIR';
+            }
+        } else {
+            this.mode = 'AIR';
+        }
+    },
+    
+    checkLanding: function() {
+        for(let l of levelLines) {
+            const px = this.x - l.x1;
+            const py = this.y - l.y1;
+            const segDx = l.x2 - l.x1;
+            const segDy = l.y2 - l.y1;
+            const t = (px * segDx + py * segDy) / (l.len * l.len);
+            
+            if (t >= 0 && t <= 1) {
+                const dist = px * l.nx + py * l.ny;
+                if (Math.abs(dist) < this.height/2 + 5) {
+                    this.mode = 'GROUND';
+                    this.angle = l.angle;
+                    this.gSpeed = this.xSpeed * Math.cos(this.angle) + this.ySpeed * Math.sin(this.angle);
+                    break;
+                }
+            }
+        }
+    }
+};
+
+window.addEventListener('keydown', e => {
+    if(e.code === 'ArrowLeft') Player.input.left = true;
+    if(e.code === 'ArrowRight') Player.input.right = true;
+    if(e.code === 'Space' && !e.repeat) Player.input.jump = true;
+    if(e.code === 'KeyR') Player.reset();
+});
+
+window.addEventListener('keyup', e => {
+    if(e.code === 'ArrowLeft') Player.input.left = false;
+    if(e.code === 'ArrowRight') Player.input.right = false;
+    if(e.code === 'Space') Player.input.jump = false;
+});
+
+// --- MAIN LOOP ---
+// Initialize camera directly to player position so we don't start looking at nothing
+let cameraX = Player.x;
+let cameraY = Player.y;
+
+function loop() {
+    Player.update();
+    
+    // Smooth Camera Follow
+    const targetCamX = Player.x;
+    const targetCamY = Player.y;
+    cameraX += (targetCamX - cameraX) * 0.1;
+    cameraY += (targetCamY - cameraY) * 0.1;
+    
+    // Render
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.2, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uResolution, canvas.width, canvas.height);
+    gl.uniform2f(uCamera, cameraX, cameraY);
+    gl.uniform1f(uScale, 4.0);
+    
+    // Render Lines
+    for(let l of levelLines) {
+        const c = (Math.sin(l.angle) + 1) / 2;
+        drawLine(l.x1, l.y1, l.x2, l.y2, [0.3, 0.8, c, 1.0]);
+    }
+    
+    // Render Player
+    drawRect(Player.x, Player.y, 30, 40, Player.angle, [0.2, 0.5, 1.0, 1.0]);
+    
+    // Render Head Direction
+    const headX = Player.x + Math.sin(Player.angle) * 10;
+    const headY = Player.y - Math.cos(Player.angle) * 10;
+    drawRect(headX, headY, 10, 10, Player.angle, [1,1,1,1]);
+
+    document.getElementById('debug').innerHTML = `
+        Mode: ${Player.mode}<br>
+        GSpeed: ${Player.gSpeed.toFixed(2)}<br>
+        Pos: ${Player.x.toFixed(0)}, ${Player.y.toFixed(0)}
+    `;
+    
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+</body>
+</html>
