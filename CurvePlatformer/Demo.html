@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Raycast Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <b>Controls:</b> Arrow Keys / WASD to Move & Jump<br>
+        <b>Tech:</b> Native WebGL + Custom Raycast Physics
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+<script>
+/* =========================================
+   CONSTANTS & CONFIG
+   ========================================= */
+const CONFIG = {
+    GRAVITY: 0.5,
+    JUMP_FORCE: 12,
+    SPEED: 5,
+    RAY_COUNT: 4,      // Number of rays to cast downwards for precision
+    SKIN_WIDTH: 0.1,   // Buffer to prevent clipping
+    CURVE_RES: 100     // Segments in the curved ground
+};
+
+/* =========================================
+   WEBGL BOILERPLATE & SHADERS
+   ========================================= */
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) alert("WebGL not supported");
+
+// Resizing
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+gl.viewport(0, 0, canvas.width, canvas.height);
+
+const vsSource = `
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    uniform vec4 u_color;
+    varying vec4 v_color;
+    
+    void main() {
+        // Convert position to pixels
+        vec2 position = (a_position * u_scale) + u_translation;
+        
+        // Convert 0->width to 0->2, then -1->1
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        
+        gl_Position = vec4(clipSpace * vec2(1, 1), 0, 1);
+        v_color = u_color;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec4 v_color;
+    void main() {
+        gl_FragColor = v_color;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Look up locations
+const positionLoc = gl.getAttribLocation(program, "a_position");
+const resLoc = gl.getUniformLocation(program, "u_resolution");
+const transLoc = gl.getUniformLocation(program, "u_translation");
+const scaleLoc = gl.getUniformLocation(program, "u_scale");
+const colorLoc = gl.getUniformLocation(program, "u_color");
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.enableVertexAttribArray(positionLoc);
+gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+/* =========================================
+   MATH & PHYSICS HELPERS
+   ========================================= */
+function raySegmentIntersect(rayOrigin, rayDir, segA, segB) {
+    // Standard Line-Line Intersection
+    const x1 = segA.x; const y1 = segA.y;
+    const x2 = segB.x; const y2 = segB.y;
+    const x3 = rayOrigin.x; const y3 = rayOrigin.y;
+    const x4 = rayOrigin.x + rayDir.x; const y4 = rayOrigin.y + rayDir.y;
+
+    const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (den === 0) return null;
+
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+    const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / den;
+
+    if (t >= 0 && t <= 1 && u > 0) {
+        return {
+            x: x1 + t * (x2 - x1),
+            y: y1 + t * (y2 - y1),
+            distance: u
+        };
+    }
+    return null;
+}
+
+/* =========================================
+   GAME WORLD GENERATION
+   ========================================= */
+const world = {
+    segments: [], // Physics segments
+    geometry: []  // WebGL vertices
+};
+
+// 1. Generate Variable Curve Ground
+// We use a sine wave + noise to create a variable curve
+const groundY = 100;
+const curveAmplitude = 100;
+const curveFreq = 0.005;
+
+let prevX = 0;
+let prevY = 0;
+
+// Create vertices for a triangle strip
+let curveVerts = [];
+
+for (let i = 0; i <= CONFIG.CURVE_RES; i++) {
+    let x = (i / CONFIG.CURVE_RES) * canvas.width;
+    // Variable curve equation: sin(x)
+    let y = groundY + Math.sin(x * curveFreq) * curveAmplitude;
+    
+    // Add extra variation
+    if (x > canvas.width * 0.6) y += Math.cos(x * 0.02) * 40;
+
+    // WebGL Geometry (Top and Bottom of ground)
+    curveVerts.push(x, y);         // Top vertex
+    curveVerts.push(x, -100);      // Bottom anchor (offscreen)
+
+    // Physics Segment
+    if (i > 0) {
+        world.segments.push({
+            p1: {x: prevX, y: prevY},
+            p2: {x: x, y: y},
+            type: 'ground'
+        });
+    }
+    prevX = x;
+    prevY = y;
+}
+
+// 2. Generate 2 Triangle Wedges
+function addWedge(x, y, w, h) {
+    // Triangle points
+    const p1 = {x: x, y: y};
+    const p2 = {x: x + w/2, y: y + h};
+    const p3 = {x: x + w, y: y};
+
+    // Physics Segments
+    world.segments.push({p1: p1, p2: p2, type: 'wall'});
+    world.segments.push({p2: p3, p1: p2, type: 'wall'}); // Note: Order matters for normals if needed
+    // We don't necessarily collide with the bottom, but let's add it for completeness
+    world.segments.push({p1: p3, p2: p1, type: 'ground'});
+
+    // WebGL Geometry
+    return [p1.x, p1.y, p2.x, p2.y, p3.x, p3.y];
+}
+
+const wedge1 = addWedge(canvas.width * 0.3, 150, 100, 150);
+const wedge2 = addWedge(canvas.width * 0.7, 100, 150, 200);
+
+/* =========================================
+   PLAYER OBJECT
+   ========================================= */
+const player = {
+    x: canvas.width / 2,
+    y: 400,
+    width: 30,
+    height: 50,
+    vx: 0,
+    vy: 0,
+    grounded: false,
+    color: [0.0, 0.8, 1.0, 1.0]
+};
+
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+/* =========================================
+   MAIN LOOP
+   ========================================= */
+function updatePhysics() {
+    // Input
+    if (keys['ArrowRight'] || keys['KeyD']) player.vx = CONFIG.SPEED;
+    else if (keys['ArrowLeft'] || keys['KeyA']) player.vx = -CONFIG.SPEED;
+    else player.vx = 0;
+
+    if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space']) && player.grounded) {
+        player.vy = CONFIG.JUMP_FORCE;
+        player.grounded = false;
+    }
+
+    // Apply Gravity
+    player.vy -= CONFIG.GRAVITY;
+
+    // Apply Horizontal Velocity first
+    player.x += player.vx;
+    handleCollisions(true); // Check walls
+
+    // Apply Vertical Velocity
+    player.y += player.vy;
+    player.grounded = false; // Assume falling until hit
+    handleCollisions(false); // Check ground
+    
+    // Bounds checking (simple reset)
+    if (player.y < -100) {
+        player.x = canvas.width/2;
+        player.y = 400;
+        player.vy = 0;
+    }
+}
+
+function handleCollisions(horizontal) {
+    // Define rays based on direction
+    const rayOrigins = [];
+    
+    if (!horizontal) {
+        // Vertical Rays (Bottom corners)
+        // We cast 3 rays: left, center, right of player bottom
+        if (player.vy <= 0) { // Only check ground when falling
+            rayOrigins.push({x: player.x, y: player.y});
+            rayOrigins.push({x: player.x + player.width/2, y: player.y});
+            rayOrigins.push({x: player.x + player.width, y: player.y});
+            
+            let closestHit = null;
+
+            rayOrigins.forEach(origin => {
+                // Ray direction is DOWN
+                const rayDir = {x: 0, y: -1}; // Unit vector
+                
+                // Check all segments
+                world.segments.forEach(seg => {
+                    // Simple Optimization: Bounding box check could go here
+                    const hit = raySegmentIntersect(origin, rayDir, seg.p1, seg.p2);
+                    
+                    // We only care about hits very close to feet (within velocity + skin)
+                    const scanDist = Math.abs(player.vy) + CONFIG.SKIN_WIDTH + 2; 
+
+                    if (hit && hit.distance <= scanDist) {
+                        if (!closestHit || hit.distance < closestHit.distance) {
+                            closestHit = hit;
+                        }
+                    }
+                });
+            });
+
+            if (closestHit) {
+                // Snap to ground
+                player.y = closestHit.y;
+                player.vy = 0;
+                player.grounded = true;
+            }
+        }
+    } else {
+        // Horizontal Rays (Side collision for wedges)
+        // Determine direction
+        const dirX = player.vx > 0 ? 1 : -1;
+        const originX = player.vx > 0 ? player.x + player.width : player.x;
+        
+        // Cast rays from feet, center, and head
+        const origins = [
+            {x: originX, y: player.y + 5}, // slightly up from feet
+            {x: originX, y: player.y + player.height / 2},
+            {x: originX, y: player.y + player.height - 5}
+        ];
+
+        let collision = false;
+        origins.forEach(origin => {
+            const rayDir = {x: dirX, y: 0};
+            world.segments.forEach(seg => {
+                const hit = raySegmentIntersect(origin, rayDir, seg.p1, seg.p2);
+                if (hit && hit.distance < Math.abs(player.vx) + CONFIG.SKIN_WIDTH) {
+                    collision = true;
+                }
+            });
+        });
+
+        if (collision) {
+            player.x -= player.vx; // Undo move
+            player.vx = 0;
+        }
+    }
+}
+
+function render() {
+    gl.clearColor(0.13, 0.13, 0.13, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Update Resolution Uniform
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+
+    // 1. Draw Ground Curve
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(curveVerts), gl.STATIC_DRAW);
+    gl.uniform2f(transLoc, 0, 0);
+    gl.uniform2f(scaleLoc, 1, 1);
+    gl.uniform4f(colorLoc, 0.2, 0.8, 0.4, 1.0); // Green
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, curveVerts.length / 2);
+
+    // 2. Draw Wedges
+    // Combine wedges into one buffer
+    const wedgeData = [...wedge1, ...wedge2];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(wedgeData), gl.STATIC_DRAW);
+    gl.uniform4f(colorLoc, 0.8, 0.3, 0.3, 1.0); // Red
+    gl.drawArrays(gl.TRIANGLES, 0, wedgeData.length / 2);
+
+    // 3. Draw Player
+    const pX = player.x;
+    const pY = player.y;
+    const pW = player.width;
+    const pH = player.height;
+    
+    const playerVerts = [
+        0, 0,
+        pW, 0,
+        0, pH,
+        0, pH,
+        pW, 0,
+        pW, pH
+    ];
+    
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(playerVerts), gl.DYNAMIC_DRAW);
+    gl.uniform2f(transLoc, player.x, player.y);
+    gl.uniform4f(colorLoc, player.color[0], player.color[1], player.color[2], player.color[3]);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function loop() {
+    updatePhysics();
+    render();
+    requestAnimationFrame(loop);
+}
+
+// Start
+loop();
+
+</script>
+</body>
+</html>
