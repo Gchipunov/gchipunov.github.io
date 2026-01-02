@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Sonic Physics Engine</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; margin: 0 auto; background: #000; }
+        #ui { position: absolute; top: 10px; left: 10px; color: lime; font-weight: bold; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        Controls: Arrows to Move, SPACE to Jump<br>
+        Physics: 360&deg; Slopes & Loop-de-Loops<br>
+        <span id="debug"></span>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/**
+ * 2D SONIC-STYLE PHYSICS ENGINE (WEBGL)
+ * * This engine recreates the logic found in the provided TypeScript snippet
+ * (momentum, wall sensors, slope gravity) but in a standalone vanilla JS file.
+ */
+
+// --- CONSTANTS & CONFIG ---
+const GRAVITY = 0.21875;
+const ACCELERATION = 0.046875;
+const FRICTION = 0.046875;
+const TOP_SPEED = 12;
+const JUMP_FORCE = 6.5;
+const SLOPE_FACTOR = 0.125; // Gravity pulling you down slopes
+
+// --- MATH UTILS ---
+const Deg2Rad = Math.PI / 180;
+const Rad2Deg = 180 / Math.PI;
+
+function clamp(val, min, max) { return Math.min(Math.max(val, min), max); }
+function distSq(x1, y1, x2, y2) { return (x1-x2)**2 + (y1-y2)**2; }
+
+// --- WEBGL SETUP ---
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+let aspect = 1;
+
+// Resize handling
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    aspect = canvas.width / canvas.height;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Shaders
+const vsSource = `
+    attribute vec2 aPosition;
+    uniform vec2 uResolution;
+    uniform vec2 uCamera;
+    uniform float uScale;
+    uniform mat3 uTransform;
+    
+    void main() {
+        // Apply object transform (rotation/pos)
+        vec2 worldPos = (uTransform * vec3(aPosition, 1.0)).xy;
+        
+        // Apply camera and screen projection
+        vec2 zeroToOne = (worldPos - uCamera) / uResolution;
+        vec2 clipSpace = (zeroToOne * 2.0 - 1.0) * vec2(1, -1); // Flip Y
+        // Correct aspect ratio
+        if(uResolution.x > uResolution.y) {
+            clipSpace.x *= uResolution.y / uResolution.x;
+        } else {
+            clipSpace.y *= uResolution.x / uResolution.y;
+        }
+        
+        gl_Position = vec4(clipSpace * uScale, 0, 1);
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 uColor;
+    void main() {
+        gl_FragColor = uColor;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Buffer Setup
+const positionBuffer = gl.createBuffer();
+const aPosition = gl.getAttribLocation(program, 'aPosition');
+const uResolution = gl.getUniformLocation(program, 'uResolution');
+const uCamera = gl.getUniformLocation(program, 'uCamera');
+const uColor = gl.getUniformLocation(program, 'uColor');
+const uTransform = gl.getUniformLocation(program, 'uTransform');
+const uScale = gl.getUniformLocation(program, 'uScale');
+
+gl.enableVertexAttribArray(aPosition);
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
+
+// --- RENDERING HELPERS ---
+function setTransform(x, y, rotation, scale) {
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    // Simple 3x3 2D matrix
+    const m = [
+        c * scale, -s * scale, 0,
+        s * scale, c * scale, 0,
+        x, y, 1
+    ];
+    gl.uniformMatrix3fv(uTransform, false, m);
+}
+
+function drawRect(x, y, w, h, angle, color) {
+    const hw = w/2; const hh = h/2;
+    const vertices = new Float32Array([
+        -hw, -hh,  hw, -hh,  -hw, hh,
+        -hw, hh,   hw, -hh,   hw, hh
+    ]);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    setTransform(x, y, angle, 1.0);
+    gl.uniform4fv(uColor, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function drawLine(x1, y1, x2, y2, color) {
+    // We draw lines as thin rectangles because GL_LINES width is restricted in WebGL
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const ang = Math.atan2(dy, dx);
+    drawRect(x1 + dx/2, y1 + dy/2, len, 2, ang, color);
+}
+
+// --- LEVEL GENERATION (THE LOOP) ---
+const levelLines = [];
+
+// Helper to add a physics segment
+function addLine(x1, y1, x2, y2) {
+    // Compute normal vector for physics
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const nx = -dy / len;
+    const ny = dx / len;
+    
+    levelLines.push({
+        x1, y1, x2, y2,
+        nx, ny, len,
+        angle: Math.atan2(dy, dx)
+    });
+}
+
+// 1. Start Platform
+addLine(-800, 200, -200, 200);
+
+// 2. The Loop-de-Loop (Generated using math)
+const loopCenterX = 100;
+const loopCenterY = -150;
+const loopRadius = 250;
+const segments = 32;
+
+let prevX = -200, prevY = 200;
+
+// Entrance curve into loop
+for(let i=0; i<=segments; i++) {
+    const t = i / segments;
+    // Bezier curve to blend from floor to loop
+    // Simplified: Just manually stitch for the demo
+}
+
+// Generate circular loop
+for(let i = 0; i <= 360; i+=10) {
+    // We start from top (270deg) and go around? 
+    // Actually standard loop is entered from bottom.
+    // Let's make a big circle that touches y=200 at the bottom
+    const rad = (i + 90) * Deg2Rad; 
+    const lx = loopCenterX + Math.cos(rad) * loopRadius;
+    const ly = (200 - loopRadius) + Math.sin(rad) * loopRadius;
+    
+    if (i > 0) addLine(prevX, prevY, lx, ly);
+    prevX = lx; prevY = ly;
+}
+
+// Exit platform
+addLine(prevX, prevY, 1200, 200);
+// Wall at end
+addLine(1200, 200, 1200, -400);
+
+// --- PHYSICS ENGINE ---
+
+const Player = {
+    x: -600, y: 150,
+    r: 15, // Radius/Half-width
+    height: 40,
+    
+    // Velocities
+    gSpeed: 0, // Ground Speed (Sonic Physics uses this on ground)
+    xSpeed: 0, // Air Speed X
+    ySpeed: 0, // Air Speed Y
+    
+    angle: 0, // Rotation of sprite/hitbox
+    
+    mode: 'AIR', // 'AIR' or 'GROUND'
+    
+    input: { left: false, right: false, jump: false },
+    
+    animFrame: 0,
+    
+    reset: function() {
+        this.x = -600; this.y = 150;
+        this.xSpeed = 0; this.ySpeed = 0; this.gSpeed = 0;
+        this.mode = 'AIR';
+        this.angle = 0;
+    },
+
+    update: function() {
+        // --- INPUT HANDLING ---
+        // Mimicking player_platform_movement logic from the provided snippet
+        
+        if (this.mode === 'GROUND') {
+            // Slope Gravity: Slow down going up, speed up going down
+            // Math.sin(angle) gives the slope factor
+            this.gSpeed -= SLOPE_FACTOR * Math.sin(this.angle);
+            
+            // Friction / Acceleration
+            if (this.input.left) {
+                if (this.gSpeed > 0) {
+                    this.gSpeed -= FRICTION * 2; // Braking
+                } else {
+                    this.gSpeed -= ACCELERATION;
+                }
+            } else if (this.input.right) {
+                if (this.gSpeed < 0) {
+                    this.gSpeed += FRICTION * 2; // Braking
+                } else {
+                    this.gSpeed += ACCELERATION;
+                }
+            } else {
+                this.gSpeed -= Math.min(Math.abs(this.gSpeed), FRICTION) * Math.sign(this.gSpeed);
+            }
+            
+            // Clamp speed
+            this.gSpeed = clamp(this.gSpeed, -TOP_SPEED, TOP_SPEED);
+            
+            // Apply Movement (Vector breakdown of Ground Speed)
+            this.xSpeed = this.gSpeed * Math.cos(this.angle);
+            this.ySpeed = this.gSpeed * Math.sin(this.angle);
+            
+            this.x += this.xSpeed;
+            this.y += this.ySpeed;
+            
+            // Jump
+            if (this.input.jump) {
+                this.mode = 'AIR';
+                // Jump perpendicular to floor
+                this.xSpeed -= JUMP_FORCE * Math.sin(this.angle);
+                this.ySpeed += JUMP_FORCE * Math.cos(this.angle);
+                this.angle = 0; // Reset angle visual
+                this.input.jump = false; // Prevent bunny hop hold
+            }
+            
+            // Wall Collision / Stay on Floor
+            this.checkGroundCollision();
+            
+        } else {
+            // --- AIR MODE ---
+            
+            // Air drag / Acceleration
+            if (this.input.left && this.xSpeed > -TOP_SPEED) this.xSpeed -= ACCELERATION * 2;
+            if (this.input.right && this.xSpeed < TOP_SPEED) this.xSpeed += ACCELERATION * 2;
+            
+            // Gravity
+            this.ySpeed += GRAVITY; 
+            
+            // Apply Velocity
+            this.x += this.xSpeed;
+            this.y += this.ySpeed;
+            
+            // Visual Rotation in air
+            // Smoothly rotate back to 0
+            this.angle *= 0.90;
+            
+            // Check Landing
+            this.checkLanding();
+        }
+    },
+    
+    checkGroundCollision: function() {
+        // We are attached to the floor. We need to find the specific line segment
+        // directly beneath our feet (relative to our angle).
+        
+        // "Sensor" vectors based on current angle (Down vector)
+        const sensorLen = 25;
+        const sx = this.x + Math.sin(this.angle) * sensorLen;
+        const sy = this.y + Math.cos(this.angle) * sensorLen; // Down is positive Y in this coord system
+        
+        let bestDist = 999;
+        let bestLine = null;
+        
+        // Simple iteration through all lines (spatial hash would be better for performance)
+        for(let l of levelLines) {
+            // Find distance from point (x,y) to line segment
+            // We use dot product to project player pos onto line
+            const px = this.x - l.x1;
+            const py = this.y - l.y1;
+            const segDx = l.x2 - l.x1;
+            const segDy = l.y2 - l.y1;
+            
+            // t is percentage along the line
+            let t = (px * segDx + py * segDy) / (l.len * l.len);
+            
+            // Stickiness: extend the line slightly so we don't fall off cracks
+            if (t >= -0.1 && t <= 1.1) {
+                // Determine normal distance
+                // Distance from line equation
+                const dist = Math.abs(px * l.nx + py * l.ny);
+                
+                // If this line is close enough to snap to
+                if (dist < 30 && dist < bestDist) {
+                    
+                    // Specific check: Are we roughly on the "outside" (normal side) or inside?
+                    // Sonic physics usually uses specific sensors, here we just check distance
+                    bestDist = dist;
+                    bestLine = l;
+                }
+            }
+        }
+        
+        if (bestLine) {
+            // Snap to line
+            // Project player position onto the line
+            const vX = this.x - bestLine.x1;
+            const vY = this.y - bestLine.y1;
+            const d = (vX * (bestLine.x2 - bestLine.x1) + vY * (bestLine.y2 - bestLine.y1)) / bestLine.len;
+            
+            // New Position
+            this.x = bestLine.x1 + (bestLine.x2 - bestLine.x1) * (d / bestLine.len) - bestLine.nx * this.height/2;
+            this.y = bestLine.y1 + (bestLine.y2 - bestLine.y1) * (d / bestLine.len) - bestLine.ny * this.height/2;
+            
+            // Update Angle
+            this.angle = bestLine.angle;
+            
+            // Fall off ceiling check
+            // If speed is too slow and angle is > 90 (walls/ceiling), fall
+            const absAng = Math.abs(this.angle);
+            if (absAng > Math.PI/2 && Math.abs(this.gSpeed) < 2.5) {
+                this.mode = 'AIR';
+            }
+            
+        } else {
+            // No ground found within sensor range? Fall.
+            this.mode = 'AIR';
+        }
+    },
+    
+    checkLanding: function() {
+        // While in air, we cast a ray downwards to see if we hit a floor
+        // Simplified: Check closest line
+        let hit = false;
+        
+        for(let l of levelLines) {
+            // Only land on lines if we are moving towards them (dot product of velocity and normal)
+            const dot = this.xSpeed * l.nx + this.ySpeed * l.ny;
+            // if (dot < 0) continue; // Only land on top? Removed for simplicity
+            
+            // Closest point on segment
+            const segDx = l.x2 - l.x1;
+            const segDy = l.y2 - l.y1;
+            const px = this.x - l.x1;
+            const py = this.y - l.y1;
+            const t = (px * segDx + py * segDy) / (l.len * l.len);
+            
+            if (t >= 0 && t <= 1) {
+                // Distance to line
+                const dist = px * l.nx + py * l.ny;
+                
+                // Check if we passed through the line or are very close (radius)
+                // dist < 0 means we are "behind" the normal (inside the wall)
+                // dist > -radius && dist < radius
+                if (Math.abs(dist) < this.height/2 + 5) {
+                    // LANDED
+                    this.mode = 'GROUND';
+                    this.angle = l.angle;
+                    
+                    // Convert Air Speed to Ground Speed via dot product
+                    this.gSpeed = this.xSpeed * Math.cos(this.angle) + this.ySpeed * Math.sin(this.angle);
+                    hit = true;
+                    break;
+                }
+            }
+        }
+    }
+};
+
+// --- INPUT LISTENERS ---
+window.addEventListener('keydown', e => {
+    if(e.code === 'ArrowLeft') Player.input.left = true;
+    if(e.code === 'ArrowRight') Player.input.right = true;
+    if(e.code === 'Space' && !e.repeat) Player.input.jump = true;
+    if(e.code === 'KeyR') Player.reset();
+});
+
+window.addEventListener('keyup', e => {
+    if(e.code === 'ArrowLeft') Player.input.left = false;
+    if(e.code === 'ArrowRight') Player.input.right = false;
+    if(e.code === 'Space') Player.input.jump = false;
+});
+
+// --- MAIN LOOP ---
+let cameraX = 0;
+let cameraY = 0;
+
+function loop() {
+    // 1. Update Physics
+    Player.update();
+    
+    // 2. Camera Follow
+    const targetCamX = Player.x;
+    const targetCamY = Player.y;
+    cameraX += (targetCamX - cameraX) * 0.1;
+    cameraY += (targetCamY - cameraY) * 0.1;
+    
+    // 3. Render Setup
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.2, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uResolution, canvas.width, canvas.height);
+    gl.uniform2f(uCamera, cameraX, cameraY);
+    gl.uniform1f(uScale, 4.0); // Zoom level
+    
+    // 4. Render Level (Lines)
+    for(let l of levelLines) {
+        // Change color based on angle for visual flair
+        const c = (Math.sin(l.angle) + 1) / 2;
+        drawLine(l.x1, l.y1, l.x2, l.y2, [0.3, 0.8, c, 1.0]);
+        
+        // Draw Normal vector (debug)
+        const mx = (l.x1+l.x2)/2; const my = (l.y1+l.y2)/2;
+        // drawLine(mx, my, mx + l.nx*10, my + l.ny*10, [1,0,0,1]);
+    }
+    
+    // 5. Render Player
+    // Draw "Shadow" hitbox
+    // drawRect(Player.x, Player.y, 30, 40, Player.angle, [1, 1, 1, 0.2]);
+    
+    // Draw "Sonic" (Blue Box with orientation)
+    drawRect(Player.x, Player.y, 30, 40, Player.angle, [0.2, 0.5, 1.0, 1.0]);
+    
+    // Draw "Head" to see rotation
+    const headX = Player.x + Math.sin(Player.angle) * 10;
+    const headY = Player.y - Math.cos(Player.angle) * 10; // Up relative to player
+    drawRect(headX, headY, 10, 10, Player.angle, [1,1,1,1]);
+
+    // Debug Text
+    document.getElementById('debug').innerHTML = `
+        Mode: ${Player.mode}<br>
+        GSpeed: ${Player.gSpeed.toFixed(2)}<br>
+        Angle: ${(Player.angle * Rad2Deg).toFixed(0)}&deg;
+    `;
+    
+    requestAnimationFrame(loop);
+}
+
+// Start
+loop();
+
+</script>
+</body>
+</html>
