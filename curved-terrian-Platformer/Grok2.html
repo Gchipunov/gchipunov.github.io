@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>2D Platformer - Curved Terrain</title>
+<style>
+    body { margin:0; background:#000; }
+    canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+// ==================== SETUP ====================
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl');
+if (!gl) alert('WebGL not supported');
+
+canvas.width = 960;
+canvas.height = 540;
+
+// Resize canvas to window
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Shaders
+const vs = `#version 100
+attribute vec2 aPos;
+uniform mat4 uProj;
+uniform mat4 uView;
+void main() {
+    gl_Position = uProj * uView * vec4(aPos, 0.0, 1.0);
+}`;
+
+const fs = `#version 100
+precision mediump float;
+uniform vec4 uColor;
+void main() {
+    gl_FragColor = uColor;
+}`;
+
+// Compile shader
+function createShader(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(sh));
+        gl.deleteShader(sh);
+        return null;
+    }
+    return sh;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl.VERTEX_SHADER, vs));
+gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(program);
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+}
+
+gl.useProgram(program);
+
+const loc = {
+    aPos: gl.getAttribLocation(program, 'aPos'),
+    uProj: gl.getUniformLocation(program, 'uProj'),
+    uView: gl.getUniformLocation(program, 'uView'),
+    uColor: gl.getUniformLocation(program, 'uColor')
+};
+
+// ==================== TERRAIN ====================
+function terrainY(x) {
+    return 100 + 80 * Math.sin(x * 0.03) + 50 * Math.sin(x * 0.08);
+    //          base      big waves         small waves
+}
+
+const step = 4;
+const pointCount = Math.ceil(canvas.width / step) + 10;
+const terrainVerts = new Float32Array(pointCount * 2);
+
+for (let i = 0; i < pointCount; i++) {
+    const x = i * step - 20; // little offset to left
+    const y = terrainY(x);
+    const idx = i * 2;
+    terrainVerts[idx]     = x;
+    terrainVerts[idx + 1] = y;
+}
+
+const terrainBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, terrainBuf);
+gl.bufferData(gl.ARRAY_BUFFER, terrainVerts, gl.STATIC_DRAW);
+
+// ==================== PLAYER ====================
+const playerSize = 24;
+const playerVerts = new Float32Array([
+    -12,-24,  12,-24,  -12,0,
+     12,-24,  12,0,   -12,0
+]);
+
+const playerBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, playerBuf);
+gl.bufferData(gl.ARRAY_BUFFER, playerVerts, gl.STATIC_DRAW);
+
+// ==================== INPUT ====================
+const keys = {};
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup',   e => keys[e.key] = false);
+
+// ==================== GAME STATE ====================
+let player = {
+    x: 400,
+    y: terrainY(400) + playerSize,
+    vx: 0,
+    vy: 0,
+    onGround: true
+};
+
+const PHYS = {
+    walkSpeed: 180,
+    runSpeed: 380,
+    accelTime: 0.6,
+    gravity: 1200,
+    jumpSpeed: 420
+};
+
+let holdTime = 0;
+let lastDir = 0;
+
+// Simple camera (follow player)
+let cameraX = 0;
+
+// ==================== MAIN LOOP ====================
+let lastTime = 0;
+function loop(time = 0) {
+    const dt = Math.min((time - lastTime) / 1000, 0.1);
+    lastTime = time;
+
+    // Input
+    let dir = 0;
+    if (keys['ArrowLeft'] || keys['a'])  dir -= 1;
+    if (keys['ArrowRight']|| keys['d']) dir += 1;
+
+    if (dir !== lastDir) holdTime = 0;
+    lastDir = dir;
+
+    if (dir !== 0) holdTime += dt;
+    else holdTime = 0;
+
+    const targetSpeed = PHYS.walkSpeed + (PHYS.runSpeed - PHYS.walkSpeed) *
+                       Math.min(holdTime / PHYS.accelTime, 1);
+
+    player.vx += (targetSpeed * dir - player.vx) * 12 * dt; // smooth accel
+
+    // Jump
+    if ((keys['ArrowUp'] || keys['w'] || keys[' ']) && player.onGround) {
+        player.vy = PHYS.jumpSpeed;
+        player.onGround = false;
+    }
+
+    // Physics
+    player.vy -= PHYS.gravity * dt;
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+
+    // Ground collision
+    const groundY = terrainY(player.x);
+    if (player.y <= groundY + playerSize/2) {  // center at feet approx
+        player.y = groundY + playerSize/2;
+        player.vy = 0;
+        player.onGround = true;
+    } else {
+        player.onGround = false;
+    }
+
+    // Camera follow (smooth)
+    const targetCam = player.x - canvas.width/2;
+    cameraX += (targetCam - cameraX) * 8 * dt;
+
+    // ==================== RENDER ====================
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.04, 0.06, 0.14, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Projection (y up, origin bottom-left)
+    const proj = new Float32Array([
+        2/canvas.width,  0,               0, 0,
+        0,              -2/canvas.height, 0, 0,
+        0,               0,               1, 0,
+        -1,              1,               0, 1
+    ]);
+
+    // View (camera)
+    const view = new Float32Array([
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        -cameraX, 80, 0, 1   // little y offset so player isn't at very bottom
+    ]);
+
+    gl.uniformMatrix4fv(loc.uProj, false, proj);
+    gl.uniformMatrix4fv(loc.uView, false, view);
+
+    // Draw terrain
+    gl.bindBuffer(gl.ARRAY_BUFFER, terrainBuf);
+    gl.vertexAttribPointer(loc.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(loc.aPos);
+
+    gl.uniform4f(loc.uColor, 0.1, 0.9, 0.2, 1);
+    gl.drawArrays(gl.LINE_STRIP, 0, pointCount);
+
+    // Draw player
+    gl.bindBuffer(gl.ARRAY_BUFFER, playerBuf);
+    gl.vertexAttribPointer(loc.aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const playerView = new Float32Array([
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        player.x, player.y, 0, 1
+    ]);
+
+    gl.uniformMatrix4fv(loc.uView, false, playerView);
+    gl.uniform4f(loc.uColor, 1, 0.3, 0.1, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
