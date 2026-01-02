@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Curved Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; font-family: sans-serif; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">AD to Move (Hold to Run) | Space to Jump</div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) { alert("WebGL not supported"); }
+
+// --- Shaders ---
+const vsSource = `
+    attribute vec2 aPosition;
+    uniform vec2 uResolution;
+    uniform vec2 uTranslation;
+    uniform vec4 uColor;
+    varying vec4 vColor;
+    void main() {
+        vec2 pos = aPosition + uTranslation;
+        vec2 zeroToOne = pos / uResolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, 1), 0, 1);
+        vColor = uColor;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec4 vColor;
+    void main() { gl_FragColor = vColor; }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// --- Game State ---
+const player = {
+    x: 100, y: 0,
+    width: 30, height: 30,
+    vx: 0, vy: 0,
+    accel: 0.5,
+    friction: 0.9,
+    maxWalk: 4,
+    maxRun: 12,
+    jumpForce: -15,
+    isGrounded: false
+};
+
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// --- Terrain Function ---
+// Returns Y height for a given X
+function getTerrainHeight(x) {
+    return 300 + Math.sin(x * 0.005) * 100 + Math.cos(x * 0.01) * 50;
+}
+
+// --- Rendering Helpers ---
+function createRect(x, y, w, h) {
+    return new Float32Array([
+        0, 0,   w, 0,   0, h,
+        0, h,   w, 0,   w, h
+    ]);
+}
+
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+const posAttrib = gl.getAttribLocation(program, "aPosition");
+gl.enableVertexAttribArray(posAttrib);
+gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(program, "uResolution");
+const uTrans = gl.getUniformLocation(program, "uTranslation");
+const uCol = gl.getUniformLocation(program, "uColor");
+
+// --- Game Loop ---
+function update() {
+    // Movement Logic
+    if (keys['KeyD']) player.vx += player.accel;
+    if (keys['KeyA']) player.vx -= player.accel;
+
+    // Apply Friction
+    player.vx *= player.friction;
+
+    // Cap Speed (The "Walk to Run" feel)
+    // If holding key longer, friction vs accel naturally settles at a top speed
+    // But we can explicitly clamp based on a "sprint" timer if desired.
+    
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Gravity
+    player.vy += 0.8;
+
+    // Terrain Collision
+    const groundY = getTerrainHeight(player.x + player.width/2);
+    if (player.y + player.height > groundY) {
+        player.y = groundY - player.height;
+        player.vy = 0;
+        player.isGrounded = true;
+    } else {
+        player.isGrounded = false;
+    }
+
+    if (keys['Space'] && player.isGrounded) {
+        player.vy = player.jumpForce;
+        player.isGrounded = false;
+    }
+}
+
+function draw() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+
+    // Draw Terrain (as points or a strip)
+    const terrainResolution = 5;
+    const points = [];
+    for(let i=0; i<canvas.width; i+=terrainResolution) {
+        const h = getTerrainHeight(i);
+        points.push(i, h, i + terrainResolution, getTerrainHeight(i + terrainResolution), i, canvas.height);
+        points.push(i, canvas.height, i + terrainResolution, getTerrainHeight(i + terrainResolution), i + terrainResolution, canvas.height);
+    }
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
+    gl.uniform2f(uTrans, 0, 0);
+    gl.uniform4f(uCol, 0.2, 0.6, 0.3, 1.0);
+    gl.drawArrays(gl.TRIANGLES, 0, points.length / 2);
+
+    // Draw Player
+    const playerRect = createRect(0, 0, player.width, player.height);
+    gl.bufferData(gl.ARRAY_BUFFER, playerRect, gl.STATIC_DRAW);
+    gl.uniform2f(uTrans, player.x, player.y);
+    gl.uniform4f(uCol, 0.8, 0.2, 0.2, 1.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>
