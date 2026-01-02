@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL 2D Platformer: Curved Terrain Demo</title>
+    <style>
+        body { margin: 0; background: #222; }
+        canvas { display: block; margin: 0 auto; background: #222; }
+        #debug { position: absolute; top: 10px; left: 10px; color: #fff; font: 14px monospace; }
+    </style>
+</head>
+<body>
+<canvas id="glcanvas" width="900" height="500"></canvas>
+<div id="debug"></div>
+<script type="text/javascript">
+/*
+    WebGL 2D Platformer Game with Curved Terrain
+    - Player can walk/run with smooth acceleration/deceleration
+    - Movement speed depends on key hold duration
+    - Curved terrain (cubic Bézier) with collision and surface normal projection
+    - Player can traverse vertical curves (wall-running)
+    - Physics uses fixed timestep for stability
+    - All code in a single HTML file, no external dependencies
+    - Extensively commented for clarity
+*/
+
+// --- WebGL Setup ---
+
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+// Check for WebGL support
+if (!gl) {
+    alert('WebGL not supported');
+}
+
+// --- Shader Sources ---
+
+// Vertex shader: transforms 2D positions, passes color and normal
+const vertexShaderSrc = `
+attribute vec2 aPosition;
+attribute vec3 aColor;
+attribute vec2 aNormal;
+uniform mat4 uProjection;
+varying vec3 vColor;
+varying vec2 vNormal;
+void main() {
+    gl_Position = uProjection * vec4(aPosition, 0.0, 1.0);
+    vColor = aColor;
+    vNormal = aNormal;
+}
+`;
+
+// Fragment shader: colors terrain, shades by normal.y for simple lighting
+const fragmentShaderSrc = `
+precision mediump float;
+varying vec3 vColor;
+varying vec2 vNormal;
+void main() {
+    float shade = 0.5 + 0.5 * vNormal.y;
+    gl_FragColor = vec4(vColor * shade, 1.0);
+}
+`;
+
+// --- Shader Compilation Utility ---
+
+function compileShader(src, type) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, src);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error('Shader compile error: ' + gl.getShaderInfoLog(shader));
+    }
+    return shader;
+}
+
+// --- Program Setup ---
+
+const vShader = compileShader(vertexShaderSrc, gl.VERTEX_SHADER);
+const fShader = compileShader(fragmentShaderSrc, gl.FRAGMENT_SHADER);
+
+const program = gl.createProgram();
+gl.attachShader(program, vShader);
+gl.attachShader(program, fShader);
+gl.linkProgram(program);
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error('Program link error: ' + gl.getProgramInfoLog(program));
+}
+gl.useProgram(program);
+
+// --- Attribute and Uniform Locations ---
+
+const aPositionLoc = gl.getAttribLocation(program, 'aPosition');
+const aColorLoc = gl.getAttribLocation(program, 'aColor');
+const aNormalLoc = gl.getAttribLocation(program, 'aNormal');
+const uProjectionLoc = gl.getUniformLocation(program, 'uProjection');
+
+// --- Orthographic Projection Matrix ---
+
+function ortho(left, right, bottom, top) {
+    const w = right - left, h = top - bottom;
+    return new Float32Array([
+        2/w, 0,   0, -(right+left)/w,
+        0,   2/h, 0, -(top+bottom)/h,
+        0,   0,   1, 0,
+        0,   0,   0, 1
+    ]);
+}
+const proj = ortho(0, canvas.width, canvas.height, 0);
+gl.uniformMatrix4fv(uProjectionLoc, false, proj);
+
+// --- Terrain Definition: Cubic Bézier Curve ---
+
+// Control points for the terrain curve
+const terrainCurve = [
+    { x: 100, y: 400 },
+    { x: 300, y: 350 },
+    { x: 600, y: 200 },
+    { x: 800, y: 400 }
+];
+
+// Utility: Evaluate cubic Bézier at t
+function cubicBezier(t, p0, p1, p2, p3) {
+    const u = 1 - t;
+    return {
+        x: u*u*u*p0.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+        y: u*u*u*p0.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y
+    };
+}
+
+// Utility: Derivative (tangent) of cubic Bézier at t
+function cubicBezierTangent(t, p0, p1, p2, p3) {
+    const u = 1 - t;
+    return {
+        x: -3*u*u*p0.x + 3*(u*u - 2*u*t)*p1.x + 3*(2*u*t - t*t)*p2.x + 3*t*t*p3.x,
+        y: -3*u*u*p0.y + 3*(u*u - 2*u*t)*p1.y + 3*(2*u*t - t*t)*p2.y + 3*t*t*p3.y
+    };
+}
+
+// Utility: Normal vector at t (perpendicular to tangent)
+function cubicBezierNormal(t, p0, p1, p2, p3) {
+    const tan = cubicBezierTangent(t, p0, p1, p2, p3);
+    const len = Math.hypot(tan.x, tan.y);
+    return { x: -tan.y/len, y: tan.x/len }; // Rotate tangent 90 deg CCW
+}
+
+// Utility: Find closest t on curve to point (brute force + refinement)
+function closestTOnCurve(px, py, curve, steps=100) {
+    let minDist = Infinity, minT = 0;
+    for (let i = 0; i <= steps; ++i) {
+        const t = i / steps;
+        const pt = cubicBezier(t, ...curve);
+        const dx = px - pt.x, dy = py - pt.y;
+        const dist = dx*dx + dy*dy;
+        if (dist < minDist) { minDist = dist; minT = t; }
+    }
+    // Refine with binary search
+    let t0 = Math.max(0, minT - 1/steps), t1 = Math.min(1, minT + 1/steps);
+    for (let iter = 0; iter < 10; ++iter) {
+        const tm = (t0 + t1) / 2;
+        const ptm = cubicBezier(tm, ...curve);
+        const distm = (px - ptm.x)**2 + (py - ptm.y)**2;
+        const pt0 = cubicBezier(t0, ...curve);
+        const dist0 = (px - pt0.x)**2 + (py - pt0.y)**2;
+        const pt1 = cubicBezier(t1, ...curve);
+        const dist1 = (px - pt1.x)**2 + (py - pt1.y)**2;
+        if (dist0 < dist1) t1 = tm;
+        else t0 = tm;
+    }
+    return (t0 + t1) / 2;
+}
+
+// --- Terrain Mesh Generation ---
+
+// Discretize curve into segments for rendering
+const terrainSegments = 80;
+let terrainVertices = [];
+for (let i = 0; i < terrainSegments; ++i) {
+    const t0 = i / terrainSegments;
+    const t1 = (i+1) / terrainSegments;
+    const p0 = cubicBezier(t0, ...terrainCurve);
+    const p1 = cubicBezier(t1, ...terrainCurve);
+    const n0 = cubicBezierNormal(t0, ...terrainCurve);
+    const n1 = cubicBezierNormal(t1, ...terrainCurve);
+    // Terrain thickness
+    const thickness = 20;
+    // Top edge
+    terrainVertices.push(
+        p0.x, p0.y, 0.2, 0.8, 0.3, n0.x, n0.y,
+        p1.x, p1.y, 0.2, 0.8, 0.3, n1.x, n1.y,
+        // Bottom edge
+        p1.x, p1.y + thickness, 0.1, 0.5, 0.2, n1.x, n1.y,
+        p0.x, p0.y + thickness, 0.1, 0.5, 0.2, n0.x, n0.y
+    );
+}
+
+// --- Player Definition ---
+
+const player = {
+    x: 120, y: 380, // Initial position
+    vx: 0, vy: 0,
+    radius: 16,
+    grounded: false,
+    onCurve: false,
+    curveT: 0,
+    walkSpeed: 120, // px/sec
+    runSpeed: 220,
+    acceleration: 900, // px/sec^2
+    deceleration: 1200,
+    gravity: 1200,
+    maxFall: 700,
+    jumpSpeed: 400,
+    wallAdhesion: false,
+    color: [0.9, 0.5, 0.1],
+    moveDir: 0,
+    runTimer: 0,
+    runThreshold: 0.35, // seconds to switch to run
+    wallRun: false
+};
+
+// --- Input Handling ---
+
+const keys = {};
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+// --- Physics and Movement ---
+
+const FIXED_DT = 1/60; // 60Hz physics
+let accumulator = 0, lastTime = performance.now();
+
+function updatePhysics(dt) {
+    // --- Input Processing ---
+    let move = 0;
+    if (keys['ArrowLeft'] || keys['a']) move -= 1;
+    if (keys['ArrowRight'] || keys['d']) move += 1;
+
+    // Walk/run detection
+    if (move !== 0) {
+        if (player.moveDir === move) {
+            player.runTimer += dt;
+        } else {
+            player.runTimer = 0;
+            player.moveDir = move;
+        }
+    } else {
+        player.runTimer = 0;
+        player.moveDir = 0;
+    }
+    const isRunning = player.runTimer > player.runThreshold;
+
+    // --- Horizontal Movement ---
+    const targetSpeed = move * (isRunning ? player.runSpeed : player.walkSpeed);
+    if (Math.abs(targetSpeed) > Math.abs(player.vx)) {
+        // Accelerate
+        player.vx += Math.sign(targetSpeed - player.vx) * player.acceleration * dt;
+        // Clamp
+        if (Math.abs(player.vx) > Math.abs(targetSpeed)) player.vx = targetSpeed;
+    } else {
+        // Decelerate
+        if (move === 0) {
+            if (Math.abs(player.vx) > 0) {
+                player.vx -= Math.sign(player.vx) * player.deceleration * dt;
+                if (Math.abs(player.vx) < 1) player.vx = 0;
+            }
+        } else {
+            player.vx = targetSpeed;
+        }
+    }
+
+    // --- Gravity ---
+    if (!player.grounded) {
+        player.vy += player.gravity * dt;
+        if (player.vy > player.maxFall) player.vy = player.maxFall;
+    }
+
+    // --- Jump ---
+    if ((keys['ArrowUp'] || keys['w'] || keys[' ']) && player.grounded) {
+        player.vy = -player.jumpSpeed;
+        player.grounded = false;
+    }
+
+    // --- Predict Next Position ---
+    let nextX = player.x + player.vx * dt;
+    let nextY = player.y + player.vy * dt;
+
+    // --- Terrain Collision ---
+    // Project player onto curve
+    const tClosest = closestTOnCurve(nextX, nextY, terrainCurve, 80);
+    const curvePt = cubicBezier(tClosest, ...terrainCurve);
+    const curveNorm = cubicBezierNormal(tClosest, ...terrainCurve);
+
+    // Distance from player center to curve
+    const dx = nextX - curvePt.x, dy = nextY - curvePt.y;
+    const distToCurve = dx * curveNorm.x + dy * curveNorm.y;
+
+    // If within radius above curve, snap to surface
+    if (distToCurve > -player.radius && distToCurve < player.radius + 8) {
+        // On terrain
+        player.onCurve = true;
+        player.curveT = tClosest;
+        // Project position onto curve surface
+        nextX = curvePt.x + curveNorm.x * player.radius;
+        nextY = curvePt.y + curveNorm.y * player.radius;
+        // Project velocity onto tangent
+        const tangent = cubicBezierTangent(tClosest, ...terrainCurve);
+        const tanLen = Math.hypot(tangent.x, tangent.y);
+        const tanVec = { x: tangent.x / tanLen, y: tangent.y / tanLen };
+        const speed = player.vx * tanVec.x + player.vy * tanVec.y;
+        player.vx = tanVec.x * speed;
+        player.vy = tanVec.y * speed;
+        player.grounded = true;
+        // Wall-running: if normal is near vertical, enable wall adhesion
+        player.wallRun = Math.abs(curveNorm.x) > 0.95;
+        if (player.wallRun) {
+            // Gravity acts along normal
+            player.vx += curveNorm.x * player.gravity * dt * 0.5;
+            player.vy += curveNorm.y * player.gravity * dt * 0.5;
+        }
+    } else {
+        player.onCurve = false;
+        player.grounded = false;
+        player.wallRun = false;
+    }
+
+    // --- Update Position ---
+    player.x = nextX;
+    player.y = nextY;
+
+    // --- World Bounds ---
+    if (player.x < player.radius) player.x = player.radius;
+    if (player.x > canvas.width - player.radius) player.x = canvas.width - player.radius;
+    if (player.y > canvas.height - player.radius) {
+        player.y = canvas.height - player.radius;
+        player.vy = 0;
+        player.grounded = true;
+    }
+}
+
+// --- Rendering ---
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.13, 0.13, 0.13, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // --- Draw Terrain ---
+    const terrainBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, terrainBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(terrainVertices), gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(aPositionLoc);
+    gl.vertexAttribPointer(aPositionLoc, 2, gl.FLOAT, false, 7 * 4, 0);
+
+    gl.enableVertexAttribArray(aColorLoc);
+    gl.vertexAttribPointer(aColorLoc, 3, gl.FLOAT, false, 7 * 4, 2 * 4);
+
+    gl.enableVertexAttribArray(aNormalLoc);
+    gl.vertexAttribPointer(aNormalLoc, 2, gl.FLOAT, false, 7 * 4, 5 * 4);
+
+    for (let i = 0; i < terrainSegments; ++i) {
+        gl.drawArrays(gl.TRIANGLE_FAN, i * 4, 4);
+    }
+
+    // --- Draw Player ---
+    // Player as a circle (triangle fan)
+    const circleVerts = [];
+    const N = 24;
+    for (let i = 0; i <= N; ++i) {
+        const theta = (i / N) * 2 * Math.PI;
+        const px = player.x + Math.cos(theta) * player.radius;
+        const py = player.y + Math.sin(theta) * player.radius;
+        circleVerts.push(
+            px, py,
+            ...player.color,
+            0, 1 // Up normal for shading
+        );
+    }
+    const playerBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, playerBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(circleVerts), gl.STATIC_DRAW);
+
+    gl.vertexAttribPointer(aPositionLoc, 2, gl.FLOAT, false, 7 * 4, 0);
+    gl.vertexAttribPointer(aColorLoc, 3, gl.FLOAT, false, 7 * 4, 2 * 4);
+    gl.vertexAttribPointer(aNormalLoc, 2, gl.FLOAT, false, 7 * 4, 5 * 4);
+
+    gl.enableVertexAttribArray(aPositionLoc);
+    gl.enableVertexAttribArray(aColorLoc);
+    gl.enableVertexAttribArray(aNormalLoc);
+
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, N + 1);
+
+    // --- Debug Visualization ---
+    const debug = document.getElementById('debug');
+    debug.innerHTML =
+        `Position: (${player.x.toFixed(1)}, ${player.y.toFixed(1)})<br>` +
+        `Velocity: (${player.vx.toFixed(1)}, ${player.vy.toFixed(1)})<br>` +
+        `Grounded: ${player.grounded}<br>` +
+        `On Curve: ${player.onCurve} (t=${player.curveT.toFixed(2)})<br>` +
+        `Wall Run: ${player.wallRun}<br>` +
+        `Speed: ${(Math.hypot(player.vx, player.vy)).toFixed(1)}<br>` +
+        `Run Timer: ${player.runTimer.toFixed(2)}<br>` +
+        `FPS: ${fps.toFixed(1)}`;
+}
+
+// --- Main Game Loop ---
+
+let fps = 0, frameCount = 0, fpsTime = 0;
+
+function gameLoop(now) {
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+    accumulator += dt;
+    while (accumulator >= FIXED_DT) {
+        updatePhysics(FIXED_DT);
+        accumulator -= FIXED_DT;
+    }
+    render();
+
+    // FPS calculation
+    frameCount++;
+    fpsTime += dt;
+    if (fpsTime > 1) {
+        fps = frameCount / fpsTime;
+        frameCount = 0;
+        fpsTime = 0;
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
