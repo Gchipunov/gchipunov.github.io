@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS with WebRTC</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; color: white; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; max-width: 300px; }
+        textarea { width: 100%; height: 60px; margin-top: 5px; background: #333; color: #0f0; border: 1px solid #555; font-size: 10px; }
+        button { margin-top: 5px; cursor: pointer; background: #444; color: white; border: 1px solid #666; padding: 5px; width: 100%; }
+        button:hover { background: #666; }
+        .instructions { font-size: 12px; color: #ccc; margin-bottom: 10px; }
+        #status { font-weight: bold; color: #ffff00; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="status">Status: Disconnected</div>
+    <div class="instructions">
+        <b>Controls:</b><br>
+        1. Click Blue Base to Select.<br>
+        2. Press 'S' to spawn Soldier.<br>
+        3. Right Click to Move (Local only).
+    </div>
+    <hr>
+    <div class="instructions"><b>P2P Setup (No Server):</b></div>
+    <button onclick="createOffer()">1. Create Host Offer</button>
+    <button onclick="acceptOffer()">2. Join & Generate Answer</button>
+    <button onclick="acceptAnswer()">3. Accept Answer (Host)</button>
+    <textarea id="signalData" placeholder="Paste SDP Data here..."></textarea>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec2 u_translation;
+    uniform vec2 u_scale;
+    
+    void main() {
+        // Convert from pixels to 0.0->1.0
+        vec2 zeroToOne = (a_position * u_scale + u_translation) / u_resolution;
+        // Convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        // Convert from 0->2 to -1->+1 (clip space)
+        vec2 clipSpace = zeroToTwo - 1.0;
+        
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+</script>
+
+<script>
+/* =========================================
+   1. WEBGL ENGINE SETUP
+   ========================================= */
+const canvas = document.getElementById("glCanvas");
+const gl = canvas.getContext("webgl");
+
+// Resize handling
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Shader Compiler
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vsSource = document.getElementById("vs").text;
+const fsSource = document.getElementById("fs").text;
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+// Locations
+const positionLoc = gl.getAttribLocation(program, "a_position");
+const resolutionLoc = gl.getUniformLocation(program, "u_resolution");
+const colorLoc = gl.getUniformLocation(program, "u_color");
+const translationLoc = gl.getUniformLocation(program, "u_translation");
+const scaleLoc = gl.getUniformLocation(program, "u_scale");
+
+// Buffers (Just a unit quad)
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+
+function drawRect(x, y, w, h, color) {
+    gl.useProgram(program);
+    gl.enableVertexAttribArray(positionLoc);
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+    gl.uniform2f(resolutionLoc, gl.canvas.width, gl.canvas.height);
+    gl.uniform2f(translationLoc, x, y);
+    gl.uniform2f(scaleLoc, w, h);
+    gl.uniform4fv(colorLoc, color);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+/* =========================================
+   2. GAME LOGIC
+   ========================================= */
+const GAME = {
+    myBase: { x: 50, y: 300, w: 60, h: 60, selected: false, color: [0.2, 0.4, 1.0, 1] }, // Blue
+    units: [],
+    enemyUnits: [],
+    lastUpdate: 0
+};
+
+// Input Handling
+let mouse = { x: 0, y: 0 };
+
+canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+
+    // Selection Logic (Simple AABB)
+    const b = GAME.myBase;
+    if (mouse.x > b.x && mouse.x < b.x + b.w && mouse.y > b.y && mouse.y < b.y + b.h) {
+        GAME.myBase.selected = true;
+    } else {
+        GAME.myBase.selected = false;
+        // Move command
+        if (e.button === 2 && GAME.units.length > 0) {
+             // Basic move command for all units (demo purposes)
+             GAME.units.forEach(u => { u.tx = mouse.x; u.ty = mouse.y; });
+             sendData({ type: 'move_all', tx: mouse.x, ty: mouse.y });
+        }
+    }
+});
+
+// Disable context menu for right click
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 's' || e.key === 'S') {
+        if (GAME.myBase.selected) {
+            spawnUnit();
+        }
+    }
+});
+
+function spawnUnit() {
+    const unit = {
+        id: Math.random().toString(36).substr(2, 9),
+        x: GAME.myBase.x + GAME.myBase.w + 10,
+        y: GAME.myBase.y + 20,
+        w: 15, h: 15,
+        tx: GAME.myBase.x + 200, // Target X
+        ty: GAME.myBase.y + 20,  // Target Y
+        color: [0.2, 1.0, 0.2, 1] // Green
+    };
+    GAME.units.push(unit);
+    
+    // Network: Tell peer we made a unit
+    sendData({ type: 'spawn', id: unit.id, x: unit.x, y: unit.y });
+}
+
+function update(time) {
+    const dt = (time - GAME.lastUpdate) / 1000;
+    GAME.lastUpdate = time;
+
+    // Move local units
+    GAME.units.forEach(u => {
+        const dx = u.tx - u.x;
+        const dy = u.ty - u.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if(dist > 2) {
+            u.x += (dx / dist) * 100 * dt;
+            u.y += (dy / dist) * 100 * dt;
+        }
+    });
+
+    // Sync positions occasionally (Simple networking approach)
+    if (Math.random() < 0.05) { 
+        GAME.units.forEach(u => {
+            sendData({ type: 'sync', id: u.id, x: u.x, y: u.y });
+        });
+    }
+
+    render();
+    requestAnimationFrame(update);
+}
+
+function render() {
+    gl.clearColor(0.1, 0.1, 0.1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    // Draw Base
+    const b = GAME.myBase;
+    const baseColor = b.selected ? [0.4, 0.6, 1.0, 1] : b.color;
+    drawRect(b.x, b.y, b.w, b.h, baseColor);
+
+    // Draw My Units (Green)
+    GAME.units.forEach(u => {
+        drawRect(u.x, u.y, u.w, u.h, u.color);
+    });
+
+    // Draw Enemy Units (Red)
+    GAME.enemyUnits.forEach(u => {
+        drawRect(u.x, u.y, 15, 15, [1.0, 0.2, 0.2, 1]);
+    });
+}
+
+/* =========================================
+   3. WEBRTC NETWORKING (DataChannel)
+   ========================================= */
+const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+const pc = new RTCPeerConnection(config);
+let dataChannel;
+
+// Setup Data Channel (Host side)
+pc.onicecandidate = e => {
+    if (e.candidate) console.log("New ICE candidate");
+    else {
+        // Gathering done, show SDP
+        document.getElementById("signalData").value = JSON.stringify(pc.localDescription);
+    }
+};
+
+pc.ondatachannel = (e) => {
+    // Receive Channel (Joiner side)
+    setupChannel(e.channel);
+};
+
+function setupChannel(channel) {
+    dataChannel = channel;
+    dataChannel.onopen = () => {
+        document.getElementById("status").innerText = "Status: CONNECTED! Game On.";
+        document.getElementById("status").style.color = "#00ff00";
+    };
+    dataChannel.onmessage = handleMessage;
+}
+
+// 1. Host creates Offer
+async function createOffer() {
+    dataChannel = pc.createDataChannel("game");
+    setupChannel(dataChannel);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    document.getElementById("status").innerText = "Status: Offer Created. Copy to Peer.";
+}
+
+// 2. Peer accepts Offer, creates Answer
+async function acceptOffer() {
+    const data = document.getElementById("signalData").value;
+    const desc = new RTCSessionDescription(JSON.parse(data));
+    await pc.setRemoteDescription(desc);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    document.getElementById("status").innerText = "Status: Answer Created. Copy back to Host.";
+}
+
+// 3. Host accepts Answer
+async function acceptAnswer() {
+    const data = document.getElementById("signalData").value;
+    const desc = new RTCSessionDescription(JSON.parse(data));
+    await pc.setRemoteDescription(desc);
+    document.getElementById("status").innerText = "Status: Connecting...";
+}
+
+// Send Game Data
+function sendData(obj) {
+    if (dataChannel && dataChannel.readyState === "open") {
+        dataChannel.send(JSON.stringify(obj));
+    }
+}
+
+// Receive Game Data
+function handleMessage(event) {
+    const data = JSON.parse(event.data);
+    
+    if (data.type === 'spawn') {
+        // Create ghost unit for enemy
+        GAME.enemyUnits.push({
+            id: data.id,
+            x: data.x, y: data.y
+        });
+    } 
+    else if (data.type === 'sync') {
+        // Update enemy position
+        const unit = GAME.enemyUnits.find(u => u.id === data.id);
+        if (unit) {
+            unit.x = data.x;
+            unit.y = data.y;
+        }
+    }
+}
+
+// Start Loop
+requestAnimationFrame(update);
+
+</script>
+</body>
+</html>
