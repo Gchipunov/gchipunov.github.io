@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Double Barrel Tank Commander</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+            font-size: 1.2rem;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">TAP / CLICK GROUND TO MOVE</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Configuration ---
+        const MOVEMENT_SPEED = 0.15;
+        const ROTATION_SPEED = 0.1;
+        const CAM_HEIGHT = 20;
+        const CAM_FOLLOW_SPEED = 0.1;
+
+        // --- Setup Scene ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        scene.fog = new THREE.Fog(0x87CEEB, 20, 60);
+
+        // --- Camera (Top Down) ---
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, CAM_HEIGHT, 20);
+        camera.lookAt(0, 0, 0);
+
+        // --- Renderer ---
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- Lights ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- Ground ---
+        const groundGeo = new THREE.PlaneGeometry(100, 100);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x55aa55 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grid helper for visual reference
+        const gridHelper = new THREE.GridHelper(100, 50, 0x444444, 0x66bb66);
+        scene.add(gridHelper);
+
+        // --- Tank Construction ---
+        const tankGroup = new THREE.Group();
+        scene.add(tankGroup);
+
+        // 1. Tank Hull
+        const hullGeo = new THREE.BoxGeometry(2, 1, 3);
+        const hullMat = new THREE.MeshStandardMaterial({ color: 0x225588 }); // Navy Blue
+        const hull = new THREE.Mesh(hullGeo, hullMat);
+        hull.position.y = 0.5;
+        hull.castShadow = true;
+        tankGroup.add(hull);
+
+        // 2. Turret
+        const turretGeo = new THREE.BoxGeometry(1.5, 0.8, 1.5);
+        const turretMat = new THREE.MeshStandardMaterial({ color: 0x336699 });
+        const turret = new THREE.Mesh(turretGeo, turretMat);
+        turret.position.y = 1.4;
+        turret.castShadow = true;
+        tankGroup.add(turret);
+
+        // 3. Double Barrels
+        const barrelGeo = new THREE.CylinderGeometry(0.15, 0.15, 2.5);
+        const barrelMat = new THREE.MeshStandardMaterial({ color: 0x333333 }); // Dark Grey
+
+        // Left Barrel
+        const barrelL = new THREE.Mesh(barrelGeo, barrelMat);
+        barrelL.rotation.x = Math.PI / 2; // Point forward
+        barrelL.position.set(-0.35, 1.4, 1.5); // Offset left
+        barrelL.castShadow = true;
+        tankGroup.add(barrelL);
+
+        // Right Barrel
+        const barrelR = new THREE.Mesh(barrelGeo, barrelMat);
+        barrelR.rotation.x = Math.PI / 2;
+        barrelR.position.set(0.35, 1.4, 1.5); // Offset right
+        barrelR.castShadow = true;
+        tankGroup.add(barrelR);
+
+        // 4. Tracks (Simple visual blocks)
+        const trackGeo = new THREE.BoxGeometry(0.5, 0.8, 3.2);
+        const trackMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        
+        const trackL = new THREE.Mesh(trackGeo, trackMat);
+        trackL.position.set(-1.2, 0.4, 0);
+        tankGroup.add(trackL);
+
+        const trackR = new THREE.Mesh(trackGeo, trackMat);
+        trackR.position.set(1.2, 0.4, 0);
+        tankGroup.add(trackR);
+
+        // Target Marker (Visual feedback where you clicked)
+        const markerGeo = new THREE.RingGeometry(0.5, 0.7, 32);
+        const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.5, side: THREE.DoubleSide });
+        const targetMarker = new THREE.Mesh(markerGeo, markerMat);
+        targetMarker.rotation.x = -Math.PI / 2;
+        targetMarker.position.y = 0.05;
+        targetMarker.visible = false;
+        scene.add(targetMarker);
+
+        // --- Game Logic Variables ---
+        let targetPosition = new THREE.Vector3();
+        let isMoving = false;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // --- Input Handling ---
+        function onInput(event) {
+            event.preventDefault();
+
+            let x, y;
+            if (event.changedTouches) {
+                x = event.changedTouches[0].clientX;
+                y = event.changedTouches[0].clientY;
+            } else {
+                x = event.clientX;
+                y = event.clientY;
+            }
+
+            // Normalize mouse/touch position
+            mouse.x = (x / window.innerWidth) * 2 - 1;
+            mouse.y = -(y / window.innerHeight) * 2 + 1;
+
+            // Raycast to ground
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(ground);
+
+            if (intersects.length > 0) {
+                targetPosition.copy(intersects[0].point);
+                isMoving = true;
+                
+                // Update Visual Marker
+                targetMarker.position.copy(targetPosition);
+                targetMarker.position.y = 0.1;
+                targetMarker.visible = true;
+            }
+        }
+
+        window.addEventListener('mousedown', onInput);
+        window.addEventListener('touchstart', onInput, { passive: false });
+
+        // --- Window Resize Handling ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isMoving) {
+                // 1. Calculate direction
+                const direction = new THREE.Vector3().subVectors(targetPosition, tankGroup.position);
+                direction.y = 0; // Keep movement flat
+                
+                const distance = direction.length();
+
+                if (distance > 0.2) {
+                    // 2. Normalize direction for movement
+                    direction.normalize();
+
+                    // 3. Smooth Rotation (Slerp-like logic manually)
+                    const targetRotation = Math.atan2(direction.x, direction.z);
+                    // Use a quaternion for smooth rotation
+                    const targetQuaternion = new THREE.Quaternion();
+                    targetQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotation);
+                    
+                    tankGroup.quaternion.slerp(targetQuaternion, ROTATION_SPEED);
+
+                    // 4. Move Forward
+                    // Only move forward if we are roughly facing the target to prevent "drifting" sideways
+                    const angleDiff = tankGroup.rotation.y - targetRotation;
+                    tankGroup.translateZ(MOVEMENT_SPEED); // Move in local Z (forward)
+                } else {
+                    isMoving = false;
+                    targetMarker.visible = false;
+                }
+            }
+
+            // --- Camera Follow Logic ---
+            const relativeCameraOffset = new THREE.Vector3(0, CAM_HEIGHT, 15);
+            // Calculate where camera should be based on tank position
+            const cameraTargetPos = relativeCameraOffset.add(tankGroup.position);
+            // Smoothly interpolate camera position
+            camera.position.lerp(cameraTargetPos, CAM_FOLLOW_SPEED);
+            camera.lookAt(tankGroup.position);
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
