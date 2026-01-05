@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Vanilla WebGL Tank Commander</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
+        #info {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            color: white; pointer-events: none; text-shadow: 1px 1px 2px black;
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+
+    <div id="info">CLICK TO MOVE TANK<br>(Raw WebGL - No Libraries)</div>
+    <canvas id="glCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) { alert("WebGL not supported"); }
+
+        // --- Shaders ---
+        const vsSource = `
+            attribute vec4 aVertexPosition;
+            attribute vec3 aNormal;
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+            uniform vec3 uColor;
+            varying lowp vec3 vColor;
+            varying lowp float vLight;
+            void main() {
+                gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+                vec3 normal = normalize(mat3(uModelViewMatrix) * aNormal);
+                float light = max(dot(normal, vec3(0.5, 1.0, 0.5)), 0.3);
+                vColor = uColor;
+                vLight = light;
+            }
+        `;
+
+        const fsSource = `
+            varying lowp vec3 vColor;
+            varying lowp float vLight;
+            void main() {
+                gl_FragColor = vec4(vColor * vLight, 1.0);
+            }
+        `;
+
+        // --- Math Utilities (Minimal Matrix4) ---
+        const M4 = {
+            perspective: (fovy, aspect, near, far) => {
+                let f = Math.tan(Math.PI * 0.5 - 0.5 * fovy), rangeInv = 1.0 / (near - far);
+                return [f/aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (near+far)*rangeInv, -1, 0, 0, near*far*rangeInv*2, 0];
+            },
+            identity: () => [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
+            multiply: (a, b) => {
+                let c = new Array(16).fill(0);
+                for (let i=0; i<4; i++) 
+                    for (let j=0; j<4; j++) 
+                        for (let k=0; k<4; k++) c[i*4+j] += a[i*4+k] * b[k*4+j];
+                return c;
+            },
+            translate: (m, x, y, z) => M4.multiply(m, [1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]),
+            rotateY: (m, angle) => {
+                let s = Math.sin(angle), c = Math.cos(angle);
+                return M4.multiply(m, [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);
+            },
+            scale: (m, x, y, z) => M4.multiply(m, [x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1])
+        };
+
+        // --- Geometry Helper (Box) ---
+        function createBox() {
+            const positions = [
+                -1,-1,1, 1,-1,1, 1,1,1, -1,1,1,   -1,-1,-1, -1,1,-1, 1,1,-1, 1,-1,-1,
+                -1,1,-1, -1,1,1, 1,1,1, 1,1,-1,   -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1,
+                1,-1,-1, 1,1,-1, 1,1,1, 1,-1,1,   -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1
+            ];
+            const normals = [
+                0,0,1, 0,0,1, 0,0,1, 0,0,1,     0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1,
+                0,1,0, 0,1,0, 0,1,0, 0,1,0,     0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0,
+                1,0,0, 1,0,0, 1,0,0, 1,0,0,     -1,0,0, -1,0,0, -1,0,0, -1,0,0
+            ];
+            const indices = [0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11, 12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23];
+            return { pos: positions, norm: normals, idx: indices };
+        }
+
+        // --- WebGL Setup ---
+        function initShader(gl, src, type) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src); gl.compileShader(s); return s;
+        }
+        const program = gl.createProgram();
+        gl.attachShader(program, initShader(gl, vsSource, gl.VERTEX_SHADER));
+        gl.attachShader(program, initShader(gl, fsSource, gl.FRAGMENT_SHADER));
+        gl.linkProgram(program); gl.useProgram(program);
+
+        const box = createBox();
+        const posBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(box.pos), gl.STATIC_DRAW);
+        const normBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, normBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(box.norm), gl.STATIC_DRAW);
+        const idxBuf = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(box.idx), gl.STATIC_DRAW);
+
+        const aPos = gl.getAttribLocation(program, 'aVertexPosition');
+        const aNorm = gl.getAttribLocation(program, 'aNormal');
+        const uProj = gl.getUniformLocation(program, 'uProjectionMatrix');
+        const uMV = gl.getUniformLocation(program, 'uModelViewMatrix');
+        const uCol = gl.getUniformLocation(program, 'uColor');
+
+        gl.enableVertexAttribArray(aPos);
+        gl.enableVertexAttribArray(aNorm);
+
+        // --- Game State ---
+        let tankPos = { x: 0, z: 0 }, tankRot = 0, target = { x: 0, z: 0 }, moving = false;
+        
+        window.addEventListener('mousedown', e => {
+            const rect = canvas.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            // Simple Plane Raycast Approximation
+            target.x = x * 20 + tankPos.x;
+            target.z = -y * 20 + tankPos.z;
+            moving = true;
+        });
+
+        function render(time) {
+            gl.clearColor(0.53, 0.81, 0.92, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.enable(gl.DEPTH_TEST);
+
+            const aspect = canvas.clientWidth / canvas.clientHeight;
+            const pMat = M4.perspective(45 * Math.PI / 180, aspect, 0.1, 100.0);
+            
+            // Camera Logic (Top-Down Follow)
+            let vMat = M4.translate(M4.identity(), -tankPos.x, -15, -tankPos.z - 15);
+            vMat = M4.multiply(M4.perspective(0.7, 1, 1, 100), vMat); // Simplified view
+
+            if (moving) {
+                const dx = target.x - tankPos.x;
+                const dz = target.z - tankPos.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                if (dist > 0.5) {
+                    const angle = Math.atan2(dx, dz);
+                    tankRot += (angle - tankRot) * 0.1;
+                    tankPos.x += Math.sin(tankRot) * 0.15;
+                    tankPos.z += Math.cos(tankRot) * 0.15;
+                } else { moving = false; }
+            }
+
+            const draw = (m, color, scale = [1,1,1]) => {
+                const mv = M4.scale(m, ...scale);
+                gl.uniformMatrix4fv(uProj, false, pMat);
+                gl.uniformMatrix4fv(uMV, false, M4.multiply(M4.translate(M4.identity(), 0, -10, -25), mv));
+                gl.uniform3fv(uCol, color);
+                gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+                gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+                gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
+                gl.vertexAttribPointer(aNorm, 3, gl.FLOAT, false, 0, 0);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+                gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+            };
+
+            // Ground
+            draw(M4.translate(M4.identity(), 0, -1, 0), [0.3, 0.6, 0.3], [50, 0.1, 50]);
+
+            // Tank Group Matrix
+            let tM = M4.translate(M4.identity(), tankPos.x, 0, tankPos.z);
+            tM = M4.rotateY(tM, tankRot);
+
+            // Hull
+            draw(M4.translate(tM, 0, 0.5, 0), [0.1, 0.3, 0.5], [1, 0.5, 1.5]);
+            // Turret
+            draw(M4.translate(tM, 0, 1.2, 0), [0.2, 0.4, 0.6], [0.7, 0.4, 0.7]);
+            // Barrels
+            draw(M4.translate(tM, -0.3, 1.2, 1.2), [0.2, 0.2, 0.2], [0.1, 0.1, 0.8]);
+            draw(M4.translate(tM, 0.3, 1.2, 1.2), [0.2, 0.2, 0.2], [0.1, 0.1, 0.8]);
+
+            requestAnimationFrame(render);
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+        requestAnimationFrame(render);
+
+    </script>
+</body>
+</html>
