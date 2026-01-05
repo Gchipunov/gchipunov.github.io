@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Double Barrel Tank - Vanilla WebGL</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        #ui { position: absolute; top: 10px; width: 100%; text-align: center; color: #0f0; pointer-events: none; text-shadow: 2px 2px #000; }
+    </style>
+</head>
+<body>
+    <div id="ui">COMMANDER: CLICK TO POSITION TANK</div>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const gl = canvas.getContext('webgl');
+
+        // --- Shaders ---
+        const vs = `
+            attribute vec4 aPos;
+            attribute vec3 aNorm;
+            uniform mat4 uProj, uView, uModel;
+            varying vec3 vNorm;
+            varying vec3 vWorldPos;
+            void main() {
+                vec4 worldPos = uModel * aPos;
+                vWorldPos = worldPos.xyz;
+                gl_Position = uProj * uView * worldPos;
+                vNorm = mat3(uModel) * aNorm;
+            }
+        `;
+        const fs = `
+            precision mediump float;
+            varying vec3 vNorm;
+            varying vec3 vWorldPos;
+            uniform vec3 uCol;
+            uniform bool uIsGround;
+            void main() {
+                vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+                float d = max(dot(normalize(vNorm), lightDir), 0.2);
+                vec3 color = uCol;
+                if(uIsGround) {
+                    float grid = step(0.95, fract(vWorldPos.x)) + step(0.95, fract(vWorldPos.z));
+                    color = mix(vec3(0.2, 0.4, 0.2), vec3(0.0, 1.0, 0.0), grid * 0.3);
+                }
+                gl_FragColor = vec4(color * d, 1.0);
+            }
+        `;
+
+        // --- Math Toolkit (Strict Float32) ---
+        const M4 = {
+            identity: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+            mul: (a, b) => {
+                let out = new Float32Array(16);
+                for(let i=0; i<4; i++) {
+                    for(let j=0; j<4; j++) {
+                        out[i*4+j] = a[i*4+0]*b[0*4+j] + a[i*4+1]*b[1*4+j] + a[i*4+2]*b[2*4+j] + a[i*4+3]*b[3*4+j];
+                    }
+                }
+                return out;
+            },
+            perspective: (fovy, aspect, near, far) => {
+                let f = 1.0 / Math.tan(fovy/2), nf = 1/(near-far);
+                return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,(2*far*near)*nf,0]);
+            },
+            translate: (m, x, y, z) => M4.mul(m, new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1])),
+            rotateY: (m, r) => {
+                let s = Math.sin(r), c = Math.cos(r);
+                return M4.mul(m, new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]));
+            },
+            scale: (m, x, y, z) => M4.mul(m, new Float32Array([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]))
+        };
+
+        // --- Init WebGL ---
+        const createS = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+        const prog = gl.createProgram();
+        gl.attachShader(prog, createS(gl.VERTEX_SHADER, vs));
+        gl.attachShader(prog, createS(gl.FRAGMENT_SHADER, fs));
+        gl.linkProgram(prog); gl.useProgram(prog);
+
+        // --- Buffers ---
+        const verts = new Float32Array([-1,-1,1, 1,-1,1, 1,1,1, -1,1,1, -1,-1,-1, -1,1,-1, 1,1,-1, 1,-1,-1, -1,1,-1, -1,1,1, 1,1,1, 1,1,-1, -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1, 1,-1,-1, 1,1,-1, 1,1,1, 1,-1,1, -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1]);
+        const norms = new Float32Array([0,0,1, 0,0,1, 0,0,1, 0,0,1, 0,0,-1, 0,0,-1, 0,0,-1, 0,0,-1, 0,1,0, 0,1,0, 0,1,0, 0,1,0, 0,-1,0, 0,-1,0, 0,-1,0, 0,-1,0, 1,0,0, 1,0,0, 1,0,0, 1,0,0, -1,0,0, -1,0,0, -1,0,0, -1,0,0]);
+        const indices = new Uint16Array([0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11, 12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23]);
+
+        const setupBuf = (data, loc, size) => {
+            gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+            gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+            gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(loc);
+        };
+        setupBuf(verts, gl.getAttribLocation(prog, 'aPos'), 3);
+        setupBuf(norms, gl.getAttribLocation(prog, 'aNorm'), 3);
+        const iBuf = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, iBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+        const uProj = gl.getUniformLocation(prog, 'uProj');
+        const uView = gl.getUniformLocation(prog, 'uView');
+        const uModel = gl.getUniformLocation(prog, 'uModel');
+        const uCol = gl.getUniformLocation(prog, 'uCol');
+        const uIsGround = gl.getUniformLocation(prog, 'uIsGround');
+
+        // --- Logic ---
+        let tank = { x: 0, z: 0, rot: 0 }, target = { x: 0, z: 0 }, moving = false;
+        window.onclick = (e) => {
+            const cx = (e.clientX / window.innerWidth - 0.5) * 2;
+            const cy = (e.clientY / window.innerHeight - 0.5) * 2;
+            target.x = tank.x + cx * 25;
+            target.z = tank.z + cy * 25;
+            moving = true;
+        };
+
+        function draw(mat, col, isGround = false) {
+            gl.uniformMatrix4fv(uModel, false, mat);
+            gl.uniform3fv(uCol, col);
+            gl.uniform1i(uIsGround, isGround);
+            gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+        }
+
+        function loop() {
+            gl.clearColor(0.1, 0.1, 0.1, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.enable(gl.DEPTH_TEST);
+
+            if (moving) {
+                let dx = target.x - tank.x, dz = target.z - tank.z;
+                let dist = Math.sqrt(dx*dx + dz*dz);
+                if (dist > 0.3) {
+                    let angle = Math.atan2(dx, dz);
+                    let diff = angle - tank.rot;
+                    while(diff < -Math.PI) diff += Math.PI*2;
+                    while(diff > Math.PI) diff -= Math.PI*2;
+                    tank.rot += diff * 0.1;
+                    tank.x += Math.sin(tank.rot) * 0.15;
+                    tank.z += Math.cos(tank.rot) * 0.15;
+                } else { moving = false; }
+            }
+
+            const proj = M4.perspective(0.8, canvas.width/canvas.height, 0.1, 1000);
+            let view = M4.identity();
+            view = M4.translate(view, 0, -20, -30); // Follow Camera height/dist
+            view = M4.mul(view, new Float32Array([1,0,0,0, 0,0.707,0.707,0, 0,-0.707,0.707,0, 0,0,0,1])); // Tilt 45deg
+            view = M4.translate(view, -tank.x, 0, -tank.z);
+
+            gl.uniformMatrix4fv(uProj, false, proj);
+            gl.uniformMatrix4fv(uView, false, view);
+
+            // 1. Ground with Grid
+            draw(M4.scale(M4.identity(), 100, 0.1, 100), [0.2, 0.3, 0.2], true);
+
+            // 2. Tank Parenting (The "Matrix Stack")
+            let tankRoot = M4.translate(M4.identity(), tank.x, 0.5, tank.z);
+            tankRoot = M4.rotateY(tankRoot, tank.rot);
+
+            // Hull: relative to tankRoot
+            draw(M4.scale(tankRoot, 1.5, 0.6, 2.0), [0.1, 0.3, 0.6]);
+
+            // Turret: relative to tankRoot
+            let turretMat = M4.translate(tankRoot, 0, 0.8, 0);
+            draw(M4.scale(turretMat, 1.0, 0.5, 1.0), [0.2, 0.4, 0.7]);
+
+            // LEFT Barrel: relative to tankRoot
+            let bL = M4.translate(tankRoot, -0.4, 0.8, 1.5); 
+            draw(M4.scale(bL, 0.15, 0.15, 1.2), [0.1, 0.1, 0.1]);
+
+            // RIGHT Barrel: relative to tankRoot
+            let bR = M4.translate(tankRoot, 0.4, 0.8, 1.5);
+            draw(M4.scale(bR, 0.15, 0.15, 1.2), [0.1, 0.1, 0.1]);
+
+            requestAnimationFrame(loop);
+        }
+
+        window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; gl.viewport(0,0,canvas.width,canvas.height); };
+        window.onresize();
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>
