@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>CrimeWars: Mission Mug</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        
+        /* UI OVERLAY */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        /* CROSSHAIR */
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            background: transparent;
+            border: 2px solid lime;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* HUDS */
+        #hud-top {
+            padding: 20px;
+            color: lime;
+            text-shadow: 2px 2px #000;
+            font-size: 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            pointer-events: auto; /* Allow clicking text if needed */
+        }
+        #hud-bottom {
+            padding: 10px;
+            color: white;
+            text-align: center;
+            font-size: 14px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+        }
+
+        /* MISSION SUCCESS SCREEN */
+        #mission-screen {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: gold;
+            font-size: 40px;
+            font-weight: bold;
+            display: none;
+            text-shadow: 4px 4px 0px #000;
+            border: 4px solid gold;
+            padding: 20px;
+            background: rgba(0,0,0,0.9);
+            transform: translate(-50%, -50%) rotate(-5deg);
+            z-index: 20;
+            text-align: center;
+        }
+
+        /* FLOATING DAMAGE NUMBERS */
+        .damage-text {
+            color: red;
+            font-weight: bold;
+            font-size: 30px;
+            position: absolute;
+            top: 40%; left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            text-shadow: 2px 2px 0 #000;
+        }
+
+        /* MOBILE CONTROLS */
+        .mobile-controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            height: 150px;
+            pointer-events: none; /* Let touches pass through to buttons */
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+        }
+
+        /* D-PAD */
+        #dpad {
+            position: relative;
+            width: 120px; height: 120px;
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+        }
+        .d-btn {
+            position: absolute;
+            background: rgba(0, 255, 0, 0.3);
+            border: 1px solid lime;
+            width: 40px; height: 40px;
+            border-radius: 8px;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            user-select: none;
+        }
+        .d-up { top: 0; left: 40px; }
+        .d-down { bottom: 0; left: 40px; }
+        .d-left { top: 40px; left: 0; }
+        .d-right { top: 40px; right: 0; }
+
+        /* ACTION BUTTONS */
+        #actions {
+            position: relative;
+            width: 120px; height: 120px;
+            pointer-events: auto;
+        }
+        .a-btn {
+            position: absolute;
+            width: 50px; height: 50px;
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid white;
+            user-select: none;
+        }
+        #btn-punch { bottom: 0; left: 0; background: rgba(255, 0, 0, 0.4); }
+        #btn-kick { top: 0; right: 0; background: rgba(0, 0, 255, 0.4); }
+
+        /* HIDE CONTROLS ON DESKTOP INITIALLY (Optional, but kept visible for hybrid testing) */
+        @media (min-width: 1024px) {
+            /* .mobile-controls { display: none; } Uncomment to hide on large screens */
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="hud-top">
+            <div>MISSION: MUG THE BAD GUY</div>
+            <div id="enemy-hp">Target HP: 100%</div>
+            <div id="weapon-status" style="color:cyan; font-size:16px; margin-top:5px;">WEAPON: FISTS</div>
+        </div>
+        
+        <div id="crosshair"></div>
+        <div class="damage-text" id="damage-indicator">POW!</div>
+        
+        <div id="mission-screen">
+            MISSION PASSED<br>
+            <span style="font-size:20px; color:white;">RESPECT +</span><br>
+            <button onclick="location.reload()" style="margin-top:10px; padding:10px; font-size:16px;">REPLAY</button>
+        </div>
+
+        <div id="hud-bottom">
+            PC: WASD Move | Mouse Look | Click Punch | Space Kick <br>
+            MOBILE: Use On-Screen Controls
+        </div>
+
+        <div class="mobile-controls">
+            <div id="dpad">
+                <div class="d-btn d-up" data-key="KeyW">W</div>
+                <div class="d-btn d-down" data-key="KeyS">S</div>
+                <div class="d-btn d-left" data-key="KeyA">A</div>
+                <div class="d-btn d-right" data-key="KeyD">D</div>
+            </div>
+            <div id="actions">
+                <div class="a-btn" id="btn-punch">PUNCH</div>
+                <div class="a-btn" id="btn-kick">KICK</div>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // --- 1. Setup Scene ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x101010); 
+        scene.fog = new THREE.Fog(0x101010, 0, 40);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.y = 1.6;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. Lighting & Environment ---
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        const streetLight = new THREE.PointLight(0xffaa00, 1.5, 30);
+        streetLight.position.set(0, 6, -5);
+        streetLight.castShadow = true;
+        scene.add(streetLight);
+
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // --- 3. The Player (Arms, Legs, Weapon) ---
+        const handGeo = new THREE.BoxGeometry(0.15, 0.15, 0.4);
+        const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0ac69 });
+        
+        // Right Arm (Punch)
+        const rightArm = new THREE.Mesh(handGeo, skinMat);
+        rightArm.position.set(0.25, -0.2, -0.4);
+        rightArm.castShadow = true;
+        camera.add(rightArm);
+
+        // Weapon (Baseball Bat) - Attached to arm but hidden initially
+        const batGeo = new THREE.CylinderGeometry(0.04, 0.02, 0.8, 8);
+        const batMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x0044aa });
+        const playerWeaponMesh = new THREE.Mesh(batGeo, batMat);
+        playerWeaponMesh.rotation.x = Math.PI / 2;
+        playerWeaponMesh.position.set(0, 0, -0.3); // Stick out from hand
+        playerWeaponMesh.visible = false;
+        rightArm.add(playerWeaponMesh);
+
+        // Right Leg (Kick)
+        const legGeo = new THREE.BoxGeometry(0.2, 0.2, 0.6);
+        const pantsMat = new THREE.MeshStandardMaterial({ color: 0x000088 });
+        const rightLeg = new THREE.Mesh(legGeo, pantsMat);
+        rightLeg.position.set(0.1, -0.6, -0.2);
+        rightLeg.rotation.x = -0.2;
+        camera.add(rightLeg);
+
+        scene.add(camera);
+
+        // --- 4. Weapon Pickup (World Object) ---
+        const pickupGroup = new THREE.Group();
+        pickupGroup.position.set(3, 1, 0); // Spawns to the right
+        
+        const pickupMesh = new THREE.Mesh(batGeo, batMat);
+        pickupMesh.rotation.z = Math.PI / 4;
+        pickupGroup.add(pickupMesh);
+        
+        // Glow effect for pickup
+        const pickupLight = new THREE.PointLight(0x00ffff, 1, 3);
+        pickupGroup.add(pickupLight);
+        
+        scene.add(pickupGroup);
+
+        let hasWeapon = false;
+
+        // --- 5. The Bad Guy (AI Target) ---
+        const badGuyGroup = new THREE.Group();
+        badGuyGroup.position.set(0, 0, -8);
+        
+        const bodyGeo = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x880000 });
+        const badGuyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+        badGuyMesh.position.y = 0.9;
+        badGuyMesh.castShadow = true;
+        badGuyGroup.add(badGuyMesh);
+
+        const headGeo = new THREE.SphereGeometry(0.25);
+        const headMesh = new THREE.Mesh(headGeo, skinMat);
+        headMesh.position.y = 1.75;
+        badGuyGroup.add(headMesh);
+
+        scene.add(badGuyGroup);
+
+        let enemyHP = 100;
+        let isEnemyDead = false;
+        const enemySpeed = 2.0; 
+        const attackRange = 1.5;
+        const sightRange = 15.0;
+
+        // --- 6. Controls & Input ---
+        const controls = new PointerLockControls(camera, document.body);
+        
+        // PC: Click to lock
+        document.body.addEventListener('click', (e) => {
+            // Only lock if not clicking a mobile button
+            if (!e.target.classList.contains('d-btn') && !e.target.classList.contains('a-btn')) {
+                controls.lock();
+            }
+        });
+
+        const move = { forward: false, backward: false, left: false, right: false };
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+
+        // Keyboard Listeners
+        const handleKey = (code, state) => {
+            switch (code) {
+                case 'KeyW': move.forward = state; break;
+                case 'KeyA': move.left = state; break;
+                case 'KeyS': move.backward = state; break;
+                case 'KeyD': move.right = state; break;
+                case 'Space': if(state) performKick(); break;
+            }
+        };
+
+        document.addEventListener('keydown', (e) => handleKey(e.code, true));
+        document.addEventListener('keyup', (e) => handleKey(e.code, false));
+
+        document.addEventListener('mousedown', (event) => {
+            if(controls.isLocked) {
+                if(event.button === 0) performPunch();
+                if(event.button === 2) performKick();
+            }
+        });
+
+        // --- Mobile Touch Logic ---
+        const dpadButtons = document.querySelectorAll('.d-btn');
+        dpadButtons.forEach(btn => {
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); handleKey(btn.dataset.key, true); });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); handleKey(btn.dataset.key, false); });
+            // Add mouse listeners for hybrid testing on PC without locking
+            btn.addEventListener('mousedown', (e) => { e.preventDefault(); handleKey(btn.dataset.key, true); });
+            btn.addEventListener('mouseup', (e) => { e.preventDefault(); handleKey(btn.dataset.key, false); });
+        });
+
+        document.getElementById('btn-punch').addEventListener('touchstart', (e) => { e.preventDefault(); performPunch(); });
+        document.getElementById('btn-kick').addEventListener('touchstart', (e) => { e.preventDefault(); performKick(); });
+        
+        // Touch to Look (Virtual Camera Pan)
+        let touchStartX = 0;
+        let touchStartY = 0;
+        
+        document.addEventListener('touchstart', (e) => {
+            // Only track look if not on UI
+            if(!e.target.closest('.mobile-controls')) {
+                touchStartX = e.touches[0].pageX;
+                touchStartY = e.touches[0].pageY;
+            }
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if(!controls.isLocked && !e.target.closest('.mobile-controls')) {
+                const sensitivity = 0.005;
+                const deltaX = e.touches[0].pageX - touchStartX;
+                const deltaY = e.touches[0].pageY - touchStartY;
+                
+                camera.rotation.y -= deltaX * sensitivity;
+                // Simple clamp for up/down to prevent flipping
+                camera.rotation.x -= deltaY * sensitivity;
+                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+
+                touchStartX = e.touches[0].pageX;
+                touchStartY = e.touches[0].pageY;
+            }
+        });
+
+        // --- 7. Animation & Game Loop ---
+        let punchAnim = 0;
+        let kickAnim = 0;
+
+        function performPunch() {
+            if (punchAnim === 0 && kickAnim === 0) {
+                punchAnim = 1; 
+                let dmg = hasWeapon ? 25 : 10;
+                let txt = hasWeapon ? "WHACK!" : "PUNCH!";
+                checkHit(dmg, txt);
+            }
+        }
+
+        function performKick() {
+            if (punchAnim === 0 && kickAnim === 0) {
+                kickAnim = 1;
+                checkHit(15, "KICK!");
+            }
+        }
+
+        function checkHit(damage, type) {
+            if (isEnemyDead) return;
+            const dist = camera.position.distanceTo(badGuyGroup.position);
+            
+            if (dist < 3.0) { // Range
+                // Check if facing enemy (dot product)
+                const dirToEnemy = new THREE.Vector3().subVectors(badGuyGroup.position, camera.position).normalize();
+                const facingDir = new THREE.Vector3();
+                camera.getWorldDirection(facingDir);
+                
+                if (facingDir.dot(dirToEnemy) > 0.5) { // Roughly facing
+                    // Visual Hit
+                    badGuyMesh.material.color.setHex(0xffffff);
+                    setTimeout(() => badGuyMesh.material.color.setHex(0x880000), 100);
+
+                    // Logic
+                    enemyHP -= damage;
+                    document.getElementById('enemy-hp').innerText = `Target HP: ${Math.max(0, enemyHP)}%`;
+                    
+                    // UI Text
+                    const dmgText = document.getElementById('damage-indicator');
+                    dmgText.innerText = type + " -" + damage;
+                    dmgText.style.display = 'block';
+                    setTimeout(() => dmgText.style.display = 'none', 300);
+
+                    // Knockback
+                    const kbDir = dirToEnemy.multiplyScalar(0.5);
+                    badGuyGroup.position.add(kbDir);
+
+                    if (enemyHP <= 0) killEnemy();
+                }
+            }
+        }
+
+        function killEnemy() {
+            isEnemyDead = true;
+            badGuyGroup.rotation.x = -Math.PI / 2;
+            badGuyGroup.position.y = 0.2;
+            document.getElementById('mission-screen').style.display = 'block';
+            document.getElementById('enemy-hp').innerText = "TARGET NEUTRALIZED";
+            document.getElementById('enemy-hp').style.color = "gold";
+        }
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // --- Player Movement ---
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+
+            direction.z = Number(move.forward) - Number(move.backward);
+            direction.x = Number(move.right) - Number(move.left);
+            direction.normalize();
+
+            if (move.forward || move.backward) velocity.z -= direction.z * 100.0 * delta;
+            if (move.left || move.right) velocity.x -= direction.x * 100.0 * delta;
+
+            // Apply movement (works for both Lock and Touch Look)
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+
+            // --- Weapon Pickup Logic ---
+            if(!hasWeapon) {
+                pickupMesh.rotation.y += delta; // Rotate pickup
+                const distToWeapon = camera.position.distanceTo(pickupGroup.position);
+                if(distToWeapon < 2.0) {
+                    hasWeapon = true;
+                    scene.remove(pickupGroup);
+                    playerWeaponMesh.visible = true;
+                    document.getElementById('weapon-status').innerText = "WEAPON: BASEBALL BAT";
+                }
+            }
+
+            // --- Bad Guy AI (Chasing) ---
+            if (!isEnemyDead) {
+                const distToPlayer = badGuyGroup.position.distanceTo(camera.position);
+                
+                // Look at player
+                badGuyGroup.lookAt(camera.position.x, badGuyGroup.position.y, camera.position.z);
+
+                if (distToPlayer < sightRange && distToPlayer > attackRange) {
+                    // Chase
+                    const chaseDir = new THREE.Vector3().subVectors(camera.position, badGuyGroup.position).normalize();
+                    // Keep Y level
+                    chaseDir.y = 0; 
+                    badGuyGroup.position.add(chaseDir.multiplyScalar(enemySpeed * delta));
+                }
+            }
+
+            // --- Combat Animations ---
+            if (punchAnim > 0) {
+                if (punchAnim < 10) {
+                    rightArm.position.z -= 0.08; 
+                    rightArm.rotation.x = hasWeapon ? -0.5 : 0; // Swing bat down if weapon
+                } else if (punchAnim < 20) {
+                    rightArm.position.z += 0.08; 
+                    rightArm.rotation.x = 0;
+                } else {
+                    punchAnim = 0;
+                    rightArm.position.set(0.25, -0.2, -0.4); 
+                    rightArm.rotation.set(0,0,0);
+                }
+                punchAnim++;
+            }
+
+            if (kickAnim > 0) {
+                if (kickAnim < 10) {
+                    rightLeg.position.z -= 0.1; rightLeg.position.y += 0.05; rightLeg.rotation.x += 0.1;
+                } else if (kickAnim < 20) {
+                    rightLeg.position.z += 0.1; rightLeg.position.y -= 0.05; rightLeg.rotation.x -= 0.1;
+                } else {
+                    kickAnim = 0;
+                    rightLeg.position.set(0.1, -0.6, -0.2); rightLeg.rotation.x = -0.2;
+                }
+                kickAnim++;
+            }
+
+            // Arm Bobbing
+            if (move.forward || move.backward || move.left || move.right) {
+                const time = Date.now() * 0.01;
+                rightArm.position.y = -0.2 + Math.sin(time) * 0.02;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
