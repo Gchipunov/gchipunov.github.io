@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CrimeWars: Mission Mug</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 20px; height: 20px;
+            background: transparent;
+            border: 2px solid lime;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #hud-top {
+            padding: 20px;
+            color: lime;
+            text-shadow: 2px 2px #000;
+            font-size: 24px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+        }
+        #hud-bottom {
+            padding: 20px;
+            color: white;
+            text-align: center;
+            font-size: 18px;
+            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+        }
+        #mission-screen {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: gold;
+            font-size: 40px;
+            font-weight: bold;
+            display: none;
+            text-shadow: 4px 4px 0px #000;
+            border: 4px solid gold;
+            padding: 20px;
+            background: rgba(0,0,0,0.8);
+            transform: translate(-50%, -50%) rotate(-5deg);
+        }
+        .damage-text {
+            color: red;
+            font-weight: bold;
+            font-size: 30px;
+            position: absolute;
+            top: 40%; left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="hud-top">
+            <div>MISSION: MUG THE BAD GUY</div>
+            <div id="enemy-hp">Target HP: 100%</div>
+        </div>
+        <div id="crosshair"></div>
+        <div class="damage-text" id="damage-indicator">POW!</div>
+        <div id="hud-bottom">
+            WASD to Move | Mouse to Look<br>
+            [L-Click] PUNCH | [R-Click / Space] KICK
+        </div>
+    </div>
+
+    <div id="mission-screen">MISSION PASSED<br>RESPECT +</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        // --- 1. Setup Scene ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x202020); // Dark city night
+        scene.fog = new THREE.Fog(0x202020, 0, 50);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.y = 1.6; // Eye level
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. Lighting & Environment ---
+        const ambientLight = new THREE.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        const streetLight = new THREE.PointLight(0xffaa00, 1, 20);
+        streetLight.position.set(0, 5, -5);
+        streetLight.castShadow = true;
+        scene.add(streetLight);
+
+        // Floor (The Street)
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // --- 3. The Player (Arms & Legs) ---
+        // We attach these to the camera so they move with you
+        const handGeo = new THREE.BoxGeometry(0.15, 0.15, 0.4);
+        const skinMat = new THREE.MeshStandardMaterial({ color: 0xe0ac69 }); // Skin tone
+        
+        // Right Arm (Punch)
+        const rightArm = new THREE.Mesh(handGeo, skinMat);
+        rightArm.position.set(0.25, -0.2, -0.4);
+        rightArm.castShadow = true;
+        camera.add(rightArm);
+
+        // Right Leg (Kick) - hidden by default, moves up when kicking
+        const legGeo = new THREE.BoxGeometry(0.2, 0.2, 0.6);
+        const pantsMat = new THREE.MeshStandardMaterial({ color: 0x000088 }); // Blue jeans
+        const rightLeg = new THREE.Mesh(legGeo, pantsMat);
+        rightLeg.position.set(0.1, -0.6, -0.2); // Lower down
+        rightLeg.rotation.x = -0.2;
+        camera.add(rightLeg);
+
+        scene.add(camera);
+
+        // --- 4. The Bad Guy (Target) ---
+        const badGuyGroup = new THREE.Group();
+        badGuyGroup.position.set(0, 0, -5);
+        
+        // Body
+        const bodyGeo = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x880000 }); // Red Shirt
+        const badGuyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+        badGuyMesh.position.y = 0.9;
+        badGuyMesh.castShadow = true;
+        badGuyGroup.add(badGuyMesh);
+
+        // Head
+        const headGeo = new THREE.SphereGeometry(0.25);
+        const headMesh = new THREE.Mesh(headGeo, skinMat);
+        headMesh.position.y = 1.75;
+        badGuyGroup.add(headMesh);
+
+        scene.add(badGuyGroup);
+
+        let enemyHP = 100;
+        let isEnemyDead = false;
+
+        // --- 5. Controls & Movement ---
+        const controls = new PointerLockControls(camera, document.body);
+        
+        document.body.addEventListener('click', () => {
+            controls.lock();
+        });
+
+        // Movement Flags
+        const move = { forward: false, backward: false, left: false, right: false };
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+
+        document.addEventListener('keydown', (event) => {
+            switch (event.code) {
+                case 'KeyW': move.forward = true; break;
+                case 'KeyA': move.left = true; break;
+                case 'KeyS': move.backward = true; break;
+                case 'KeyD': move.right = true; break;
+                case 'Space': performKick(); break;
+            }
+        });
+
+        document.addEventListener('keyup', (event) => {
+            switch (event.code) {
+                case 'KeyW': move.forward = false; break;
+                case 'KeyA': move.left = false; break;
+                case 'KeyS': move.backward = false; break;
+                case 'KeyD': move.right = false; break;
+            }
+        });
+
+        // Mouse Click for Punch
+        document.addEventListener('mousedown', (event) => {
+            if(controls.isLocked) {
+                if(event.button === 0) performPunch(); // Left click
+                if(event.button === 2) performKick();  // Right click
+            }
+        });
+
+        // --- 6. Animation & Logic ---
+        let punchAnim = 0;
+        let kickAnim = 0;
+        let cashDropped = false;
+
+        function performPunch() {
+            if (punchAnim === 0 && kickAnim === 0) {
+                punchAnim = 1; // Start animation frames
+                checkHit(10, "PUNCH");
+            }
+        }
+
+        function performKick() {
+            if (punchAnim === 0 && kickAnim === 0) {
+                kickAnim = 1;
+                checkHit(20, "KICK");
+            }
+        }
+
+        function checkHit(damage, type) {
+            if (isEnemyDead) return;
+
+            // Simple distance check
+            const dist = camera.position.distanceTo(badGuyGroup.position);
+            
+            // If we are close enough (2 meters) and looking vaguely at him
+            if (dist < 2.5) {
+                // Flash enemy color
+                badGuyMesh.material.color.setHex(0xffffff);
+                setTimeout(() => badGuyMesh.material.color.setHex(0x880000), 100);
+
+                // Reduce HP
+                enemyHP -= damage;
+                document.getElementById('enemy-hp').innerText = `Target HP: ${Math.max(0, enemyHP)}%`;
+                
+                // Visual Feedback
+                const dmgText = document.getElementById('damage-indicator');
+                dmgText.innerText = type + "!";
+                dmgText.style.display = 'block';
+                setTimeout(() => dmgText.style.display = 'none', 300);
+
+                // Knockback effect
+                badGuyGroup.position.z -= 0.2;
+
+                if (enemyHP <= 0) {
+                    killEnemy();
+                }
+            }
+        }
+
+        function killEnemy() {
+            isEnemyDead = true;
+            badGuyGroup.rotation.x = -Math.PI / 2; // Fall over
+            badGuyGroup.position.y = 0.2;
+            
+            document.getElementById('mission-screen').style.display = 'block';
+            document.getElementById('enemy-hp').innerText = "TARGET NEUTRALIZED";
+            document.getElementById('enemy-hp').style.color = "gold";
+        }
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // -- Movement Logic --
+            if (controls.isLocked) {
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+
+                direction.z = Number(move.forward) - Number(move.backward);
+                direction.x = Number(move.right) - Number(move.left);
+                direction.normalize();
+
+                if (move.forward || move.backward) velocity.z -= direction.z * 100.0 * delta;
+                if (move.left || move.right) velocity.x -= direction.x * 100.0 * delta;
+
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+            }
+
+            // -- Combat Animations --
+            
+            // Punch Animation (Move arm forward and back)
+            if (punchAnim > 0) {
+                if (punchAnim < 10) {
+                    rightArm.position.z -= 0.08; // Extend
+                    rightArm.position.x -= 0.01;
+                } else if (punchAnim < 20) {
+                    rightArm.position.z += 0.08; // Retract
+                    rightArm.position.x += 0.01;
+                } else {
+                    punchAnim = 0; // Reset
+                    rightArm.position.set(0.25, -0.2, -0.4); // Force reset position
+                }
+                if (punchAnim > 0) punchAnim++;
+            }
+
+            // Kick Animation (Move leg up and forward)
+            if (kickAnim > 0) {
+                if (kickAnim < 10) {
+                    rightLeg.position.z -= 0.1;
+                    rightLeg.position.y += 0.05;
+                    rightLeg.rotation.x += 0.1;
+                } else if (kickAnim < 20) {
+                    rightLeg.position.z += 0.1;
+                    rightLeg.position.y -= 0.05;
+                    rightLeg.rotation.x -= 0.1;
+                } else {
+                    kickAnim = 0;
+                    rightLeg.position.set(0.1, -0.6, -0.2); // Reset
+                    rightLeg.rotation.x = -0.2;
+                }
+                if (kickAnim > 0) kickAnim++;
+            }
+
+            // -- Camera/Arm Bobbing (Walking effect) --
+            if (controls.isLocked && (move.forward || move.backward || move.left || move.right)) {
+                const time = Date.now() * 0.01;
+                rightArm.position.y = -0.2 + Math.sin(time) * 0.02;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
