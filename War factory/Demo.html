@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL War Factory</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: #ffffff;
+            font-family: monospace;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px black;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">War Factory: Active <br> Smoke System & Hydraulic Door</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- 1. SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222); // Dark industrial sky
+        scene.fog = new THREE.Fog(0x222222, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(8, 8, 12);
+        camera.lookAt(0, 2, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5); // Soft white light
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffaa00, 2); // Orange "sun/fire" light
+        dirLight.position.set(-5, 10, 5);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // --- 3. THE FACTORY BUILDING ---
+        const factoryGroup = new THREE.Group();
+        scene.add(factoryGroup);
+
+        // Materials
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.9 });
+        const roofMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 1.0 });
+        const doorMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.2 });
+        const hazardMat = new THREE.MeshStandardMaterial({ color: 0xdcae1d }); // Yellow caution stripes
+
+        // Main Building Body
+        const buildingGeo = new THREE.BoxGeometry(10, 6, 8);
+        const building = new THREE.Mesh(buildingGeo, wallMat);
+        building.position.y = 3; // Half height
+        building.castShadow = true;
+        building.receiveShadow = true;
+        factoryGroup.add(building);
+
+        // Roof
+        const roofGeo = new THREE.BoxGeometry(10.5, 0.5, 8.5);
+        const roof = new THREE.Mesh(roofGeo, roofMat);
+        roof.position.y = 6.25;
+        factoryGroup.add(roof);
+
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(50, 50);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- 4. THE SLIDING GARAGE DOOR ---
+        // Create a hole illusion (black rectangle behind door)
+        const doorHoleGeo = new THREE.PlaneGeometry(4, 4);
+        const doorHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const doorHole = new THREE.Mesh(doorHoleGeo, doorHoleMat);
+        doorHole.position.set(0, 2, 4.01); // Slightly in front of building
+        factoryGroup.add(doorHole);
+
+        // The Moving Door
+        const doorGeo = new THREE.BoxGeometry(4, 4, 0.2);
+        
+        // Create a texture for the door (Stripes)
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#555'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = '#333'; 
+        ctx.fillRect(0,0,64,4); ctx.fillRect(0,16,64,4); ctx.fillRect(0,32,64,4); ctx.fillRect(0,48,64,4);
+        const doorTexture = new THREE.CanvasTexture(canvas);
+        const texturedDoorMat = new THREE.MeshStandardMaterial({ map: doorTexture, metalness: 0.6 });
+
+        const door = new THREE.Mesh(doorGeo, texturedDoorMat);
+        door.position.set(0, 2, 4.1); // Slightly in front of hole
+        door.castShadow = true;
+        factoryGroup.add(door);
+
+        // Door Frame (Hazard Stripes)
+        const frameTop = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.2, 0.3), hazardMat);
+        frameTop.position.set(0, 4.1, 4.1);
+        factoryGroup.add(frameTop);
+
+        // --- 5. SMOKE PIPES ---
+        const pipeGeo = new THREE.CylinderGeometry(0.4, 0.4, 3, 16);
+        const pipeMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        
+        const pipe1 = new THREE.Mesh(pipeGeo, pipeMat);
+        pipe1.position.set(-3, 7.5, -2);
+        factoryGroup.add(pipe1);
+
+        const pipe2 = new THREE.Mesh(pipeGeo, pipeMat);
+        pipe2.position.set(-1.5, 7.5, -2);
+        factoryGroup.add(pipe2);
+
+        // --- 6. SMOKE PARTICLE SYSTEM ---
+        const smokeParticles = [];
+        const smokeGeo = new THREE.SphereGeometry(1, 8, 8); // Low poly spheres
+        const smokeMat = new THREE.MeshLambertMaterial({ 
+            color: 0x555555, 
+            transparent: true, 
+            opacity: 0.4 
+        });
+
+        function spawnSmoke(x, z) {
+            const particle = new THREE.Mesh(smokeGeo, smokeMat.clone()); // Clone mat for individual opacity
+            
+            // Start at top of pipe
+            particle.position.set(x, 9, z);
+            
+            // Randomize starting size
+            const scale = 0.2 + Math.random() * 0.2;
+            particle.scale.set(scale, scale, scale);
+            
+            // Velocity properties attached to mesh
+            particle.userData = {
+                vy: 0.05 + Math.random() * 0.05, // Upward speed
+                vx: (Math.random() - 0.5) * 0.02, // Drift
+                vz: (Math.random() - 0.5) * 0.02,
+                growth: 0.01 // Expansion rate
+            };
+
+            scene.add(particle);
+            smokeParticles.push(particle);
+        }
+
+        // --- 7. ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const time = clock.getElapsedTime();
+            const delta = clock.getDelta();
+
+            // 1. Door Animation (Sine wave for open/close loop)
+            // Range 0 to 3.8
+            const doorHeight = Math.max(0, Math.sin(time * 0.8) * 3.8); 
+            // We only want it to go up, then sit, then down. 
+            // Let's use simple logic: slide up to 3.5, stay, slide down.
+            // Simplified: mapped sine wave clamped.
+            const slide = Math.sin(time * 0.5); // Slow cycle
+            let newY = 2; // Default closed center position
+            if(slide > 0) {
+                // Opening/Open
+                 newY = 2 + (slide * 3.5); 
+            }
+            if(newY > 3.9) newY = 3.9; // Clamp top
+            door.position.y = newY;
+
+
+            // 2. Smoke Generation
+            if (Math.random() > 0.85) spawnSmoke(-3, -2);   // Pipe 1
+            if (Math.random() > 0.85) spawnSmoke(-1.5, -2); // Pipe 2
+
+            // 3. Smoke Physics
+            for (let i = smokeParticles.length - 1; i >= 0; i--) {
+                const p = smokeParticles[i];
+                const data = p.userData;
+
+                p.position.y += data.vy;
+                p.position.x += data.vx;
+                p.position.z += data.vz;
+
+                // Grow and Fade
+                p.scale.addScalar(data.growth);
+                p.material.opacity -= 0.005;
+
+                // Remove if invisible
+                if (p.material.opacity <= 0) {
+                    scene.remove(p);
+                    p.geometry.dispose(); // Cleanup memory
+                    p.material.dispose();
+                    smokeParticles.splice(i, 1);
+                }
+            }
+
+            // 4. Subtle Factory Hover/Shake (optional, adds life)
+            // factoryGroup.rotation.y = Math.sin(time * 0.1) * 0.05;
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
