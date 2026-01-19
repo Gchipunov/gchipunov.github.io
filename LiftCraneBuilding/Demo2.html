@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Building & Crane & Warehouse</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: #333;
+            font-family: sans-serif;
+            font-weight: bold;
+            pointer-events: none;
+            text-shadow: 1px 1px 0px white;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">WebGL Crane, Building & Animated Warehouse<br/>Left Click: Rotate | Scroll: Zoom | Right Click: Pan</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(50, 40, 50); // Moved back slightly to see everything
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // Enable shadows
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -50;
+        dirLight.shadow.camera.right = 50;
+        dirLight.shadow.camera.top = 50;
+        dirLight.shadow.camera.bottom = -50;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // --- 3. Ground ---
+        const groundGeo = new THREE.PlaneGeometry(200, 200);
+        const groundMat = new THREE.MeshPhongMaterial({ color: 0x555555, depthWrite: true });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const gridHelper = new THREE.GridHelper(200, 50, 0x000000, 0x888888);
+        gridHelper.position.y = 0.1;
+        gridHelper.material.opacity = 0.2;
+        gridHelper.material.transparent = true;
+        scene.add(gridHelper);
+
+        // --- 4. Building (Procedural Cubes) ---
+        const boxGeo = new THREE.BoxGeometry(4, 4, 4);
+        const boxMat = new THREE.MeshLambertMaterial({ color: 0xcd5c5c }); // IndianRed
+
+        function createBuilding(xOffset, zOffset) {
+            const height = Math.floor(Math.random() * 5) + 3; // Random height
+            for (let y = 0; y < height; y++) {
+                const mesh = new THREE.Mesh(boxGeo, boxMat);
+                mesh.position.set(xOffset, 2 + (y * 4), zOffset);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                
+                // Add black edges for structure look
+                const edges = new THREE.EdgesGeometry(boxGeo);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 }));
+                mesh.add(line);
+                
+                scene.add(mesh);
+            }
+        }
+
+        // Create a small city block
+        createBuilding(-10, -10);
+        createBuilding(-10, -15);
+        createBuilding(-15, -10);
+        createBuilding(-5, -10);
+
+        // --- 4.5 NEW: The Warehouse with Sliding Door ---
+        const warehouseGroup = new THREE.Group();
+        warehouseGroup.position.set(25, 0, -20); // Position it away from the random buildings
+        scene.add(warehouseGroup);
+
+        // Warehouse Main Body
+        const whGeo = new THREE.BoxGeometry(24, 14, 20);
+        const whMat = new THREE.MeshStandardMaterial({ color: 0x708090 }); // SlateGray
+        const warehouse = new THREE.Mesh(whGeo, whMat);
+        warehouse.position.y = 7; // Half height
+        warehouse.castShadow = true;
+        warehouse.receiveShadow = true;
+        warehouseGroup.add(warehouse);
+
+        // Warehouse Roof (Simple Flat with rim)
+        const roofGeo = new THREE.BoxGeometry(25, 1, 21);
+        const roof = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: 0x2f4f4f }));
+        roof.position.y = 14.5;
+        warehouseGroup.add(roof);
+
+        // Garage Door Frame (Visual guides)
+        const doorFrameMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const doorFrameLeft = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 1), doorFrameMat);
+        doorFrameLeft.position.set(-5.5, 5, 10.1); // Slightly sticking out of front face (z=10)
+        warehouseGroup.add(doorFrameLeft);
+
+        const doorFrameRight = new THREE.Mesh(new THREE.BoxGeometry(1, 10, 1), doorFrameMat);
+        doorFrameRight.position.set(5.5, 5, 10.1);
+        warehouseGroup.add(doorFrameRight);
+
+        // THE GARAGE DOOR
+        // We use a separate geometry so we can move it
+        const doorGeo = new THREE.BoxGeometry(10, 9, 0.5);
+        // Texture hints (lines) can be done with a texture map, but let's use a ridged material color for now
+        const doorMat = new THREE.MeshStandardMaterial({ color: 0x4682B4, roughness: 0.7, metalness: 0.1 }); 
+        const garageDoor = new THREE.Mesh(doorGeo, doorMat);
+        
+        // Initial closed position
+        // Center of door is at y=4.5 (half of 9). Front face of warehouse is z=10.
+        garageDoor.position.set(0, 4.5, 10); 
+        warehouseGroup.add(garageDoor);
+
+
+        // --- 5. The Crane Hierarchy ---
+        // Group to hold the entire crane
+        const craneGroup = new THREE.Group();
+        craneGroup.position.set(10, 0, 10);
+        scene.add(craneGroup);
+
+        // Materials
+        const craneMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.5 }); // Yellow
+        const darkMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+
+        // Base
+        const baseGeo = new THREE.BoxGeometry(6, 1, 6);
+        const base = new THREE.Mesh(baseGeo, darkMat);
+        base.position.y = 0.5;
+        base.receiveShadow = true;
+        craneGroup.add(base);
+
+        // Tower (Mast)
+        const towerHeight = 30;
+        const towerGeo = new THREE.BoxGeometry(2, towerHeight, 2);
+        const tower = new THREE.Mesh(towerGeo, craneMat);
+        tower.position.y = towerHeight / 2;
+        tower.castShadow = true;
+        craneGroup.add(tower);
+
+        // Cabin (Pivot point for rotation)
+        const cabinGroup = new THREE.Group();
+        cabinGroup.position.y = towerHeight; // Sit on top of tower
+        craneGroup.add(cabinGroup);
+
+        // Cabin Mesh
+        const cabinGeo = new THREE.BoxGeometry(3, 3, 3);
+        const cabin = new THREE.Mesh(cabinGeo, darkMat);
+        cabin.position.y = 1.5; // Half height to sit on pivot
+        cabinGroup.add(cabin);
+
+        // Jib (The long arm)
+        const jibLength = 25;
+        const jibGeo = new THREE.BoxGeometry(2, 2, jibLength);
+        const jib = new THREE.Mesh(jibGeo, craneMat);
+        // Offset so it extends mostly forward
+        jib.position.set(0, 1.5, jibLength / 2 - 4); 
+        jib.castShadow = true;
+        cabinGroup.add(jib);
+
+        // Counter Jib (The short arm with weights)
+        const counterJibGeo = new THREE.BoxGeometry(2, 2, 10);
+        const counterJib = new THREE.Mesh(counterJibGeo, craneMat);
+        counterJib.position.set(0, 1.5, -5 - 2); 
+        cabinGroup.add(counterJib);
+
+        // Counter Weight
+        const weightGeo = new THREE.BoxGeometry(4, 3, 3);
+        const weight = new THREE.Mesh(weightGeo, darkMat);
+        weight.position.set(0, 2, -9);
+        cabinGroup.add(weight);
+
+        // Trolley (Moves along the Jib)
+        const trolleyGroup = new THREE.Group();
+        // Start position on the jib
+        trolleyGroup.position.set(0, 0, 10); 
+        cabinGroup.add(trolleyGroup);
+
+        // Trolley Mesh
+        const trolleyGeo = new THREE.BoxGeometry(2.2, 1, 2);
+        const trolley = new THREE.Mesh(trolleyGeo, darkMat);
+        trolley.position.y = 1.5 + 1; // Under the jib? No, let's put it around the jib
+        trolleyGroup.add(trolley);
+
+        // Cable Line (Dynamic Geometry)
+        const cableGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
+        const cable = new THREE.Mesh(cableGeo, new THREE.MeshBasicMaterial({ color: 0x000000 }));
+        cable.geometry.translate(0, -0.5, 0); // Move pivot to top
+        cable.position.y = 1.5; // Attach to trolley
+        trolleyGroup.add(cable);
+
+        // Hook/Load
+        const hookGeo = new THREE.BoxGeometry(2, 2, 2);
+        const hook = new THREE.Mesh(hookGeo, new THREE.MeshStandardMaterial({ color: 0xff0000 }));
+        hook.castShadow = true;
+        // We will animate the hook mesh position relative to the cable scale
+        cable.add(hook); 
+
+        // --- 6. Interaction & Animation ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        
+        // Window Resize Handling
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Animation Loop
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const time = clock.getElapsedTime();
+            
+            // 1. Rotate the crane cabin (Y-axis)
+            cabinGroup.rotation.y = Math.sin(time * 0.5) * 0.5 + 1; // Oscillate gently
+
+            // 2. Move trolley back and forth along Jib
+            const trolleyPos = Math.sin(time * 0.8) * 6 + 12; // Move between Z=6 and Z=18
+            trolleyGroup.position.z = trolleyPos;
+
+            // 3. Lower and raise the cable
+            const cableLen = Math.sin(time * 1.5) * 5 + 10; // Length between 5 and 15
+            cable.scale.y = cableLen;
+            
+            // Scale Hook Inverse
+            hook.scale.set(1, 1/cableLen, 1);
+            hook.position.y = -1; 
+
+            // --- 4. ANIMATE GARAGE DOOR ---
+            // Slide up and down slowly. 
+            // Range: 0 to 1
+            const doorCycle = (Math.sin(time * 0.5) + 1) / 2; 
+            // Door Height is 9, center is 4.5.
+            // Closed Y = 4.5
+            // Open Y = 4.5 + 8 (Slides up into the wall/roof area)
+            garageDoor.position.y = 4.5 + (doorCycle * 8);
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
