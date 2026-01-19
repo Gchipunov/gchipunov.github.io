@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Hex Planet</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050510; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            pointer-events: none;
+            z-index: 10;
+            text-shadow: 0 0 5px black;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="info">Hex Grid Planet<br><span style="font-size: 0.8em">Hover to interact • Drag to rotate</span></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+        // --- Configuration ---
+        const PLANET_RADIUS = 10;
+        const SUBDIVISION = 3; // 2 = Low Poly, 3 = Nice Hexes, 4 = High Detail
+        const TILE_SCALE = 0.92; // Scale of hexes (less than 1 creates the grid gap)
+        
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050510, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 40);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.enablePan = false;
+        controls.minDistance = 15;
+        controls.maxDistance = 60;
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunLight.position.set(20, 10, 20);
+        scene.add(sunLight);
+        
+        const fillLight = new THREE.DirectionalLight(0x4444ff, 1.0);
+        fillLight.position.set(-20, 0, -20);
+        scene.add(fillLight);
+
+        // --- Planet Generation Helper Functions ---
+
+        /**
+         * Converts an Icosahedron to its Dual (Hexagons/Pentagons)
+         * 1. Generate Icosahedron
+         * 2. Find unique vertices (which become the centers of our hexes)
+         * 3. Find the faces touching each vertex
+         * 4. The centroids of those faces form the corners of the new hex
+         */
+        function createHexSphere(radius, detail) {
+            const geometry = new THREE.IcosahedronGeometry(radius, detail);
+            const posAttr = geometry.attributes.position;
+            
+            // 1. Map vertices to connected faces
+            // We need a tolerance check because vertices might not be exactly identical due to float precision
+            const vertexMap = new Map(); // Key: "x,y,z", Value: { originalIndex, faces: [] }
+            
+            // Helper to generate a hash key for a vertex
+            const getHash = (x, y, z) => `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+
+            // Iterate over all triangles (faces) in the icosahedron
+            for (let i = 0; i < posAttr.count; i += 3) {
+                // Get the 3 vertices of the triangle
+                const vA = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+                const vB = new THREE.Vector3().fromBufferAttribute(posAttr, i + 1);
+                const vC = new THREE.Vector3().fromBufferAttribute(posAttr, i + 2);
+                
+                // Calculate face centroid (this becomes a corner of the hex)
+                const centroid = new THREE.Vector3().addVectors(vA, vB).add(vC).divideScalar(3);
+
+                // Register this face to its 3 vertices
+                [vA, vB, vC].forEach((v) => {
+                    const key = getHash(v.x, v.y, v.z);
+                    if (!vertexMap.has(key)) {
+                        vertexMap.set(key, { center: v.clone(), centroids: [] });
+                    }
+                    vertexMap.get(key).centroids.push(centroid);
+                });
+            }
+
+            // 2. Construct the hexagonal meshes
+            const hexGeometries = [];
+            const dummyObj = new THREE.Object3D();
+
+            vertexMap.forEach((data, key) => {
+                const { center, centroids } = data;
+                
+                // Sort centroids to form a proper polygon (clockwise/counter-clockwise)
+                // We project them onto a plane defined by the normal (center vector)
+                const normal = center.clone().normalize();
+                const basisX = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0,1,0)).normalize();
+                if(basisX.lengthSq() < 0.001) basisX.crossVectors(normal, new THREE.Vector3(0,0,1)).normalize();
+                const basisY = new THREE.Vector3().crossVectors(normal, basisX);
+
+                centroids.sort((a, b) => {
+                    const angA = Math.atan2(
+                        new THREE.Vector3().subVectors(a, center).dot(basisY),
+                        new THREE.Vector3().subVectors(a, center).dot(basisX)
+                    );
+                    const angB = Math.atan2(
+                        new THREE.Vector3().subVectors(b, center).dot(basisY),
+                        new THREE.Vector3().subVectors(b, center).dot(basisX)
+                    );
+                    return angA - angB;
+                });
+
+                // Create the individual hex/pentagon shape
+                const shape = new THREE.Shape();
+                // Map 3D points to 2D for the Shape, then we will re-position
+                // Actually, easier approach for custom geometry:
+                // Create a fan of triangles from center to edge points
+                
+                const positions = [];
+                const numPoints = centroids.length; // 5 for pentagon, 6 for hexagon
+                
+                // Simple geometry generation: Center + Triangle fan
+                // To support individual interaction, we should probably return separate meshes 
+                // or a single geometry with attributes. 
+                // Let's build a single buffer geometry where each hex is separate (not merged vertices)
+                
+                const localVerts = [];
+                
+                // Create a "cap" slightly offset from the center
+                for(let i=0; i<numPoints; i++) {
+                    localVerts.push(center); // Center
+                    localVerts.push(centroids[i]); // Current edge
+                    localVerts.push(centroids[(i+1)%numPoints]); // Next edge
+                }
+
+                // Convert to geometry
+                const hexGeo = new THREE.BufferGeometry().setFromPoints(localVerts);
+                hexGeo.computeVertexNormals();
+
+                // Scale down for the "Grid" effect
+                // We scale relative to the individual cell center
+                const geomCenter = center.clone(); 
+                hexGeo.translate(-geomCenter.x, -geomCenter.y, -geomCenter.z);
+                hexGeo.scale(TILE_SCALE, TILE_SCALE, TILE_SCALE);
+                hexGeo.translate(geomCenter.x, geomCenter.y, geomCenter.z);
+
+                hexGeometries.push(hexGeo);
+            });
+
+            // Merge all hexes into one massive geometry for performance
+            // We use BufferGeometryUtils
+            const mergedGeometry = mergeGeometries(hexGeometries, false);
+            return { geometry: mergedGeometry, count: hexGeometries.length };
+        }
+
+        // --- Build the Planet ---
+        
+        console.time("Generation");
+        const { geometry: hexGeometry, count } = createHexSphere(PLANET_RADIUS, SUBDIVISION);
+        console.timeEnd("Generation");
+
+        // Add Colors
+        // Since we constructed triangles in fans (Center -> P1 -> P2), each hex has (6 or 5) * 3 vertices.
+        // But we merged them. We need to color based on "Cells".
+        // The merge order is preserved. 
+        // We need to loop through the geometry and color vertices.
+        
+        const colors = [];
+        const posAttribute = hexGeometry.attributes.position;
+        const colorPalette = [
+            new THREE.Color(0x1E88E5), // Ocean Blue
+            new THREE.Color(0x1E88E5), // Ocean Blue
+            new THREE.Color(0x1E88E5), // Ocean Blue
+            new THREE.Color(0x43A047), // Land Green
+            new THREE.Color(0xFDD835), // Sand/Beach
+            new THREE.Color(0xFFFFFF)  // Ice/Snow
+        ];
+
+        // We know each cell is independent in the buffer. 
+        // We have to guess the vertex count per cell, but it varies (5 or 6 segments * 3 verts = 15 or 18).
+        // A robust way is detecting jumps in position or just processing the original array before merge.
+        // Let's re-do the color step slightly differently: 
+        // We will assign a color for every vertex, switching color every 18 or 15 vertices? 
+        // Too risky.
+        
+        // Simpler approach for coloring: 
+        // Calculate the center of the triangle. If it's far from origin, color A.
+        // Let's use noise-based coloring based on vertex position.
+        
+        for (let i = 0; i < posAttribute.count; i++) {
+            const x = posAttribute.getX(i);
+            const y = posAttribute.getY(i);
+            const z = posAttribute.getZ(i);
+            
+            // Simple Perlin-ish noise approximation
+            const noise = Math.sin(x * 0.2) + Math.sin(y * 0.3) + Math.sin(z * 0.4) + Math.sin((x+y+z)*0.1);
+            
+            let c;
+            if (noise > 1.8) c = colorPalette[5]; // Ice
+            else if (noise > 1.2) c = colorPalette[3]; // Forest
+            else if (noise > 1.0) c = colorPalette[4]; // Sand
+            else c = colorPalette[0]; // Ocean
+
+            colors.push(c.r, c.g, c.b);
+        }
+
+        hexGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+        // Material
+        const material = new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            roughness: 0.8,
+            metalness: 0.1,
+            flatShading: true 
+        });
+
+        const planet = new THREE.Mesh(hexGeometry, material);
+        scene.add(planet);
+
+        // --- Interaction (Raycasting) ---
+        // To interact with individual cells efficiently in a merged mesh, 
+        // we use a secondary Invisible Mesh or we compute logic.
+        // For visual "Pop", we will add a separate Highlight Mesh.
+
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const highlightMesh = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(1.0, 0), // Placeholder
+            new THREE.MeshBasicMaterial({ color: 0xff00ff, transparent: true, opacity: 0.5, depthTest: false })
+        );
+        scene.add(highlightMesh);
+        highlightMesh.visible = false;
+
+        // --- Atmosphere/Glow ---
+        const atmosphereGeo = new THREE.SphereGeometry(PLANET_RADIUS + 2, 64, 64);
+        const atmosphereMat = new THREE.ShaderMaterial({
+            uniforms: { 
+                viewVector: { value: new THREE.Vector3() },
+                c: { value: 0.5 },
+                p: { value: 4.0 },
+                glowColor: { value: new THREE.Color(0x00aaff) }
+            },
+            vertexShader: `
+                uniform vec3 viewVector;
+                varying float intensity;
+                void main() {
+                    vec3 vNormal = normalize(normalMatrix * normal);
+                    vec3 vNormel = normalize(normalMatrix * viewVector);
+                    intensity = pow(0.6 - dot(vNormal, vNormel), 4.0);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 glowColor;
+                varying float intensity;
+                void main() {
+                    vec3 glow = glowColor * intensity;
+                    gl_FragColor = vec4( glow, 1.0 );
+                }
+            `,
+            side: THREE.BackSide,
+            blending: THREE.AdditiveBlending,
+            transparent: true
+        });
+        const atmosphere = new THREE.Mesh(atmosphereGeo, atmosphereMat);
+        scene.add(atmosphere);
+
+        // --- Input Listeners ---
+        window.addEventListener('resize', onWindowResize, false);
+        window.addEventListener('mousemove', onMouseMove, false);
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // Rotation
+            planet.rotation.y += 0.005 * delta * 10;
+            atmosphere.rotation.y += 0.005 * delta * 10;
+
+            // Interaction
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(planet);
+
+            if (intersects.length > 0) {
+                // If we hit a face
+                const intersect = intersects[0];
+                const face = intersect.face;
+                
+                // We want to highlight the whole hex (which is made of multiple faces).
+                // Since we merged geometries, this is tricky. 
+                // Visual trick: Position a hexagonal helper at the interaction point normal.
+                
+                highlightMesh.visible = true;
+                highlightMesh.position.copy(intersect.point).normalize().multiplyScalar(PLANET_RADIUS * 1.01);
+                highlightMesh.lookAt(new THREE.Vector3(0,0,0));
+                
+                // Scale highlight based on dist to cam for constant size feel
+                highlightMesh.scale.setScalar(2.0); 
+                
+                // The geometry of the highlight can be a simple ring or hex
+                if(highlightMesh.geometry.type === 'IcosahedronGeometry') {
+                     highlightMesh.geometry = new THREE.RingGeometry(0.5, 0.6, 6);
+                }
+            } else {
+                highlightMesh.visible = false;
+            }
+            
+            // Update Atmosphere Shader
+            atmosphere.material.uniforms.viewVector.value = new THREE.Vector3().subVectors(camera.position, atmosphere.position);
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
