@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Pipes & Smoke</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background-color: #111; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #instruction {
+            position: absolute; top: 10px; left: 10px; color: white;
+            font-family: monospace; background: rgba(0,0,0,0.5); padding: 5px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="instruction">Raw WebGL: Pipes & Smoke (No Libraries)</div>
+    <canvas id="glcanvas"></canvas>
+
+<script>
+/**
+ * SECTION 1: SHADERS (GLSL)
+ */
+
+// --- PIPE SHADERS (Standard Lighting) ---
+const vsPipe = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+    
+    uniform mat4 uPMatrix;
+    uniform mat4 uMVMatrix;
+    uniform mat4 uNormalMatrix;
+    
+    varying vec3 vLighting;
+    
+    void main(void) {
+        gl_Position = uPMatrix * uMVMatrix * vec4(aPosition, 1.0);
+        
+        // Simple directional lighting
+        vec3 ambientLight = vec3(0.3, 0.3, 0.3);
+        vec3 directionalLightColor = vec3(1.0, 1.0, 1.0);
+        vec3 directionalVector = normalize(vec3(0.85, 0.8, 0.75));
+        
+        vec4 transformedNormal = uNormalMatrix * vec4(aNormal, 1.0);
+        float directional = max(dot(transformedNormal.xyz, directionalVector), 0.0);
+        
+        vLighting = ambientLight + (directionalLightColor * directional);
+    }
+`;
+
+const fsPipe = `
+    precision mediump float;
+    varying vec3 vLighting;
+    
+    void main(void) {
+        // Metallic/Industrial Grey Pipe Color
+        vec4 color = vec4(0.4, 0.45, 0.5, 1.0); 
+        gl_FragColor = vec4(color.rgb * vLighting, color.a);
+    }
+`;
+
+// --- SMOKE SHADERS (Point Sprites) ---
+const vsSmoke = `
+    attribute vec3 aPosition;
+    attribute float aLife;
+    
+    uniform mat4 uPMatrix;
+    uniform mat4 uMVMatrix;
+    
+    varying float vLife;
+    
+    void main(void) {
+        vec4 mvPosition = uMVMatrix * vec4(aPosition, 1.0);
+        gl_Position = uPMatrix * mvPosition;
+        
+        // Size attenuation (particles get smaller as they move away)
+        gl_PointSize = (300.0 / -mvPosition.z) * aLife;
+        vLife = aLife;
+    }
+`;
+
+const fsSmoke = `
+    precision mediump float;
+    varying float vLife;
+    
+    void main(void) {
+        // Create a soft circle from the point square
+        vec2 coord = gl_PointCoord - vec2(0.5);
+        float dist = length(coord);
+        
+        if (dist > 0.5) discard; // Cut off corners to make a circle
+        
+        // Soft edges
+        float alpha = (1.0 - (dist * 2.0)) * vLife * 0.4;
+        
+        // Smoke color (light grey)
+        gl_FragColor = vec4(0.9, 0.9, 0.9, alpha);
+    }
+`;
+
+/**
+ * SECTION 2: MATH UTILS (Micro Matrix Library)
+ */
+const Mat4 = {
+    create: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+    perspective: (out, fovy, aspect, near, far) => {
+        const f = 1.0 / Math.tan(fovy / 2);
+        const nf = 1 / (near - far);
+        out[0] = f / aspect; out[1] = 0; out[2] = 0; out[3] = 0;
+        out[4] = 0; out[5] = f; out[6] = 0; out[7] = 0;
+        out[8] = 0; out[9] = 0; out[10] = (far + near) * nf; out[11] = -1;
+        out[12] = 0; out[13] = 0; out[14] = (2 * far * near) * nf; out[15] = 0;
+    },
+    translate: (out, a, v) => {
+        let x = v[0], y = v[1], z = v[2];
+        out[12] = a[0]*x + a[4]*y + a[8]*z + a[12];
+        out[13] = a[1]*x + a[5]*y + a[9]*z + a[13];
+        out[14] = a[2]*x + a[6]*y + a[10]*z + a[14];
+        out[15] = a[3]*x + a[7]*y + a[11]*z + a[15];
+    },
+    rotateX: (out, a, rad) => {
+        let s = Math.sin(rad), c = Math.cos(rad);
+        let a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+        let a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+        out[4] = a10*c + a20*s; out[5] = a11*c + a21*s;
+        out[6] = a12*c + a22*s; out[7] = a13*c + a23*s;
+        out[8] = a20*c - a10*s; out[9] = a21*c - a11*s;
+        out[10] = a22*c - a12*s; out[11] = a23*c - a13*s;
+    },
+    multiply: (out, a, b) => {
+        let temp = new Float32Array(16);
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                temp[i*4+j] = b[i*4]*a[0+j] + b[i*4+1]*a[4+j] + b[i*4+2]*a[8+j] + b[i*4+3]*a[12+j];
+            }
+        }
+        for(let i=0; i<16; i++) out[i] = temp[i];
+    },
+    identity: (out) => {
+        for(let i=0; i<16; i++) out[i] = (i%5 === 0) ? 1 : 0;
+    },
+    invertAndTranspose: (out, a) => {
+        // Simplified for orthogonal/rigid transforms (sufficient for this demo)
+        // Usually you need a full inverse function, but for rotation/translation 
+        // passing the rotation matrix is usually enough for normals.
+        // We will just copy the top 3x3 rotation part for normals here.
+        // (A true inverse logic is too long for this snippet, this approximation works for simple scaling/rotation)
+        out[0]=a[0]; out[1]=a[1]; out[2]=a[2]; out[3]=0;
+        out[4]=a[4]; out[5]=a[5]; out[6]=a[6]; out[7]=0;
+        out[8]=a[8]; out[9]=a[9]; out[10]=a[10]; out[11]=0;
+        out[12]=0; out[13]=0; out[14]=0; out[15]=1;
+    }
+};
+
+/**
+ * SECTION 3: GEOMETRY GENERATION
+ */
+function createCylinder(radius, height, segments) {
+    let vertices = [];
+    let normals = [];
+    let indices = [];
+
+    // Side vertices
+    for (let i = 0; i <= segments; i++) {
+        let theta = (i / segments) * 2 * Math.PI;
+        let x = Math.cos(theta) * radius;
+        let z = Math.sin(theta) * radius;
+        
+        // Top edge
+        vertices.push(x, height/2, z);
+        normals.push(x, 0, z); // Approximate normal
+        // Bottom edge
+        vertices.push(x, -height/2, z);
+        normals.push(x, 0, z);
+    }
+
+    // Indices for sides
+    for (let i = 0; i < segments; i++) {
+        let first = i * 2;
+        indices.push(first, first + 1, first + 2);
+        indices.push(first + 1, first + 3, first + 2);
+    }
+    
+    return { vertices: new Float32Array(vertices), normals: new Float32Array(normals), indices: new Uint16Array(indices) };
+}
+
+/**
+ * SECTION 4: MAIN WEBGL LOGIC
+ */
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) { alert('WebGL not supported'); }
+
+// Compile Shader Helper
+function createProgram(vsSource, fsSource) {
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, vsSource);
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(vs));
+
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, fsSource);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fs));
+
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    return prog;
+}
+
+const pipeProg = createProgram(vsPipe, fsPipe);
+const smokeProg = createProgram(vsSmoke, fsSmoke);
+
+// --- SETUP PIPES ---
+const cylinderData = createCylinder(0.8, 4.0, 20);
+
+const pipeVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, pipeVBO);
+gl.bufferData(gl.ARRAY_BUFFER, cylinderData.vertices, gl.STATIC_DRAW);
+
+const pipeNBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, pipeNBO);
+gl.bufferData(gl.ARRAY_BUFFER, cylinderData.normals, gl.STATIC_DRAW);
+
+const pipeIBO = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pipeIBO);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cylinderData.indices, gl.STATIC_DRAW);
+
+// Define Pipe Locations (x, y, z)
+const pipes = [
+    { x: -2.0, y: -1.0, z: -8.0 },
+    { x:  0.0, y: -1.5, z: -9.0 },
+    { x:  2.0, y: -0.5, z: -10.0 }
+];
+
+// --- SETUP SMOKE ---
+// We will stream data to the GPU every frame
+const MAX_PARTICLES = 1000;
+let particleData = new Float32Array(MAX_PARTICLES * 4); // x, y, z, life
+// CPU state for simulation
+let particles = [];
+for(let i=0; i<MAX_PARTICLES; i++) {
+    particles.push({ 
+        active: false, x:0, y:0, z:0, vx:0, vy:0, vz:0, life: 0 
+    });
+}
+
+const smokeVBO = gl.createBuffer();
+
+// Attributes locations
+const pipeLocs = {
+    pos: gl.getAttribLocation(pipeProg, 'aPosition'),
+    norm: gl.getAttribLocation(pipeProg, 'aNormal'),
+    pMat: gl.getUniformLocation(pipeProg, 'uPMatrix'),
+    mvMat: gl.getUniformLocation(pipeProg, 'uMVMatrix'),
+    nMat: gl.getUniformLocation(pipeProg, 'uNormalMatrix'),
+};
+
+const smokeLocs = {
+    pos: gl.getAttribLocation(smokeProg, 'aPosition'),
+    life: gl.getAttribLocation(smokeProg, 'aLife'),
+    pMat: gl.getUniformLocation(smokeProg, 'uPMatrix'),
+    mvMat: gl.getUniformLocation(smokeProg, 'uMVMatrix'),
+};
+
+// Matrices
+let pMatrix = Mat4.create();
+let mvMatrix = Mat4.create();
+let nMatrix = Mat4.create();
+let viewMatrix = Mat4.create();
+
+// Resize Handler
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    Mat4.perspective(pMatrix, 45 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100.0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- RENDER LOOP ---
+
+function updateSmoke() {
+    // 1. Spawn new particles
+    // Spawn 2 particles per pipe per frame
+    pipes.forEach(pipe => {
+        for(let k=0; k<2; k++) {
+            // Find inactive particle
+            let p = particles.find(p => !p.active);
+            if(p) {
+                p.active = true;
+                // Start at top of pipe
+                p.x = pipe.x + (Math.random() - 0.5) * 0.5;
+                p.y = pipe.y + 2.0; // Half height of pipe (4.0/2)
+                p.z = pipe.z + (Math.random() - 0.5) * 0.5;
+                
+                // Upward velocity with randomness
+                p.vx = (Math.random() - 0.5) * 0.02;
+                p.vy = 0.05 + Math.random() * 0.02;
+                p.vz = (Math.random() - 0.5) * 0.02;
+                
+                p.life = 1.0;
+            }
+        }
+    });
+
+    // 2. Update existing particles and fill buffer array
+    let activeCount = 0;
+    for(let i=0; i<MAX_PARTICLES; i++) {
+        let p = particles[i];
+        if(p.active) {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.z += p.vz;
+            p.life -= 0.005; // Fade out speed
+
+            // Wind effect (push slightly right over time)
+            p.x += 0.005; 
+
+            if(p.life <= 0) p.active = false;
+            
+            // Fill Buffer Data
+            particleData[activeCount * 4 + 0] = p.x;
+            particleData[activeCount * 4 + 1] = p.y;
+            particleData[activeCount * 4 + 2] = p.z;
+            particleData[activeCount * 4 + 3] = p.life;
+            activeCount++;
+        }
+    }
+    return activeCount;
+}
+
+let time = 0;
+
+function render() {
+    time += 0.01;
+    
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+
+    // Camera View Move (slight sway)
+    Mat4.identity(viewMatrix);
+    // Standard view position
+    
+    // --- DRAW PIPES ---
+    gl.useProgram(pipeProg);
+    
+    gl.enableVertexAttribArray(pipeLocs.pos);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pipeVBO);
+    gl.vertexAttribPointer(pipeLocs.pos, 3, gl.FLOAT, false, 0, 0);
+    
+    gl.enableVertexAttribArray(pipeLocs.norm);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pipeNBO);
+    gl.vertexAttribPointer(pipeLocs.norm, 3, gl.FLOAT, false, 0, 0);
+    
+    gl.uniformMatrix4fv(pipeLocs.pMat, false, pMatrix);
+
+    pipes.forEach(pipe => {
+        Mat4.identity(mvMatrix);
+        Mat4.translate(mvMatrix, mvMatrix, [pipe.x, pipe.y, pipe.z]);
+        
+        // Compute Normal Matrix (simplified)
+        Mat4.invertAndTranspose(nMatrix, mvMatrix);
+        
+        gl.uniformMatrix4fv(pipeLocs.mvMat, false, mvMatrix);
+        gl.uniformMatrix4fv(pipeLocs.nMat, false, nMatrix);
+        
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, pipeIBO);
+        gl.drawElements(gl.TRIANGLES, cylinderData.indices.length, gl.UNSIGNED_SHORT, 0);
+    });
+
+    // --- DRAW SMOKE ---
+    let count = updateSmoke();
+
+    if (count > 0) {
+        gl.useProgram(smokeProg);
+        
+        // Enable blending for transparency
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false); // Don't write to depth buffer for transparent particles
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, smokeVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, particleData, gl.DYNAMIC_DRAW);
+        
+        // Interleave data: x,y,z (0-12 bytes), life (12-16 bytes) stride = 16
+        gl.enableVertexAttribArray(smokeLocs.pos);
+        gl.vertexAttribPointer(smokeLocs.pos, 3, gl.FLOAT, false, 16, 0);
+        
+        gl.enableVertexAttribArray(smokeLocs.life);
+        gl.vertexAttribPointer(smokeLocs.life, 1, gl.FLOAT, false, 16, 12);
+        
+        Mat4.identity(mvMatrix); // World space particles
+        gl.uniformMatrix4fv(smokeLocs.pMat, false, pMatrix);
+        gl.uniformMatrix4fv(smokeLocs.mvMat, false, mvMatrix);
+        
+        gl.drawArrays(gl.POINTS, 0, count);
+
+        // Reset state
+        gl.disable(gl.BLEND);
+        gl.depthMask(true);
+    }
+
+    requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>
