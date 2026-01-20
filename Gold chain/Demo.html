@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Gold Chain</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec3 position;
+        attribute vec3 normal;
+
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
+        uniform mat3 uNormalMatrix;
+
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+
+        void main() {
+            vec4 viewPos = uView * uModel * vec4(position, 1.0);
+            vViewPosition = viewPos.xyz;
+            vNormal = uNormalMatrix * normal;
+            gl_Position = uProjection * viewPos;
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision mediump float;
+
+        varying vec3 vNormal;
+        varying vec3 vViewPosition;
+
+        // Gold Material Properties
+        const vec3 baseColor = vec3(1.0, 0.84, 0.0); // Gold
+        const vec3 specColor = vec3(1.0, 1.0, 0.8);  // Pale yellow highlight
+        const float shininess = 64.0;
+
+        void main() {
+            vec3 N = normalize(vNormal);
+            vec3 V = normalize(-vViewPosition);
+            
+            // Fixed light source from top-right-front
+            vec3 lightPos = vec3(10.0, 10.0, 10.0);
+            vec3 L = normalize(lightPos);
+
+            // Ambient
+            vec3 ambient = 0.2 * baseColor;
+
+            // Diffuse
+            float diff = max(dot(N, L), 0.0);
+            vec3 diffuse = diff * baseColor;
+
+            // Specular (Blinn-Phong)
+            vec3 H = normalize(L + V);
+            float spec = pow(max(dot(N, H), 0.0), shininess);
+            vec3 specular = spec * specColor;
+
+            // Mock Reflection (Pseudo-environment)
+            // Adds a metallic sheen based on viewing angle
+            float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+            vec3 reflection = vec3(1.0, 0.9, 0.5) * fresnel * 0.5;
+
+            gl_FragColor = vec4(ambient + diffuse + specular + reflection, 1.0);
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById('glcanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert('WebGL not supported');
+        }
+
+        // --- 1. Helper: Resize handling ---
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- 2. Shader Compilation ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vsSource = document.getElementById('vs').text;
+        const fsSource = document.getElementById('fs').text;
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error(gl.getProgramInfoLog(program));
+        }
+
+        // --- 3. Geometry Generation (Torus) ---
+        // Generates vertices for a single chain link
+        function createTorus(tubeRadius, ringRadius, tubeSegments, ringSegments) {
+            let vertices = [];
+            let normals = [];
+            let indices = [];
+
+            for (let i = 0; i <= ringSegments; i++) {
+                let theta = i * Math.PI * 2 / ringSegments;
+                let cosTheta = Math.cos(theta);
+                let sinTheta = Math.sin(theta);
+
+                for (let j = 0; j <= tubeSegments; j++) {
+                    let phi = j * Math.PI * 2 / tubeSegments;
+                    let cosPhi = Math.cos(phi);
+                    let sinPhi = Math.sin(phi);
+
+                    // Position
+                    let x = (ringRadius + tubeRadius * cosPhi) * cosTheta;
+                    let y = (ringRadius + tubeRadius * cosPhi) * sinTheta;
+                    let z = tubeRadius * sinPhi;
+                    
+                    // Flattening the torus slightly to look like a chain link
+                    // We stretch along Y to make it oval
+                    y *= 1.5; 
+
+                    vertices.push(x, y, z);
+
+                    // Normal
+                    let nx = cosPhi * cosTheta;
+                    let ny = cosPhi * sinTheta;
+                    let nz = sinPhi;
+                    normals.push(nx, ny, nz);
+                }
+            }
+
+            for (let i = 0; i < ringSegments; i++) {
+                for (let j = 0; j < tubeSegments; j++) {
+                    let first = (i * (tubeSegments + 1)) + j;
+                    let second = first + tubeSegments + 1;
+                    indices.push(first, second, first + 1);
+                    indices.push(second, second + 1, first + 1);
+                }
+            }
+
+            return { vertices, normals, indices };
+        }
+
+        const torusData = createTorus(0.35, 1.0, 30, 50);
+
+        // --- 4. Buffer Setup ---
+        const posBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(torusData.vertices), gl.STATIC_DRAW);
+
+        const normBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, normBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(torusData.normals), gl.STATIC_DRAW);
+
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(torusData.indices), gl.STATIC_DRAW);
+
+        // --- 5. Attribute Locations ---
+        const posLoc = gl.getAttribLocation(program, 'position');
+        const normLoc = gl.getAttribLocation(program, 'normal');
+        
+        gl.enableVertexAttribArray(posLoc);
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+        gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+        gl.enableVertexAttribArray(normLoc);
+        gl.bindBuffer(gl.ARRAY_BUFFER, normBuffer);
+        gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
+
+        // --- 6. Uniform Locations ---
+        const uModel = gl.getUniformLocation(program, 'uModel');
+        const uView = gl.getUniformLocation(program, 'uView');
+        const uProjection = gl.getUniformLocation(program, 'uProjection');
+        const uNormalMatrix = gl.getUniformLocation(program, 'uNormalMatrix');
+
+        // --- 7. Math Library (Minimal Matrix4) ---
+        const Mat4 = {
+            perspective: (fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2);
+                const nf = 1 / (near - far);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (far + near) * nf, -1,
+                    0, 0, (2 * far * near) * nf, 0
+                ];
+            },
+            lookAt: (eye, center, up) => {
+                const z = normalize(subtract(eye, center));
+                const x = normalize(cross(up, z));
+                const y = normalize(cross(z, x));
+                return [
+                    x[0], y[0], z[0], 0,
+                    x[1], y[1], z[1], 0,
+                    x[2], y[2], z[2], 0,
+                    -dot(x, eye), -dot(y, eye), -dot(z, eye), 1
+                ];
+            },
+            identity: () => [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
+            multiply: (a, b) => {
+                let out = [];
+                for(let i=0; i<4; i++) {
+                    for(let j=0; j<4; j++) {
+                        let sum = 0;
+                        for(let k=0; k<4; k++) sum += a[i*4+k] * b[k*4+j];
+                        out[i*4+j] = sum;
+                    }
+                }
+                return out; // Note: simplified row/col logic for this demo
+            },
+            translate: (m, v) => {
+                let out = [...m];
+                out[12] = m[0]*v[0] + m[4]*v[1] + m[8]*v[2] + m[12];
+                out[13] = m[1]*v[0] + m[5]*v[1] + m[9]*v[2] + m[13];
+                out[14] = m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14];
+                return out;
+            },
+            rotateX: (m, angle) => {
+                const c = Math.cos(angle), s = Math.sin(angle);
+                const mv1 = m[1], mv5 = m[5], mv9 = m[9];
+                const mv2 = m[2], mv6 = m[6], mv10 = m[10];
+                let out = [...m];
+                out[1] = mv1*c + mv2*s;
+                out[5] = mv5*c + mv6*s;
+                out[9] = mv9*c + mv10*s;
+                out[2] = mv2*c - mv1*s;
+                out[6] = mv6*c - mv5*s;
+                out[10] = mv10*c - mv9*s;
+                return out;
+            },
+            rotateY: (m, angle) => {
+                const c = Math.cos(angle), s = Math.sin(angle);
+                const mv0 = m[0], mv4 = m[4], mv8 = m[8];
+                const mv2 = m[2], mv6 = m[6], mv10 = m[10];
+                let out = [...m];
+                out[0] = mv0*c - mv2*s;
+                out[4] = mv4*c - mv6*s;
+                out[8] = mv8*c - mv10*s;
+                out[2] = mv0*s + mv2*c;
+                out[6] = mv4*s + mv6*c;
+                out[10] = mv8*s + mv10*c;
+                return out;
+            },
+            normalMatrix: (m) => {
+                // For orthogonal matrices (rot/trans), inverse transpose is just the upper 3x3
+                return [
+                    m[0], m[1], m[2],
+                    m[4], m[5], m[6],
+                    m[8], m[9], m[10]
+                ];
+            }
+        };
+
+        function subtract(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+        function normalize(v) { 
+            const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+            return len > 0 ? [v[0]/len, v[1]/len, v[2]/len] : [0,0,0];
+        }
+        function cross(a, b) {
+            return [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]];
+        }
+        function dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+
+
+        // --- 8. Render Loop ---
+        gl.useProgram(program);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clearColor(0.1, 0.1, 0.1, 1.0);
+
+        let time = 0;
+        const CHAIN_LENGTH = 12;
+
+        function render() {
+            time += 0.01;
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Camera Setup
+            const aspect = canvas.width / canvas.height;
+            const projection = Mat4.perspective(Math.PI / 4, aspect, 0.1, 100);
+            
+            // Orbiting Camera
+            const camX = Math.sin(time * 0.5) * 15;
+            const camZ = Math.cos(time * 0.5) * 15;
+            const view = Mat4.lookAt([camX, 5, camZ], [0, 0, 0], [0, 1, 0]);
+
+            gl.uniformMatrix4fv(uProjection, false, new Float32Array(projection));
+            gl.uniformMatrix4fv(uView, false, new Float32Array(view));
+
+            // Render Chain Links
+            for (let i = 0; i < CHAIN_LENGTH; i++) {
+                let model = Mat4.identity();
+                
+                // 1. Center the chain vertically
+                const totalHeight = CHAIN_LENGTH * 1.8;
+                const startY = -totalHeight / 2 + 1.0;
+                
+                // 2. Position this link
+                // Link spacing is roughly 1.8 units (2.0 radius - thickness overlap)
+                model = Mat4.translate(model, [0, startY + i * 1.8, 0]);
+
+                // 3. Rotate every other link 90 degrees
+                if (i % 2 !== 0) {
+                    model = Mat4.rotateY(model, Math.PI / 2);
+                }
+
+                // 4. Add a gentle swaying motion to the whole chain
+                const sway = Math.sin(time + i * 0.5) * 0.2;
+                model = Mat4.rotateX(model, sway);
+                
+                // Send Matrices to Shader
+                gl.uniformMatrix4fv(uModel, false, new Float32Array(model));
+                
+                const normalMat = Mat4.normalMatrix(model);
+                gl.uniformMatrix3fv(uNormalMatrix, false, new Float32Array(normalMat));
+
+                // Draw
+                gl.drawElements(gl.TRIANGLES, torusData.indices.length, gl.UNSIGNED_SHORT, 0);
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        render();
+    </script>
+</body>
+</html>
