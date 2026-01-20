@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Package Scanner</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: monospace; user-select: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+        #crosshair {
+            width: 10px; height: 10px; border: 2px solid white; border-radius: 50%;
+            background: rgba(255,255,255,0.3);
+        }
+        #hud {
+            position: absolute; top: 20px; left: 20px; color: #0f0; font-size: 20px;
+            text-shadow: 1px 1px 0 #000;
+        }
+        #msg {
+            position: absolute; bottom: 100px; color: yellow; font-size: 24px; font-weight: bold;
+            opacity: 0; transition: opacity 0.5s; text-shadow: 1px 1px 0 #000;
+        }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center;
+            color: white; pointer-events: auto; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="glcanvas"></canvas>
+
+<div id="ui">
+    <div id="crosshair"></div>
+</div>
+
+<div id="hud">
+    STATUS: IDLE<br>
+    SCORE: 0<br>
+    HELD: NONE
+</div>
+
+<div id="msg"></div>
+
+<div id="overlay" id="startScreen">
+    <div style="text-align:center">
+        <h1>PACKAGE SORTER 3000</h1>
+        <p>Sort packages into matching zones.</p>
+        <p><strong>WASD</strong> to Move | <strong>Mouse</strong> to Look</p>
+        <p><strong>Click</strong> to Scan/Pick Up and Place</p>
+        <br>
+        <h2>CLICK TO START</h2>
+    </div>
+</div>
+
+<script>
+/* =========================================
+   MATH & UTILS (No Libraries)
+   ========================================= */
+const m4 = {
+    perspective: (fov, aspect, near, far) => {
+        const f = 1 / Math.tan(fov / 2);
+        return [
+            f / aspect, 0, 0, 0,
+            0, f, 0, 0,
+            0, 0, (near + far) * (1 / (near - far)), -1,
+            0, 0, near * far * (1 / (near - far)) * 2, 0
+        ];
+    },
+    multiply: (a, b) => {
+        let r = [];
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                let s = 0;
+                for (let k = 0; k < 4; k++) s += a[i * 4 + k] * b[k * 4 + j];
+                r[i * 4 + j] = s;
+            }
+        }
+        return r;
+    },
+    translation: (tx, ty, tz) => [1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,tz,1],
+    yRotation: (rad) => [Math.cos(rad),0,-Math.sin(rad),0, 0,1,0,0, Math.sin(rad),0,Math.cos(rad),0, 0,0,0,1],
+    xRotation: (rad) => [1,0,0,0, 0,Math.cos(rad),Math.sin(rad),0, 0,-Math.sin(rad),Math.cos(rad),0, 0,0,0,1],
+    inverse: (m) => {
+        // Simplified inverse for orthogonal/rigid matrices mostly used in camera
+        // A full 4x4 inverse is huge, so we usually cheat or implement the full generic one.
+        // For brevity in a single file without libs, we'll implement a robust generic inverse.
+        let m00 = m[0 * 4 + 0], m01 = m[0 * 4 + 1], m02 = m[0 * 4 + 2], m03 = m[0 * 4 + 3];
+        let m10 = m[1 * 4 + 0], m11 = m[1 * 4 + 1], m12 = m[1 * 4 + 2], m13 = m[1 * 4 + 3];
+        let m20 = m[2 * 4 + 0], m21 = m[2 * 4 + 1], m22 = m[2 * 4 + 2], m23 = m[2 * 4 + 3];
+        let m30 = m[3 * 4 + 0], m31 = m[3 * 4 + 1], m32 = m[3 * 4 + 2], m33 = m[3 * 4 + 3];
+        let tmp_0  = m22 * m33, tmp_1  = m32 * m23, tmp_2  = m12 * m33, tmp_3  = m32 * m13;
+        let tmp_4  = m12 * m23, tmp_5  = m22 * m13, tmp_6  = m02 * m33, tmp_7  = m32 * m03;
+        let tmp_8  = m02 * m23, tmp_9  = m22 * m03, tmp_10 = m02 * m13, tmp_11 = m12 * m03;
+        let t0 = (tmp_0 * m11 + tmp_3 * m21 + tmp_4 * m31) - (tmp_1 * m11 + tmp_2 * m21 + tmp_5 * m31);
+        let t1 = (tmp_1 * m01 + tmp_6 * m21 + tmp_9 * m31) - (tmp_0 * m01 + tmp_7 * m21 + tmp_8 * m31);
+        let t2 = (tmp_2 * m01 + tmp_7 * m11 + tmp_10 * m31) - (tmp_3 * m01 + tmp_6 * m11 + tmp_11 * m31);
+        let t3 = (tmp_5 * m01 + tmp_8 * m11 + tmp_11 * m21) - (tmp_4 * m01 + tmp_9 * m11 + tmp_10 * m21);
+        let d = 1.0 / (m00 * t0 + m10 * t1 + m20 * t2 + m30 * t3);
+        return [
+            d * t0, d * t1, d * t2, d * t3,
+            d * ((tmp_1 * m10 + tmp_2 * m20 + tmp_5 * m30) - (tmp_0 * m10 + tmp_3 * m20 + tmp_4 * m30)),
+            d * ((tmp_0 * m00 + tmp_7 * m20 + tmp_8 * m30) - (tmp_1 * m00 + tmp_6 * m20 + tmp_9 * m30)),
+            d * ((tmp_3 * m00 + tmp_6 * m10 + tmp_11 * m30) - (tmp_2 * m00 + tmp_7 * m10 + tmp_10 * m30)),
+            d * ((tmp_4 * m00 + tmp_9 * m10 + tmp_10 * m20) - (tmp_5 * m00 + tmp_8 * m10 + tmp_11 * m20)),
+            d * ((tmp_12 = m22 * m33 - m32 * m23) * m13 + (tmp_13 = m32 * m13 - m12 * m33) * m23 + (tmp_14 = m12 * m23 - m22 * m13) * m33),
+            d * ((tmp_15 = m32 * m03 - m02 * m33) * m23 + (tmp_16 = m02 * m23 - m22 * m03) * m33 - tmp_12 * m03),
+            d * ((tmp_17 = m02 * m13 - m12 * m03) * m33 - tmp_15 * m13 - tmp_13 * m03),
+            d * (tmp_12 * m01 + tmp_15 * m11 + tmp_13 * m21), // Simplified last row elements mostly 0/1 for us
+            d * ((m21 * m32 - m31 * m22) * m13 + (m31 * m12 - m11 * m32) * m23 + (m11 * m22 - m21 * m12) * m33),
+            d * ((m31 * m02 - m01 * m32) * m23 + (m01 * m22 - m21 * m02) * m33 + (m21 * m32 - m31 * m22) * m03),
+            d * ((m01 * m12 - m11 * m02) * m33 + (m11 * m32 - m31 * m12) * m03 + (m31 * m02 - m01 * m32) * m13),
+            d * ((m11 * m22 - m21 * m12) * m03 + (m21 * m02 - m01 * m22) * m13 + (m01 * m12 - m11 * m02) * m23)
+        ];
+    }
+};
+
+/* =========================================
+   WEBGL SETUP
+   ========================================= */
+const canvas = document.querySelector("#glcanvas");
+const gl = canvas.getContext("webgl");
+
+if (!gl) alert("WebGL not supported");
+
+const vsSource = `
+    attribute vec4 a_position;
+    attribute vec3 a_normal;
+    uniform mat4 u_matrix;
+    uniform mat4 u_world;
+    varying vec3 v_normal;
+    void main() {
+        gl_Position = u_matrix * a_position;
+        // Basic normal transform
+        v_normal = mat3(u_world) * a_normal; 
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 v_normal;
+    uniform vec4 u_color;
+    uniform float u_highlight;
+    void main() {
+        vec3 normal = normalize(v_normal);
+        // Simple directional light
+        vec3 lightDir = normalize(vec3(0.5, 0.7, 1.0));
+        float light = max(dot(normal, lightDir), 0.2);
+        
+        vec3 finalColor = u_color.rgb * light;
+        if(u_highlight > 0.5) {
+            finalColor = finalColor + vec3(0.3, 0.3, 0.3);
+        }
+        gl_FragColor = vec4(finalColor, u_color.a);
+    }
+`;
+
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+        gl.deleteShader(s);
+        return null;
+    }
+    return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(prog, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+// Attributes & Uniforms
+const aPos = gl.getAttribLocation(prog, "a_position");
+const aNorm = gl.getAttribLocation(prog, "a_normal");
+const uMat = gl.getUniformLocation(prog, "u_matrix");
+const uWorld = gl.getUniformLocation(prog, "u_world");
+const uCol = gl.getUniformLocation(prog, "u_color");
+const uHigh = gl.getUniformLocation(prog, "u_highlight");
+
+// Cube Data
+const cubeVerts = new Float32Array([
+    // Front
+    -0.5, -0.5,  0.5,  0.5, -0.5,  0.5,  0.5,  0.5,  0.5, -0.5,  0.5,  0.5,
+    // Back
+    -0.5, -0.5, -0.5, -0.5,  0.5, -0.5,  0.5,  0.5, -0.5,  0.5, -0.5, -0.5,
+    // Top
+    -0.5,  0.5, -0.5, -0.5,  0.5,  0.5,  0.5,  0.5,  0.5,  0.5,  0.5, -0.5,
+    // Bottom
+    -0.5, -0.5, -0.5,  0.5, -0.5, -0.5,  0.5, -0.5,  0.5, -0.5, -0.5,  0.5,
+    // Right
+     0.5, -0.5, -0.5,  0.5,  0.5, -0.5,  0.5,  0.5,  0.5,  0.5, -0.5,  0.5,
+    // Left
+    -0.5, -0.5, -0.5, -0.5, -0.5,  0.5, -0.5,  0.5,  0.5, -0.5,  0.5, -0.5,
+]);
+const cubeInds = new Uint16Array([
+    0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11, 12,13,14, 12,14,15, 16,17,18, 16,18,19, 20,21,22, 20,22,23
+]);
+// Simple normal approximation (per face)
+const cubeNorms = new Float32Array([
+   0,0,1,0,0,1,0,0,1,0,0,1, 0,0,-1,0,0,-1,0,0,-1,0,0,-1, 0,1,0,0,1,0,0,1,0,0,1,0, 0,-1,0,0,-1,0,0,-1,0,0,-1,0, 1,0,0,1,0,0,1,0,0,1,0,0, -1,0,0,-1,0,0,-1,0,0,-1,0,0
+]);
+
+const bufPos = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+gl.bufferData(gl.ARRAY_BUFFER, cubeVerts, gl.STATIC_DRAW);
+
+const bufNorm = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, bufNorm);
+gl.bufferData(gl.ARRAY_BUFFER, cubeNorms, gl.STATIC_DRAW);
+
+const bufInd = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufInd);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cubeInds, gl.STATIC_DRAW);
+
+/* =========================================
+   GAME STATE
+   ========================================= */
+const state = {
+    cam: { x: 0, y: 1.5, z: 5, yaw: 0, pitch: 0 },
+    keys: {},
+    packages: [],
+    zones: [],
+    heldPackage: null,
+    score: 0,
+    scanDist: 3.5,
+    lastTime: 0
+};
+
+// Define Types
+const COLORS = {
+    RED:   [1.0, 0.2, 0.2, 1.0],
+    BLUE:  [0.2, 0.2, 1.0, 1.0],
+    GREEN: [0.2, 1.0, 0.2, 1.0]
+};
+const TYPE_NAMES = ['RED', 'BLUE', 'GREEN'];
+
+function initGame() {
+    // Floor "Zones"
+    state.zones.push({ x: -4, y: 0.1, z: -4, color: COLORS.RED, type: 0, scale: 2 });
+    state.zones.push({ x:  0, y: 0.1, z: -4, color: COLORS.GREEN, type: 2, scale: 2 });
+    state.zones.push({ x:  4, y: 0.1, z: -4, color: COLORS.BLUE, type: 1, scale: 2 });
+
+    // Random Packages
+    for(let i=0; i<6; i++) {
+        spawnPackage();
+    }
+}
+
+function spawnPackage() {
+    const type = Math.floor(Math.random()*3);
+    const cols = Object.values(COLORS);
+    state.packages.push({
+        x: (Math.random()*10 - 5),
+        y: 0.5,
+        z: (Math.random()*4 + 2), // Spawn closer to start
+        color: cols[type],
+        type: type,
+        active: true,
+        id: Math.random()
+    });
+}
+
+function showMsg(txt) {
+    const el = document.getElementById('msg');
+    el.innerText = txt;
+    el.style.opacity = 1;
+    setTimeout(() => el.style.opacity = 0, 1500);
+}
+
+/* =========================================
+   INPUT
+   ========================================= */
+document.addEventListener('keydown', e => state.keys[e.code] = true);
+document.addEventListener('keyup', e => state.keys[e.code] = false);
+
+document.getElementById('overlay').addEventListener('click', () => {
+    canvas.requestPointerLock();
+    document.getElementById('overlay').style.display = 'none';
+});
+
+document.addEventListener('mousemove', e => {
+    if (document.pointerLockElement === canvas) {
+        state.cam.yaw -= e.movementX * 0.002;
+        state.cam.pitch -= e.movementY * 0.002;
+        // Clamp pitch
+        state.cam.pitch = Math.max(-Math.PI/2 + 0.1, Math.min(Math.PI/2 - 0.1, state.cam.pitch));
+    }
+});
+
+document.addEventListener('mousedown', () => {
+    if (document.pointerLockElement !== canvas) return;
+    
+    // Check Action
+    if (state.heldPackage) {
+        // DROP / PLACE
+        // Check if looking at a zone
+        const zone = getLookedAtZone();
+        
+        state.heldPackage.active = true; // Drop it
+        state.heldPackage.x = state.cam.x + Math.sin(state.cam.yaw) * 1.5;
+        state.heldPackage.z = state.cam.z - Math.cos(state.cam.yaw) * 1.5;
+        state.heldPackage.y = 0.5;
+
+        if (zone) {
+            // Is it the right zone?
+            if (zone.type === state.heldPackage.type) {
+                // Correct!
+                state.score += 100;
+                showMsg("SCANNED & SORTED! +100");
+                // Remove package (sorted)
+                state.packages = state.packages.filter(p => p !== state.heldPackage);
+                spawnPackage(); // Add new work
+            } else {
+                showMsg("WRONG BIN! TRY AGAIN");
+            }
+        } else {
+             showMsg("DROPPED");
+        }
+        state.heldPackage = null;
+    } else {
+        // PICK UP
+        const target = getLookedAtPackage();
+        if (target) {
+            state.heldPackage = target;
+            target.active = false; // Hide from world render, draw manually attached to cam
+            showMsg("PACKAGE ACQUIRED");
+        }
+    }
+    updateHud();
+});
+
+function updateHud() {
+    let txt = "HELD: " + (state.heldPackage ? TYPE_NAMES[state.heldPackage.type] : "NONE");
+    document.getElementById('hud').innerHTML = `STATUS: ACTIVE<br>SCORE: ${state.score}<br>${txt}`;
+}
+
+/* =========================================
+   LOGIC & PHYSICS
+   ========================================= */
+function getForwardVector() {
+    return {
+        x: Math.sin(state.cam.yaw) * Math.cos(state.cam.pitch),
+        y: Math.sin(state.cam.pitch),
+        z: -Math.cos(state.cam.yaw) * Math.cos(state.cam.pitch)
+    };
+}
+
+// Simple Raycast Logic: Check distance and angle to object center
+function isLookingAt(objX, objY, objZ, size) {
+    const dx = objX - state.cam.x;
+    const dy = objY - state.cam.y;
+    const dz = objZ - state.cam.z;
+    const distSq = dx*dx + dy*dy + dz*dz;
+    
+    if (distSq > state.scanDist * state.scanDist) return false;
+
+    // Normalize direction to object
+    const dist = Math.sqrt(distSq);
+    const nx = dx/dist, ny = dy/dist, nz = dz/dist;
+
+    // Camera forward vector
+    const fwd = getForwardVector();
+    
+    // Dot product
+    const dot = nx*fwd.x + ny*fwd.y + nz*fwd.z;
+    
+    // Threshold (narrow cone)
+    return dot > 0.95; 
+}
+
+function getLookedAtPackage() {
+    return state.packages.find(p => p.active && isLookingAt(p.x, p.y, p.z, 1));
+}
+
+function getLookedAtZone() {
+    // Zones are floor planes, checks slightly differently (dist to center)
+    return state.zones.find(z => {
+        const dx = z.x - state.cam.x;
+        const dz = z.z - state.cam.z;
+        return (Math.sqrt(dx*dx + dz*dz) < z.scale); // Inside radius
+    });
+}
+
+function update(dt) {
+    const speed = 5 * dt;
+    let dx = 0, dz = 0;
+    
+    if (state.keys['KeyW']) { dx += Math.sin(state.cam.yaw); dz -= Math.cos(state.cam.yaw); }
+    if (state.keys['KeyS']) { dx -= Math.sin(state.cam.yaw); dz += Math.cos(state.cam.yaw); }
+    if (state.keys['KeyA']) { dx -= Math.cos(state.cam.yaw); dz -= Math.sin(state.cam.yaw); }
+    if (state.keys['KeyD']) { dx += Math.cos(state.cam.yaw); dz += Math.sin(state.cam.yaw); }
+
+    state.cam.x += dx * speed;
+    state.cam.z += dz * speed;
+}
+
+/* =========================================
+   RENDER
+   ========================================= */
+function drawCube(matrix, color, highlight) {
+    gl.uniformMatrix4fv(uMat, false, matrix);
+    // World matrix is roughly the model matrix here for normals, simplified
+    gl.uniformMatrix4fv(uWorld, false, matrix); 
+    gl.uniform4fv(uCol, color);
+    gl.uniform1f(uHigh, highlight ? 1.0 : 0.0);
+    gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+}
+
+function render(time) {
+    const now = time * 0.001;
+    const dt = now - state.lastTime;
+    state.lastTime = now;
+
+    update(dt);
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Camera Matrix
+    const aspect = canvas.width / canvas.height;
+    const projection = m4.perspective(Math.PI / 3, aspect, 0.1, 100);
+    
+    const viewInv = m4.multiply(m4.translation(state.cam.x, state.cam.y, state.cam.z), m4.yRotation(state.cam.yaw));
+    const viewInvFinal = m4.multiply(viewInv, m4.xRotation(state.cam.pitch));
+    const view = m4.inverse(viewInvFinal);
+    
+    const viewProj = m4.multiply(projection, view);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(aPos);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufNorm);
+    gl.vertexAttribPointer(aNorm, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(aNorm);
+    
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufInd);
+
+    // 1. Draw Floor
+    let floorM = m4.translation(0, -0.5, 0);
+    floorM = m4.multiply(floorM, [20,0,0,0, 0,1,0,0, 0,0,20,0, 0,0,0,1]); // Scale
+    drawCube(m4.multiply(viewProj, floorM), [0.3, 0.3, 0.3, 1.0], false);
+
+    // 2. Draw Zones (Flat Cubes)
+    state.zones.forEach(z => {
+        let m = m4.translation(z.x, z.y - 0.5, z.z); // Slightly above floor
+        // Scale x/z
+        m = m4.multiply(m, [z.scale,0,0,0, 0,0.1,0,0, 0,0,z.scale,0, 0,0,0,1]);
+        drawCube(m4.multiply(viewProj, m), z.color, false);
+    });
+
+    // 3. Draw Packages
+    const hoveredParams = getLookedAtPackage();
+    
+    state.packages.forEach(p => {
+        if (!p.active) return;
+        let m = m4.translation(p.x, p.y, p.z);
+        // Bob animation
+        m = m4.multiply(m, m4.translation(0, Math.sin(now * 2 + p.id) * 0.1, 0));
+        
+        let highlight = (p === hoveredParams && !state.heldPackage);
+        drawCube(m4.multiply(viewProj, m), p.color, highlight);
+    });
+
+    // 4. Draw Held Package (Attached to Camera)
+    if (state.heldPackage) {
+        // Manual matrix construction for "View Model" (UI element essentially)
+        // Position it in front of camera, ignore camera rotation for rendering relative to eye?
+        // Actually, easiest way in world space:
+        // Position = CamPos + Forward * 2
+        // Rotation = CamRotation
+        
+        // However, to make it look "held", we just render it with Identity View matrix but adjusted Projection?
+        // Let's just calculate world position based on camera logic for simplicity
+        
+        const fwd = getForwardVector();
+        const hx = state.cam.x + fwd.x * 1.5;
+        const hy = state.cam.y + fwd.y * 1.5 - 0.3; // slightly down
+        const hz = state.cam.z + fwd.z * 1.5;
+        
+        let m = m4.translation(hx, hy, hz);
+        m = m4.multiply(m, m4.yRotation(state.cam.yaw));
+        m = m4.multiply(m, m4.xRotation(state.cam.pitch));
+        m = m4.multiply(m, [0.5,0,0,0, 0,0.5,0,0, 0,0,0.5,0, 0,0,0,1]); // Scale down
+        
+        drawCube(m4.multiply(viewProj, m), state.heldPackage.color, false);
+    }
+
+    requestAnimationFrame(render);
+}
+
+// Start
+initGame();
+requestAnimationFrame(render);
+
+</script>
+</body>
+</html>
