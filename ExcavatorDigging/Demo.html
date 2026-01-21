@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Excavator Digging</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            font-family: Arial, sans-serif;
+            color: #333;
+            pointer-events: none;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">WebGL Excavator Simulation<br>Using Three.js</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky blue
+        scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(5, 5, 8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true; // Enable shadows
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. LIGHTING & GROUND ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(50, 50);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 }); // Dirt color
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        
+        // Dirt Pile (Visual target)
+        const pileGeo = new THREE.ConeGeometry(3, 1.5, 32);
+        const pileMat = new THREE.MeshStandardMaterial({ color: 0x4a3227 });
+        const pile = new THREE.Mesh(pileGeo, pileMat);
+        pile.position.set(4, 0.75, 0);
+        scene.add(pile);
+
+        // --- 3. EXCAVATOR CONSTRUCTION (Hierarchy) ---
+        
+        // Materials
+        const yellowMat = new THREE.MeshPhongMaterial({ color: 0xFFA500 });
+        const greyMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+
+        // A. The Base (Tracks)
+        const rigGroup = new THREE.Group();
+        scene.add(rigGroup);
+
+        const tracksGeo = new THREE.BoxGeometry(2, 0.6, 2.5);
+        const tracks = new THREE.Mesh(tracksGeo, greyMat);
+        tracks.position.y = 0.3;
+        tracks.castShadow = true;
+        tracks.receiveShadow = true;
+        rigGroup.add(tracks);
+
+        // B. The Cab (Rotates Y axis)
+        const cabGroup = new THREE.Group();
+        cabGroup.position.y = 0.6; // Sit on top of tracks
+        rigGroup.add(cabGroup);
+
+        const cabBodyGeo = new THREE.BoxGeometry(1.8, 1.2, 1.8);
+        const cabBody = new THREE.Mesh(cabBodyGeo, yellowMat);
+        cabBody.position.y = 0.6; // Center the box relative to pivot
+        cabBody.castShadow = true;
+        cabGroup.add(cabBody);
+
+        // Cab Cockpit (Visual detail)
+        const cockpitGeo = new THREE.BoxGeometry(0.8, 0.8, 1);
+        const cockpit = new THREE.Mesh(cockpitGeo, new THREE.MeshPhongMaterial({color: 0x222222}));
+        cockpit.position.set(0, 1, 0.2);
+        cabGroup.add(cockpit);
+
+        // C. The Boom (First Arm - Rotates Z axis)
+        // Crucial: Create a pivot point for rotation
+        const boomPivot = new THREE.Group();
+        boomPivot.position.set(0.5, 0.8, 0); // Position where boom connects to cab
+        cabGroup.add(boomPivot);
+
+        const boomGeo = new THREE.BoxGeometry(3, 0.4, 0.4);
+        const boom = new THREE.Mesh(boomGeo, yellowMat);
+        // Offset the mesh so it rotates around one end, not its center
+        boom.position.set(1.5, 0, 0); 
+        boom.castShadow = true;
+        boomPivot.add(boom);
+
+        // D. The Stick/Arm (Second Arm - Rotates Z axis)
+        const armPivot = new THREE.Group();
+        armPivot.position.set(2.8, 0, 0); // Position at tip of boom
+        boomPivot.add(armPivot);
+
+        const armGeo = new THREE.BoxGeometry(2, 0.3, 0.3);
+        const arm = new THREE.Mesh(armGeo, yellowMat);
+        arm.position.set(1, 0, 0); // Offset geometry
+        arm.castShadow = true;
+        armPivot.add(arm);
+
+        // E. The Bucket (Rotates Z axis)
+        const bucketPivot = new THREE.Group();
+        bucketPivot.position.set(1.9, 0, 0); // Tip of arm
+        armPivot.add(bucketPivot);
+
+        // Simple bucket shape using Box + Scale adjustments
+        const bucketGeo = new THREE.BoxGeometry(0.6, 0.6, 0.8);
+        const bucket = new THREE.Mesh(bucketGeo, greyMat);
+        bucket.position.set(0.3, -0.2, 0);
+        bucket.castShadow = true;
+        bucketPivot.add(bucket);
+
+
+        // --- 4. CONTROLS & ANIMATION ---
+        
+        // Add orbit controls to look around
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const t = clock.getElapsedTime();
+
+            // Digging Cycle Logic
+            // We use Sine waves with offsets to simulate the mechanical phases
+            
+            // 1. Swing the body (Left to Right)
+            // Slower cycle (div by 2)
+            cabGroup.rotation.y = Math.sin(t * 0.5) * 0.8;
+
+            // 2. Boom Up/Down
+            // Goes down to dig, up to move
+            boomPivot.rotation.z = (Math.sin(t) * 0.5) + 0.5;
+
+            // 3. Arm Curl
+            // Curls in when boom is down
+            armPivot.rotation.z = (Math.sin(t - 1.5) * 0.8) - 1.0;
+
+            // 4. Bucket Curl (Scoop)
+            // Curls tightly at the bottom of the movement
+            bucketPivot.rotation.z = (Math.sin(t - 2.0) * 0.8) - 0.5;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
