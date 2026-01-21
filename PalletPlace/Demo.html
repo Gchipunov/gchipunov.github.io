@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Pallet Positioning Game</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+            user-select: none;
+        }
+        h1 { margin: 0 0 10px 0; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 1px; }
+        p { margin: 5px 0; font-size: 0.9rem; }
+        .key { display: inline-block; background: #444; padding: 2px 6px; border-radius: 4px; font-weight: bold; color: #ffeb3b; }
+        #status { margin-top: 10px; font-weight: bold; color: #00ff00; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>Pallet Commander</h1>
+    <p><span class="key">WASD</span> or <span class="key">Arrows</span> to Drive</p>
+    <p><span class="key">SPACE</span> to Lift / Drop Pallet</p>
+    <p>Goal: Move Blue Pallet to Green Zone</p>
+    <div id="status">Status: Ready</div>
+</div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Global Variables ---
+    let scene, camera, renderer;
+    let jack, forks, pallet, dropZone;
+    let isLifting = false;
+    let hasPallet = false;
+    
+    // Physics / Movement state
+    const playerState = {
+        speed: 0,
+        turnSpeed: 0,
+        maxSpeed: 0.15,
+        acceleration: 0.01,
+        friction: 0.92
+    };
+
+    const keys = { w: false, a: false, s: false, d: false, space: false };
+
+    init();
+    animate();
+
+    function init() {
+        // 1. Setup Scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        scene.fog = new THREE.Fog(0x222222, 10, 50);
+
+        // 2. Setup Camera (Isometric-ish view)
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 15, 15);
+        camera.lookAt(0, 0, 0);
+
+        // 3. Setup Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // 4. Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        scene.add(dirLight);
+
+        // 5. Create Objects
+        createEnvironment();
+        createPalletJack();
+        createPallet();
+        createDropZone();
+
+        // 6. Event Listeners
+        window.addEventListener('resize', onWindowResize);
+        window.addEventListener('keydown', (e) => handleKey(e, true));
+        window.addEventListener('keyup', (e) => handleKey(e, false));
+    }
+
+    // --- Object Creation Helpers ---
+
+    function createEnvironment() {
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Grid helper for better depth perception
+        const grid = new THREE.GridHelper(100, 50, 0x000000, 0x555555);
+        scene.add(grid);
+    }
+
+    function createPalletJack() {
+        jack = new THREE.Group();
+
+        // Main Body (Battery/Motor housing)
+        const bodyGeo = new THREE.BoxGeometry(1, 1.2, 0.8);
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffcc00 }); // Industrial Yellow
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 0.6;
+        body.position.z = 0.5;
+        body.castShadow = true;
+        jack.add(body);
+
+        // Handle
+        const handleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.5);
+        const handleMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+        const handle = new THREE.Mesh(handleGeo, handleMat);
+        handle.position.set(0, 1.5, 0.8);
+        handle.rotation.x = -0.5;
+        jack.add(handle);
+
+        // Forks Group (This moves up/down)
+        forks = new THREE.Group();
+        
+        // Left Fork
+        const forkGeo = new THREE.BoxGeometry(0.2, 0.1, 1.5);
+        const forkMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+        const forkL = new THREE.Mesh(forkGeo, forkMat);
+        forkL.position.set(-0.3, 0.1, -0.8);
+        forkL.castShadow = true;
+        forks.add(forkL);
+
+        // Right Fork
+        const forkR = new THREE.Mesh(forkGeo, forkMat);
+        forkR.position.set(0.3, 0.1, -0.8);
+        forkR.castShadow = true;
+        forks.add(forkR);
+
+        jack.add(forks);
+        scene.add(jack);
+    }
+
+    function createPallet() {
+        pallet = new THREE.Group();
+
+        const woodMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+        
+        // Top slats
+        const slatGeo = new THREE.BoxGeometry(1.2, 0.05, 1.2);
+        const top = new THREE.Mesh(slatGeo, woodMat);
+        top.position.y = 0.25;
+        top.castShadow = true;
+        pallet.add(top);
+
+        // Bottom runners (Left, Center, Right)
+        const runnerGeo = new THREE.BoxGeometry(0.15, 0.25, 1.2);
+        
+        const runnerL = new THREE.Mesh(runnerGeo, woodMat);
+        runnerL.position.set(-0.5, 0.125, 0);
+        runnerL.castShadow = true;
+        pallet.add(runnerL);
+
+        const runnerC = new THREE.Mesh(runnerGeo, woodMat);
+        runnerC.position.set(0, 0.125, 0);
+        runnerC.castShadow = true;
+        pallet.add(runnerC);
+
+        const runnerR = new THREE.Mesh(runnerGeo, woodMat);
+        runnerR.position.set(0.5, 0.125, 0);
+        runnerR.castShadow = true;
+        pallet.add(runnerR);
+
+        // Set initial position
+        pallet.position.set(2, 0, -4);
+        scene.add(pallet);
+    }
+
+    function createDropZone() {
+        const geometry = new THREE.PlaneGeometry(2.5, 2.5);
+        const material = new THREE.MeshBasicMaterial({ 
+            color: 0x00ff00, 
+            transparent: true, 
+            opacity: 0.3, 
+            side: THREE.DoubleSide 
+        });
+        dropZone = new THREE.Mesh(geometry, material);
+        dropZone.rotation.x = -Math.PI / 2;
+        dropZone.position.set(-5, 0.01, -5); // Target location
+        scene.add(dropZone);
+
+        // Outline
+        const edges = new THREE.EdgesGeometry(geometry);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ff00 }));
+        dropZone.add(line);
+    }
+
+    // --- Input Handling ---
+
+    function handleKey(e, pressed) {
+        const key = e.key.toLowerCase();
+        if (key === 'w' || key === 'arrowup') keys.w = pressed;
+        if (key === 's' || key === 'arrowdown') keys.s = pressed;
+        if (key === 'a' || key === 'arrowleft') keys.a = pressed;
+        if (key === 'd' || key === 'arrowright') keys.d = pressed;
+        
+        if (key === ' ' && pressed && !keys.space) {
+            // Space toggle (only trigger once per press)
+            toggleLift();
+            keys.space = true;
+        } else if (key === ' ' && !pressed) {
+            keys.space = false;
+        }
+    }
+
+    // --- Game Logic ---
+
+    function toggleLift() {
+        if (hasPallet) {
+            // Drop Logic
+            isLifting = false;
+            hasPallet = false;
+            
+            // Detach pallet from jack and re-attach to scene (preserving world transform)
+            scene.attach(pallet);
+            document.getElementById('status').innerText = "Status: Dropped";
+            checkWin();
+        } else {
+            // Lift Logic
+            // Calculate distance and alignment
+            const dist = jack.position.distanceTo(pallet.position);
+            
+            // Vector pointing out the back of the pallet jack forks
+            const jackDir = new THREE.Vector3(0, 0, -1);
+            jackDir.applyQuaternion(jack.quaternion);
+            
+            // Vector from Jack to Pallet
+            const toPallet = new THREE.Vector3().subVectors(pallet.position, jack.position).normalize();
+            
+            // Dot product to ensure we are facing the pallet
+            const alignment = jackDir.dot(toPallet);
+
+            if (dist < 1.5 && alignment > 0.8) {
+                isLifting = true;
+                hasPallet = true;
+                // Attach pallet to the forks group so it moves with the jack
+                forks.attach(pallet);
+                document.getElementById('status').innerText = "Status: Lifting...";
+            } else {
+                document.getElementById('status').innerText = "Status: Too far or not aligned!";
+            }
+        }
+    }
+
+    function updatePhysics() {
+        // Acceleration / Friction
+        if (keys.w) playerState.speed += playerState.acceleration;
+        if (keys.s) playerState.speed -= playerState.acceleration;
+
+        // Apply friction if no key pressed
+        if (!keys.w && !keys.s) {
+            playerState.speed *= playerState.friction;
+        }
+
+        // Cap speed
+        playerState.speed = Math.max(Math.min(playerState.speed, playerState.maxSpeed), -playerState.maxSpeed);
+
+        // Rotation
+        if (Math.abs(playerState.speed) > 0.001) {
+            const turnAmt = 0.05 * (playerState.speed > 0 ? 1 : -1); // Reverse steering logic
+            if (keys.a) jack.rotation.y += turnAmt;
+            if (keys.d) jack.rotation.y -= turnAmt;
+        }
+
+        // Apply Velocity
+        jack.translateZ(-playerState.speed);
+
+        // Fork Animation (Lifting/Lowering)
+        const liftHeight = 0.3;
+        const liftSpeed = 0.02;
+
+        if (isLifting && forks.position.y < liftHeight) {
+            forks.position.y += liftSpeed;
+        } else if (!isLifting && forks.position.y > 0) {
+            forks.position.y -= liftSpeed;
+        }
+    }
+
+    function checkWin() {
+        // Simple AABB check (is pallet inside drop zone?)
+        const dist = pallet.position.distanceTo(dropZone.position);
+        if (dist < 1.0) {
+            document.getElementById('status').innerText = "Status: SUCCESS! Pallet Delivered.";
+            document.getElementById('status').style.color = "#00ffff";
+        }
+    }
+
+    function updateCamera() {
+        // Camera Smooth Follow
+        const relativeOffset = new THREE.Vector3(0, 10, 10);
+        const cameraOffset = relativeOffset.applyMatrix4(jack.matrixWorld);
+        
+        // Simple linear interpolation for smoothness
+        camera.position.lerp(cameraOffset, 0.05);
+        camera.lookAt(jack.position);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // --- Main Loop ---
+
+    function animate() {
+        requestAnimationFrame(animate);
+        updatePhysics();
+        updateCamera();
+        renderer.render(scene, camera);
+    }
+
+</script>
+</body>
+</html>
