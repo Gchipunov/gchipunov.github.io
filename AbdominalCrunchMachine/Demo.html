@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Abdominal Crunch Machine</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; font-family: sans-serif; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none; /* Let clicks pass through to canvas if needed */
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        input[type=range] { width: 300px; }
+        label { margin-bottom: 5px; font-weight: bold; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="info">
+        <strong>Abdominal Crunch Machine</strong><br>
+        Left-Click to Rotate | Right-Click to Pan | Scroll to Zoom
+    </div>
+
+    <div id="controls">
+        <label for="crunchSlider">Perform Crunch (0% - 100%)</label>
+        <input type="range" id="crunchSlider" min="0" max="1" step="0.01" value="0">
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdddddd);
+        scene.fog = new THREE.Fog(0xdddddd, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(5, 4, 6);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // --- 3. Materials ---
+        const metalMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.4, metalness: 0.8 });
+        const silverMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.3, metalness: 0.9 });
+        const leatherMat = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.8 }); // Brown leather
+        const padMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 }); // Black foam
+        const beltMat = new THREE.MeshStandardMaterial({ color: 0x111111, side: THREE.DoubleSide });
+
+        // --- 4. Build Machine Parts ---
+
+        // A. Floor
+        const floorGeo = new THREE.PlaneGeometry(20, 20);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // B. Main Frame (Static)
+        const frameGroup = new THREE.Group();
+        scene.add(frameGroup);
+
+        function createBar(w, h, d, x, y, z, mat = metalMat) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // Base rails
+        frameGroup.add(createBar(0.2, 0.1, 2.5, 0.5, 0.05, 0)); 
+        frameGroup.add(createBar(0.2, 0.1, 2.5, -0.5, 0.05, 0));
+        // Vertical Weight Stack Pillars
+        frameGroup.add(createBar(0.1, 2.5, 0.1, 0.5, 1.25, -1.2)); 
+        frameGroup.add(createBar(0.1, 2.5, 0.1, -0.5, 1.25, -1.2));
+        // Top connector
+        frameGroup.add(createBar(1.2, 0.1, 0.2, 0, 2.5, -1.2));
+        // Seat Support
+        frameGroup.add(createBar(0.8, 0.1, 1.5, 0, 0.5, 0.5));
+
+        // C. The Seat & Backrest
+        const seat = createBar(0.7, 0.1, 0.7, 0, 0.6, 0.6, leatherMat);
+        frameGroup.add(seat);
+        const backRest = createBar(0.7, 0.8, 0.1, 0, 1.0, 0.2, leatherMat); // Slightly reclined usually, keep simple here
+        frameGroup.add(backRest);
+
+        // D. The Pivot Arm (The moving part the user pulls)
+        // We create a pivot group. The center of rotation is usually behind/above the head.
+        const pivotGroup = new THREE.Group();
+        pivotGroup.position.set(0, 1.5, 0); // Pivot point
+        scene.add(pivotGroup);
+
+        // Visual marker for pivot axis
+        const pivotAxel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.2, 16), silverMat);
+        pivotAxel.rotation.z = Math.PI / 2;
+        pivotGroup.add(pivotAxel);
+
+        // The Arm Structure extending from pivot
+        const armBar = createBar(0.1, 0.8, 0.1, 0, 0.4, 0); // Extends up/down from pivot? 
+        // Let's make it extend forward and up like a crunch machine handles
+        // Actually, crunch machines usually pivot from behind the back.
+        // Let's model a standard "ab crunch" where handles are near head/chest.
+        
+        const mainArm = createBar(0.8, 0.1, 0.1, 0, 0.4, 0.5); // Bar reaching over head
+        // Rotate this geometric bar so it looks right relative to pivot group
+        mainArm.position.set(0, 0.5, 0.5);
+        mainArm.rotation.x = -Math.PI / 4;
+        pivotGroup.add(mainArm);
+
+        // Handles
+        const handleBar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 16), padMat);
+        handleBar.rotation.z = Math.PI / 2;
+        handleBar.position.set(0, 0.8, 0.8); // Tip of the arm
+        pivotGroup.add(handleBar);
+
+        // Cam / Pulley Wheel at pivot (where the belt wraps)
+        const camGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.15, 32);
+        const cam = new THREE.Mesh(camGeo, metalMat);
+        cam.rotation.z = Math.PI / 2;
+        pivotGroup.add(cam);
+
+        // E. The Weight Stack
+        const weightPlates = [];
+        const numPlates = 10;
+        const plateHeight = 0.1;
+        const stackGroup = new THREE.Group();
+        stackGroup.position.set(0, 0, -1.2);
+        scene.add(stackGroup);
+
+        // Guide rods
+        const rod1 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.3, 8), silverMat);
+        rod1.position.set(0.2, 1.15, 0);
+        stackGroup.add(rod1);
+        const rod2 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 2.3, 8), silverMat);
+        rod2.position.set(-0.2, 1.15, 0);
+        stackGroup.add(rod2);
+
+        // Create individual plates
+        for(let i=0; i<numPlates; i++) {
+            const plate = createBar(0.6, 0.08, 0.3, 0, 0.05 + (i * 0.11), 0, metalMat);
+            // We want to group them to lift a specific amount, but for this demo, 
+            // we will lift the *whole* remaining stack based on "selection" or just lift the top one.
+            // Let's make a "Lift Group" vs "Static Group".
+            // For simplicity: We will lift ALL plates in this visual demo.
+            stackGroup.add(plate);
+            weightPlates.push(plate);
+        }
+
+        // F. The Belt / Cable
+        // This is the tricky part. It needs to go from the cam (pivot) to the weight stack.
+        // We will use a Line geometry that updates every frame.
+        const beltPoints = [];
+        const beltGeo = new THREE.BufferGeometry();
+        const beltLine = new THREE.Line(beltGeo, new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 }));
+        scene.add(beltLine);
+
+        // Define cable path points
+        // Point A: Fixed on the rotating Cam
+        // Point B: A Pulley fixed on the frame top
+        // Point C: The top of the weight stack
+        
+        // Pulley on top frame
+        const pulleyWheel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 16), silverMat);
+        pulleyWheel.rotation.z = Math.PI / 2;
+        pulleyWheel.position.set(0, 2.3, -1.2);
+        frameGroup.add(pulleyWheel);
+
+        // --- 5. Interaction Logic ---
+        const slider = document.getElementById('crunchSlider');
+        let crunchValue = 0; // 0 to 1
+
+        function updateMachine() {
+            crunchValue = parseFloat(slider.value);
+
+            // 1. Rotate the Pivot Arm (The Crunch)
+            // Max rotation say 60 degrees (approx 1 radian)
+            const maxRotation = Math.PI / 3;
+            pivotGroup.rotation.x = crunchValue * maxRotation;
+
+            // 2. Lift Weights
+            // As pivot rotates, cable pulls up.
+            // Calculate arc length pulled: radius * angle
+            const camRadius = 0.3; 
+            const cablePulled = (crunchValue * maxRotation) * camRadius * 2.5; // Multiplier for visual effect
+
+            // Move weights up
+            weightPlates.forEach((plate, index) => {
+                // Initial Y positions
+                const initialY = 0.05 + (index * 0.11);
+                plate.position.y = initialY + cablePulled;
+            });
+
+            // 3. Update Belt Geometry
+            // We need world positions.
+            
+            // Point 1: Connection on the Cam. 
+            // It rotates with pivotGroup. Let's approximate it as a point on the cam surface.
+            // Since the cam rotates X, the attachment point moves.
+            // A simple approximation: Top of cam in local space transformed to world.
+            const camAttachLocal = new THREE.Vector3(0, camRadius, 0); 
+            // We need to rotate this vector by pivot rotation
+            camAttachLocal.applyAxisAngle(new THREE.Vector3(1,0,0), pivotGroup.rotation.x);
+            const p1 = camAttachLocal.add(pivotGroup.position);
+
+            // Point 2: The static pulley on the frame
+            // The belt usually goes "over" the cam, then back to a pulley.
+            // Let's draw: Cam Top -> Pulley Top -> Weight Stack
+            const p2 = new THREE.Vector3(0, 2.3 + 0.15, -1.2); // Top of pulley wheel
+
+            // Point 3: Top of weight stack (moves up)
+            // Top plate index is numPlates-1
+            const topPlate = weightPlates[numPlates-1];
+            const p3 = new THREE.Vector3(0, topPlate.position.y + 0.05, -1.2);
+
+            const points = [p1, p2, p3];
+            beltGeo.setFromPoints(points);
+        }
+
+        // --- 6. Animation Loop ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.target.set(0, 1, 0);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updateMachine();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        animate();
+
+    </script>
+</body>
+</html>
