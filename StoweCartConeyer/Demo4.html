@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Warehouse Showdown: Beavis vs SpongeBob</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; touch-action: none; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: yellow;
+            font-size: 24px; text-shadow: 2px 2px #000; pointer-events: none; z-index: 10;
+        }
+        #instructions {
+            position: absolute; bottom: 80px; width: 100%; text-align: center;
+            color: white; font-size: 16px; pointer-events: none; opacity: 0.7;
+        }
+        /* Mobile Touch Zones */
+        .touch-zone {
+            position: absolute; bottom: 0; width: 50%; height: 100%;
+            z-index: 5; -webkit-tap-highlight-color: transparent;
+        }
+        #left-zone { left: 0; }
+        #right-zone { right: 0; }
+        
+        /* Visual feedback for buttons (optional) */
+        .btn-visual {
+            position: absolute; bottom: 30px; width: 60px; height: 60px;
+            background: rgba(255, 255, 255, 0.2); border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+        }
+        #left-visual { left: 30px; }
+        #right-visual { right: 30px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">Score: <span id="score">0</span></div>
+<div id="instructions">Dodge the packages! (Arrows/AD or Tap Sides)</div>
+
+<div id="left-zone" class="touch-zone"><div id="left-visual" class="btn-visual"></div></div>
+<div id="right-zone" class="touch-zone"><div id="right-visual" class="btn-visual"></div></div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Setup Scene ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x221100); 
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    // --- Lighting ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const spotLight = new THREE.PointLight(0xffaa00, 100);
+    spotLight.position.set(0, 10, 0);
+    scene.add(spotLight);
+
+    // --- The Conveyor Belt ---
+    const beltGeometry = new THREE.PlaneGeometry(10, 100);
+    const beltMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+    const belt = new THREE.Mesh(beltGeometry, beltMaterial);
+    belt.rotation.x = -Math.PI / 2;
+    scene.add(belt);
+
+    const grid = new THREE.GridHelper(10, 20, 0xffff00, 0x444444);
+    grid.position.y = 0.05;
+    scene.add(grid);
+
+    // --- The Racers ---
+    const beavisGroup = new THREE.Group();
+    const cartBody = new THREE.Mesh(new THREE.BoxGeometry(1, 0.5, 1.5), new THREE.MeshStandardMaterial({color: 0x0000ff}));
+    const beavisHead = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.4), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+    beavisHead.position.set(0, 0.6, 0.2);
+    beavisGroup.add(cartBody, beavisHead);
+    beavisGroup.position.set(-1.5, 0.5, 5);
+    scene.add(beavisGroup);
+
+    const spongeCart = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({color: 0xffff00}));
+    spongeCart.position.set(1.5, 0.5, 2);
+    scene.add(spongeCart);
+
+    // --- Obstacles ---
+    const boxes = [];
+    function spawnBox() {
+        const geom = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+        const mat = new THREE.MeshStandardMaterial({color: 0x8b4513});
+        const box = new THREE.Mesh(geom, mat);
+        box.position.set((Math.random() - 0.5) * 8, 0.6, -50);
+        scene.add(box);
+        boxes.push(box);
+    }
+
+    // --- Interaction Logic ---
+    let targetX = -1.5;
+    const moveLeft = () => targetX = Math.max(targetX - 2, -4);
+    const moveRight = () => targetX = Math.min(targetX + 2, 4);
+
+    // Keyboard
+    window.addEventListener('keydown', (e) => {
+        if (e.key === "ArrowLeft" || e.key === "a") moveLeft();
+        if (e.key === "ArrowRight" || e.key === "d") moveRight();
+    });
+
+    // Touch Events
+    document.getElementById('left-zone').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        moveLeft();
+    });
+    document.getElementById('right-zone').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        moveRight();
+    });
+
+    camera.position.set(0, 5, 12);
+    camera.lookAt(0, 0, 0);
+
+    // --- Game Loop ---
+    let score = 0;
+    let speed = 0.4;
+    let frame = 0;
+    let isGameOver = false;
+
+    function animate() {
+        if (isGameOver) return;
+        requestAnimationFrame(animate);
+
+        grid.position.z += speed;
+        if (grid.position.z > 1) grid.position.z = 0;
+
+        beavisGroup.position.x += (targetX - beavisGroup.position.x) * 0.15;
+
+        spongeCart.position.x = Math.sin(Date.now() * 0.002) * 3;
+        spongeCart.position.z = 2 + Math.cos(Date.now() * 0.005);
+
+        frame++;
+        if (frame % 60 === 0) spawnBox();
+
+        for (let i = boxes.length - 1; i >= 0; i--) {
+            boxes[i].position.z += speed;
+
+            const dist = beavisGroup.position.distanceTo(boxes[i].position);
+            if (dist < 1.1) {
+                isGameOver = true;
+                setTimeout(() => {
+                    alert("CRASHED! Beavis says: 'This sucks!' \nScore: " + Math.floor(score));
+                    location.reload(); 
+                }, 10);
+            }
+
+            if (boxes[i].position.z > 15) {
+                scene.remove(boxes[i]);
+                boxes.splice(i, 1);
+                score += 10;
+                document.getElementById('score').innerText = Math.floor(score);
+                speed += 0.002; 
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
