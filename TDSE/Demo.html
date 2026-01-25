@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Quantum Wavefunction Visualization</title>
+    <style>
+        body { margin: 0; background: #050505; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .ui { position: absolute; top: 20px; left: 20px; pointer-events: none; text-shadow: 1px 1px 2px black; }
+    </style>
+</head>
+<body>
+    <div class="ui">
+        <h1>Schrödinger Wave Packet</h1>
+        <p>Visualizing $|\psi(x,t)|^2$ using WebGL</p>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script type="text/javascript">
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl2');
+
+    if (!gl) { alert("WebGL2 not supported"); }
+
+    // Vertex Shader: Standard full-screen quad
+    const vsSource = `#version 300 es
+        in vec4 aPosition;
+        void main() { gl_Position = aPosition; }
+    `;
+
+    // Fragment Shader: This is where the physics (approximation) happens
+    // We simulate the evolution of the probability density over time.
+    const fsSource = `#version 300 es
+        precision highp float;
+        uniform vec2 uResolution;
+        uniform float uTime;
+        out vec4 fragColor;
+
+        void main() {
+            vec2 uv = (gl_FragCoord.xy * 2.0 - uResolution.xy) / uResolution.y;
+            
+            // Parameters for the wave packet
+            float x = uv.x * 5.0;
+            float t = uTime * 1.5;
+            
+            // Simplified 1D Wave Packet: psi(x,t)
+            // Real part of a Gaussian wave packet moving right
+            float sigma = 0.5;
+            float k = 10.0; // Momentum
+            float x0 = -4.0 + mod(t, 8.0); // Position over time
+            
+            // Envelope (The "Cloud")
+            float envelope = exp(-pow(x - x0, 2.0) / (2.0 * pow(sigma, 2.0)));
+            
+            // Phase (The oscillation)
+            float phase = cos(k * (x - x0));
+            
+            // Probability Density |psi|^2
+            float density = envelope * envelope;
+            
+            // Potential Barrier at center
+            float barrier = (abs(uv.x) < 0.05) ? 0.8 : 0.0;
+            
+            // Colors
+            vec3 waveColor = vec3(0.0, 0.8, 1.0) * density * (0.8 + 0.2 * phase);
+            vec3 barrierColor = vec3(1.0, 0.0, 0.3) * barrier;
+            
+            // Add a glow/grid effect
+            float grid = 0.1 * smoothstep(0.01, 0.0, abs(sin(uv.y * 20.0)) * abs(sin(uv.x * 20.0)));
+
+            fragColor = vec4(waveColor + barrierColor + grid, 1.0);
+        }
+    `;
+
+    // Shader Setup Helpers
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(program);
+
+    // Buffer setup for a single rectangle (two triangles) covering the screen
+    const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    const posAttrib = gl.getAttribLocation(program, "aPosition");
+    gl.enableVertexAttribArray(posAttrib);
+    gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+    const resLoc = gl.getUniformLocation(program, "uResolution");
+    const timeLoc = gl.getUniformLocation(program, "uTime");
+
+    function render(time) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+
+        gl.useProgram(program);
+        gl.uniform2f(resLoc, canvas.width, canvas.height);
+        gl.uniform1f(timeLoc, time * 0.001);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+</script>
+</body>
+</html>
