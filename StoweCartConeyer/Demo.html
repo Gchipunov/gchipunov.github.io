@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Showdown: Beavis vs SpongeBob</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: yellow;
+            font-size: 24px; text-shadow: 2px 2px #000; pointer-events: none;
+        }
+        #instructions {
+            position: absolute; bottom: 20px; width: 100%; text-align: center;
+            color: white; font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">Score: <span id="score">0</span></div>
+<div id="instructions">Use ARROW KEYS or A/D to dodge the packages!</div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Setup Scene ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x221100); // Warehouse vibe
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // --- Lighting ---
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const spotLight = new THREE.PointLight(0xffaa00, 100);
+    spotLight.position.set(0, 10, 0);
+    scene.add(spotLight);
+
+    // --- The Conveyor Belt ---
+    const beltGeometry = new THREE.PlaneGeometry(10, 100);
+    const beltMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x333333, 
+        roughness: 0.8 
+    });
+    const belt = new THREE.Mesh(beltGeometry, beltMaterial);
+    belt.rotation.x = -Math.PI / 2;
+    scene.add(belt);
+
+    // Add "lines" to the belt to show movement
+    const grid = new THREE.GridHelper(10, 20, 0xffff00, 0x444444);
+    grid.position.y = 0.05;
+    scene.add(grid);
+
+    // --- The Racers (Represented by themed Boxes) ---
+    // Beavis Cart (Blue/Yellow)
+    const beavisGroup = new THREE.Group();
+    const cartBody = new THREE.Mesh(new THREE.BoxGeometry(1, 0.5, 1.5), new THREE.MeshStandardMaterial({color: 0x0000ff}));
+    const beavisHead = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.4), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+    beavisHead.position.set(0, 0.6, 0.2);
+    beavisGroup.add(cartBody, beavisHead);
+    beavisGroup.position.set(-1.5, 0.5, 5);
+    scene.add(beavisGroup);
+
+    // SpongeBob (Yellow/Square) - The Rival
+    const spongeCart = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({color: 0xffff00}));
+    spongeCart.position.set(1.5, 0.5, 2);
+    scene.add(spongeCart);
+
+    // --- Obstacles (Delivery Boxes) ---
+    const boxes = [];
+    function spawnBox() {
+        const geom = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+        const mat = new THREE.MeshStandardMaterial({color: 0x8b4513}); // Cardboard brown
+        const box = new THREE.Mesh(geom, mat);
+        box.position.set((Math.random() - 0.5) * 8, 0.6, -50);
+        scene.add(box);
+        boxes.push(box);
+    }
+
+    // --- Interaction ---
+    let targetX = -1.5;
+    window.addEventListener('keydown', (e) => {
+        if (e.key === "ArrowLeft" || e.key === "a") targetX = Math.max(targetX - 2, -4);
+        if (e.key === "ArrowRight" || e.key === "d") targetX = Math.min(targetX + 2, 4);
+    });
+
+    camera.position.set(0, 5, 12);
+    camera.lookAt(0, 0, 0);
+
+    // --- Game Loop ---
+    let score = 0;
+    let speed = 0.4;
+    let frame = 0;
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        // Move Belt
+        grid.position.z += speed;
+        if (grid.position.z > 1) grid.position.z = 0;
+
+        // Smooth Player Movement
+        beavisGroup.position.x += (targetX - beavisGroup.position.x) * 0.1;
+
+        // Move SpongeBob (AI Wobble)
+        spongeCart.position.x = Math.sin(Date.now() * 0.002) * 3;
+        spongeCart.position.z = 2 + Math.cos(Date.now() * 0.005);
+
+        // Handle Obstacles
+        frame++;
+        if (frame % 60 === 0) spawnBox();
+
+        for (let i = boxes.length - 1; i >= 0; i--) {
+            boxes[i].position.z += speed;
+
+            // Collision Detection
+            const dist = beavisGroup.position.distanceTo(boxes[i].position);
+            if (dist < 1.2) {
+                alert("CRASHED! Beavis says: 'This sucks!' \nScore: " + Math.floor(score));
+                score = 0;
+                speed = 0.4;
+                boxes.forEach(b => scene.remove(b));
+                boxes.length = 0;
+            }
+
+            // Remove off-screen boxes
+            if (boxes[i].position.z > 15) {
+                scene.remove(boxes[i]);
+                boxes.splice(i, 1);
+                score += 10;
+                document.getElementById('score').innerText = Math.floor(score);
+                speed += 0.005; // Get faster!
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // Handle Resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
