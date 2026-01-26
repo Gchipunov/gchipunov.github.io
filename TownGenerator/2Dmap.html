@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Platformer Map Gen</title>
+    <style>
+        body { margin: 0; background: #222; overflow: hidden; color: white; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 1px 1px 2px black; }
+    </style>
+</head>
+<body>
+    <div class="ui">
+        <h1>Procedural Map Generator</h1>
+        <p>Press <b>Space</b> to Regenerate</p>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) {
+    alert('WebGL not supported');
+}
+
+// --- Shaders ---
+const vsSource = `
+    attribute vec2 a_position;
+    attribute vec3 a_color;
+    varying vec3 v_color;
+    uniform vec2 u_resolution;
+
+    void main() {
+        // Convert position from pixels to 0.0 to 1.0
+        vec2 zeroToOne = a_position / u_resolution;
+        // Convert from 0->1 to 0->2
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        // Convert from 0->2 to -1->+1 (clipspace)
+        vec2 clipSpace = zeroToTwo - 1.0;
+
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        v_color = a_color;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 v_color;
+
+    void main() {
+        gl_FragColor = vec4(v_color, 1.0);
+    }
+`;
+
+// Helper to compile shaders
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+// --- Map Logic ---
+const TILE_SIZE = 20;
+let mapWidth, mapHeight;
+let geometryData = [];
+
+function generateMap() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    mapWidth = Math.floor(canvas.width / TILE_SIZE);
+    mapHeight = Math.floor(canvas.height / TILE_SIZE);
+
+    const grid = Array(mapWidth).fill().map(() => Array(mapHeight).fill(0));
+    
+    // Simple Platform Generation Logic
+    // 0 = Empty, 1 = Ground, 2 = Platform
+    for (let x = 0; x < mapWidth; x++) {
+        // Floor
+        grid[x][mapHeight - 1] = 1;
+        
+        // Random platforms
+        if (Math.random() > 0.8) {
+            let platW = Math.floor(Math.random() * 5) + 3;
+            let platY = Math.floor(Math.random() * (mapHeight - 5)) + 2;
+            for (let i = 0; i < platW; i++) {
+                if (x + i < mapWidth) grid[x + i][platY] = 2;
+            }
+        }
+    }
+
+    // Convert Grid to Triangles for WebGL
+    geometryData = [];
+    for (let x = 0; x < mapWidth; x++) {
+        for (let y = 0; y < mapHeight; y++) {
+            if (grid[x][y] > 0) {
+                const color = grid[x][y] === 1 ? [0.4, 0.25, 0.1] : [0.2, 0.6, 0.2];
+                addRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE - 1, TILE_SIZE - 1, color);
+            }
+        }
+    }
+}
+
+function addRect(x, y, w, h, color) {
+    const r = color[0], g = color[1], b = color[2];
+    // Two triangles per tile
+    geometryData.push(
+        x, y, r, g, b,
+        x + w, y, r, g, b,
+        x, y + h, r, g, b,
+        x, y + h, r, g, b,
+        x + w, y, r, g, b,
+        x + w, y + h, r, g, b
+    );
+}
+
+// --- Render Loop ---
+const positionBuffer = gl.createBuffer();
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.15, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(program);
+
+    const resLoc = gl.getUniformLocation(program, "u_resolution");
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(geometryData), gl.STATIC_DRAW);
+
+    const posLoc = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 5 * 4, 0);
+
+    const colorLoc = gl.getAttribLocation(program, "a_color");
+    gl.enableVertexAttribArray(colorLoc);
+    gl.vertexAttribPointer(colorLoc, 3, gl.FLOAT, false, 5 * 4, 2 * 4);
+
+    gl.drawArrays(gl.TRIANGLES, 0, geometryData.length / 5);
+}
+
+// Initial setup
+window.addEventListener('resize', () => { generateMap(); render(); });
+window.addEventListener('keydown', (e) => { if(e.code === 'Space') { generateMap(); render(); } });
+
+generateMap();
+render();
+</script>
+</body>
+</html>
