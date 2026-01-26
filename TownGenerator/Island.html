@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Island Generator</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #001020; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; pointer-events: none; }
+        span { font-weight: bold; color: #4af; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1>WebGL Island</h1>
+    <p>Press <b>Space</b> to generate a new seed</p>
+    <p>Terrain: <span>Perlin Noise + Radial Mask</span></p>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script id="vs" type="x-shader/x-vertex">
+    attribute vec3 position;
+    attribute float height;
+    
+    uniform mat4 uProjection;
+    uniform mat4 uView;
+    uniform float uTime;
+
+    varying float vHeight;
+    varying vec3 vPos;
+
+    void main() {
+        vHeight = height;
+        vPos = position;
+        // Apply a slight wave motion to the water level (height near 0)
+        float displacement = (height < 0.1) ? sin(uTime + position.x * 10.0) * 0.01 : 0.0;
+        gl_Position = uProjection * uView * vec4(position.x, position.y + displacement, position.z, 1.0);
+    }
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    varying float vHeight;
+    varying vec3 vPos;
+
+    void main() {
+        vec3 color;
+        
+        // Biome coloring based on height
+        if (vHeight < 0.08) {
+            color = vec3(0.1, 0.4, 0.8); // Deep Water
+        } else if (vHeight < 0.12) {
+            color = vec3(0.8, 0.7, 0.5); // Sand
+        } else if (vHeight < 0.4) {
+            color = vec3(0.2, 0.6, 0.2); // Grass/Jungle
+        } else if (vHeight < 0.7) {
+            color = vec3(0.4, 0.3, 0.2); // Rock/Mountain
+        } else {
+            color = vec3(0.9, 0.9, 1.0); // Snow
+        }
+
+        // Simple directional lighting fake
+        float light = dot(normalize(vec3(1.0, 1.0, 0.5)), vec3(0.0, 1.0, 0.0)) * 0.8 + 0.2;
+        
+        gl_FragColor = vec4(color * light, 1.0);
+    }
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+
+<script>
+/** * Procedural Logic 
+ */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+const GRID_SIZE = 128;
+let seed = Math.random() * 100;
+
+function noise(x, y) {
+    // Simple pseudo-random noise function
+    const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453123;
+    return n - Math.floor(n);
+}
+
+// Simple Value Noise (Interpolated)
+function smoothNoise(x, y) {
+    let i = Math.floor(x);
+    let j = Math.floor(y);
+    let fX = x - i;
+    let fY = y - j;
+
+    // Cubic Hermite Interpolation
+    fX = fX * fX * (3.0 - 2.0 * fX);
+    fY = fY * fY * (3.0 - 2.0 * fY);
+
+    const a = noise(i, j);
+    const b = noise(i + 1, j);
+    const c = noise(i, j + 1);
+    const d = noise(i + 1, j + 1);
+
+    return a + (b - a) * fX + (c - a) * fY + (a - b - c + d) * fX * fY;
+}
+
+function getIslandHeight(x, y) {
+    let nx = x / GRID_SIZE - 0.5;
+    let ny = y / GRID_SIZE - 0.5;
+    
+    // Fractal Brownian Motion (Octaves)
+    let e = 1.0 * smoothNoise(1.0 * x/10, 1.0 * y/10) +
+            0.5 * smoothNoise(2.0 * x/10, 2.0 * y/10) +
+            0.25 * smoothNoise(4.0 * x/10, 4.0 * y/10);
+    e = e / (1.0 + 0.5 + 0.25);
+    
+    // Radial Mask (makes it an island instead of endless terrain)
+    let d = Math.sqrt(nx*nx + ny*ny) * 2.0;
+    e = (e + (0.3 - d)); 
+    
+    return Math.max(0, e);
+}
+
+/** * WebGL Boilerplate 
+ */
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Generate Geometry
+let vertices = [];
+let indices = [];
+let heights = [];
+
+function generateMesh() {
+    vertices = [];
+    indices = [];
+    heights = [];
+    
+    for (let z = 0; z <= GRID_SIZE; z++) {
+        for (let x = 0; x <= GRID_SIZE; x++) {
+            let h = getIslandHeight(x, z);
+            vertices.push((x / GRID_SIZE) * 2 - 1, h * 0.8, (z / GRID_SIZE) * 2 - 1);
+            heights.push(h);
+        }
+    }
+
+    for (let z = 0; z < GRID_SIZE; z++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            let row1 = z * (GRID_SIZE + 1);
+            let row2 = (z + 1) * (GRID_SIZE + 1);
+            indices.push(row1 + x, row1 + x + 1, row2 + x);
+            indices.push(row1 + x + 1, row2 + x + 1, row2 + x);
+        }
+    }
+}
+
+generateMesh();
+
+const vBuffer = gl.createBuffer();
+const iBuffer = gl.createBuffer();
+const hBuffer = gl.createBuffer();
+
+function updateBuffers() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, hBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(heights), gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, iBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+}
+
+updateBuffers();
+
+const posAttrib = gl.getAttribLocation(program, "position");
+const heightAttrib = gl.getAttribLocation(program, "height");
+const uProj = gl.getUniformLocation(program, "uProjection");
+const uView = gl.getUniformLocation(program, "uView");
+const uTime = gl.getUniformLocation(program, "uTime");
+
+// Matrices
+const projMatrix = mat4.create();
+const viewMatrix = mat4.create();
+mat4.perspective(projMatrix, 45 * Math.PI / 180, window.innerWidth / window.innerHeight, 0.1, 100.0);
+
+function render(t) {
+    gl.clearColor(0.05, 0.1, 0.15, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    // Rotate camera around center
+    let camX = Math.sin(t * 0.0005) * 2.5;
+    let camZ = Math.cos(t * 0.0005) * 2.5;
+    mat4.lookAt(viewMatrix, [camX, 1.5, camZ], [0, 0, 0], [0, 1, 0]);
+
+    gl.uniformMatrix4fv(uProj, false, projMatrix);
+    gl.uniformMatrix4fv(uView, false, viewMatrix);
+    gl.uniform1f(uTime, t * 0.005);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+    gl.vertexAttribPointer(posAttrib, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(posAttrib);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, hBuffer);
+    gl.vertexAttribPointer(heightAttrib, 1, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(heightAttrib);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, iBuffer);
+    gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+
+    requestAnimationFrame(render);
+}
+
+window.addEventListener('keydown', (e) => {
+    if(e.code === 'Space') {
+        seed = Math.random() * 1000;
+        generateMesh();
+        updateBuffers();
+    }
+});
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
