@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Hex Town Scraper</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; }
+        .hint { font-size: 0.8em; color: #aaa; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>Hex Scraper</h2>
+        <p>Click to toggle building height</p>
+        <p class="hint">Built with WebGL & Hex-Math</p>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** * SHADERS 
+ */
+const vsSource = `
+    attribute house vec4 aPosition;
+    attribute vec3 aColor;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uViewMatrix;
+    uniform mat4 uModelMatrix;
+    varying lowp vec3 vColor;
+    void main() {
+        gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * aPosition;
+        vColor = aColor;
+    }
+`;
+
+const fsSource = `
+    varying lowp vec3 vColor;
+    void main() {
+        gl_FragColor = vec4(vColor, 1.0);
+    }
+`;
+
+/**
+ * HEX MATH & GENERATION
+ */
+const SIZE = 1.0; 
+const WIDTH = Math.sqrt(3) * SIZE;
+const HEIGHT = 2 * SIZE;
+
+// Returns the center of a hex at grid coordinates (q, r)
+function hexToPixel(q, r) {
+    let x = SIZE * (Math.sqrt(3) * q  +  Math.sqrt(3)/2 * r);
+    let y = SIZE * (3/2 * r);
+    return { x, y };
+}
+
+// Simple Hexagon Geometry (Top + Sides)
+function createHexMesh(gl, height = 0.2) {
+    const positions = [];
+    const colors = [];
+    const colorTop = [0.4, 0.7, 1.0];
+    const colorSide = [0.2, 0.4, 0.6];
+
+    // Top face (6 triangles)
+    for (let i = 0; i < 6; i++) {
+        const angle1 = (Math.PI / 180) * (60 * i - 30);
+        const angle2 = (Math.PI / 180) * (60 * (i + 1) - 30);
+        
+        // Triangle: Center, Point 1, Point 2
+        positions.push(0, height, 0);
+        positions.push(Math.cos(angle1) * SIZE, height, Math.sin(angle1) * SIZE);
+        positions.push(Math.cos(angle2) * SIZE, height, Math.sin(angle2) * SIZE);
+        
+        for(let j=0; j<3; j++) colors.push(...colorTop);
+    }
+
+    // Sides
+    for (let i = 0; i < 6; i++) {
+        const angle1 = (Math.PI / 180) * (60 * i - 30);
+        const angle2 = (Math.PI / 180) * (60 * (i + 1) - 30);
+        const x1 = Math.cos(angle1) * SIZE, z1 = Math.sin(angle1) * SIZE;
+        const x2 = Math.cos(angle2) * SIZE, z2 = Math.sin(angle2) * SIZE;
+
+        // Quad as 2 triangles
+        positions.push(x1, 0, z1, x2, 0, z2, x1, height, z1);
+        positions.push(x1, height, z1, x2, 0, z2, x2, height, z2);
+        for(let j=0; j<6; j++) colors.push(...colorSide);
+    }
+
+    return {
+        pos: new Float32Array(positions),
+        col: new Float32Array(colors),
+        count: positions.length / 3
+    };
+}
+
+/**
+ * MAIN ENGINE
+ */
+function main() {
+    const canvas = document.querySelector('#glCanvas');
+    const gl = canvas.getContext('webgl');
+    if (!gl) return;
+
+    // Initialize Shaders
+    const program = initShaderProgram(gl, vsSource, fsSource);
+    const programInfo = {
+        program: program,
+        attribLocations: {
+            aPosition: gl.getAttribLocation(program, 'aPosition'),
+            aColor: gl.getAttribLocation(program, 'aColor'),
+        },
+        uniformLocations: {
+            uProjectionMatrix: gl.getUniformLocation(program, 'uProjectionMatrix'),
+            uViewMatrix: gl.getUniformLocation(program, 'uViewMatrix'),
+            uModelMatrix: gl.getUniformLocation(program, 'uModelMatrix'),
+        },
+    };
+
+    // Game State
+    const grid = [];
+    const radius = 5;
+    for (let q = -radius; q <= radius; q++) {
+        for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+            grid.push({ q, r, h: 0.2 + Math.random() * 0.1 });
+        }
+    }
+
+    function render() {
+        resize(gl);
+        gl.clearColor(0.1, 0.1, 0.15, 1.0);
+        gl.clearDepth(1.0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        const proj = perspective(45 * Math.PI / 180, gl.canvas.clientWidth / gl.canvas.clientHeight, 0.1, 100.0);
+        const view = lookAt([10, 15, 20], [0, 0, 0], [0, 1, 0]);
+
+        gl.useProgram(programInfo.program);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.uProjectionMatrix, false, proj);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.uViewMatrix, false, view);
+
+        grid.forEach(tile => {
+            const pos = hexToPixel(tile.q, tile.r);
+            const model = translation(pos.x, 0, pos.y);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.uModelMatrix, false, model);
+            
+            const mesh = createHexMesh(gl, tile.h);
+            drawMesh(gl, programInfo, mesh);
+        });
+
+        requestAnimationFrame(render);
+    }
+
+    // Interaction
+    window.addEventListener('mousedown', () => {
+        // Randomly "scrape" or "build" a tile for demo purposes
+        const target = grid[Math.floor(Math.random() * grid.length)];
+        target.h = target.h > 1.0 ? 0.2 : target.h + 1.0;
+    });
+
+    requestAnimationFrame(render);
+}
+
+/**
+ * UTILS (Matrices & WebGL Boilerplate)
+ */
+function initShaderProgram(gl, vs, fs) {
+    const vShader = loadShader(gl, gl.VERTEX_SHADER, vs);
+    const fShader = loadShader(gl, gl.FRAGMENT_SHADER, fs);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vShader);
+    gl.attachShader(prog, fShader);
+    gl.linkProgram(prog);
+    return prog;
+}
+
+function loadShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+function drawMesh(gl, info, mesh) {
+    const pBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.pos, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(info.attribLocations.aPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(info.attribLocations.aPosition);
+
+    const cBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, cBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.col, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(info.attribLocations.aColor, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(info.attribLocations.aColor);
+
+    gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+}
+
+function translation(x, y, z) {
+    return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);
+}
+
+function perspective(fov, aspect, near, far) {
+    const f = 1.0 / Math.tan(fov / 2);
+    const rangeInv = 1 / (near - far);
+    return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(near+far)*rangeInv,-1, 0,0,near*far*rangeInv*2,0]);
+}
+
+function lookAt(eye, center, up) {
+    const z = normalize([eye[0]-center[0], eye[1]-center[1], eye[2]-center[2]]);
+    const x = normalize(cross(up, z));
+    const y = normalize(cross(z, x));
+    return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -dot(x,eye),-dot(y,eye),-dot(z,eye),1]);
+}
+
+const normalize = (v) => {
+    const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+    return [v[0]/l, v[1]/l, v[2]/l];
+};
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const dot = (a, b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+
+function resize(gl) {
+    const w = gl.canvas.clientWidth;
+    const h = gl.canvas.clientHeight;
+    if (gl.canvas.width !== w || gl.canvas.height !== h) {
+        gl.canvas.width = w; gl.canvas.height = h;
+        gl.viewport(0, 0, w, h);
+    }
+}
+
+main();
+</script>
+</body>
+</html>
