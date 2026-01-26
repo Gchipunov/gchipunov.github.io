@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Hex Scraper - Fixed & Optimized</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; }
+        .controls { position: absolute; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; }
+        button { padding: 15px 30px; font-size: 1.2rem; font-weight: bold; border: none; border-radius: 12px; color: white; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        #buildBtn { background: #4a90e2; }
+        #scrapeBtn { background: #e24a4a; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>Town Scraper</h2>
+        <p style="font-size: 0.8em; color: #aaa;">Optimized with Instancing & Lighting</p>
+    </div>
+    <div class="controls">
+        <button id="buildBtn">BUILD</button>
+        <button id="scrapeBtn">SCRAPE</button>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** * SHADERS - Added Lighting & Instancing 
+ */
+const vsSource = `
+    attribute vec4 aVertexPosition;
+    attribute vec3 aNormal;
+    attribute vec2 aOffset; // Instanced: q, r
+    attribute float aHeight; // Instanced: height
+    
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uViewMatrix;
+    
+    varying lowp vec3 vColor;
+    varying lowp float vLight;
+
+    void main() {
+        // Simple hex-to-pixel math inside shader
+        float x = 1.0 * (sqrt(3.0) * aOffset.x + sqrt(3.0)/2.0 * aOffset.y);
+        float z = 1.0 * (3.0/2.0 * aOffset.y);
+        
+        // Scale vertical vertices by height
+        vec4 pos = aVertexPosition;
+        if(pos.y > 0.0) pos.y = aHeight;
+        
+        pos.x += x;
+        pos.z += z;
+
+        gl_Position = uProjectionMatrix * uViewMatrix * pos;
+        
+        // Simple Directional Light (Sun)
+        vec3 sunDir = normalize(vec3(0.5, 1.0, 0.3));
+        vLight = max(dot(aNormal, sunDir), 0.3); 
+        
+        // Color based on height
+        vColor = mix(vec3(0.2, 0.4, 0.6), vec3(0.4, 0.8, 1.0), aHeight/8.0);
+    }
+`;
+
+const fsSource = `
+    varying lowp vec3 vColor;
+    varying lowp float vLight;
+    void main() {
+        gl_FragColor = vec4(vColor * vLight, 1.0);
+    }
+`;
+
+/**
+ * GEOMETRY (Static Hexagon)
+ */
+function getHexData() {
+    const pos = [], norm = [];
+    const pts = [];
+    for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 180) * (60 * i - 30);
+        pts.push({x: Math.cos(a), z: Math.sin(a)});
+    }
+    // Top
+    for(let i=0; i<6; i++) {
+        const p1 = pts[i], p2 = pts[(i+1)%6];
+        pos.push(0,1,0, p1.x,1,p1.z, p2.x,1,p2.z);
+        for(let j=0; j<3; j++) norm.push(0,1,0);
+    }
+    // Sides
+    for(let i=0; i<6; i++) {
+        const p1 = pts[i], p2 = pts[(i+1)%6];
+        const nx = (p1.x + p2.x)/2.0, nz = (p1.z + p2.z)/2.0;
+        pos.push(p1.x,0,p1.z, p2.x,0,p2.z, p1.x,1,p1.z);
+        pos.push(p1.x,1,p1.z, p2.x,0,p2.z, p2.x,1,p2.z);
+        for(let j=0; j<6; j++) norm.push(nx, 0, nz);
+    }
+    return { pos: new Float32Array(pos), norm: new Float32Array(norm) };
+}
+
+
+
+function main() {
+    const canvas = document.querySelector('#glCanvas');
+    const gl = canvas.getContext('webgl');
+    const ext = gl.getExtension('ANGLE_instanced_arrays'); // Required for instancing in WebGL 1
+    if (!gl || !ext) return alert("WebGL Instancing not supported");
+
+    const program = initShaderProgram(gl, vsSource, fsSource);
+    const info = {
+        program,
+        attribs: {
+            pos: gl.getAttribLocation(program, 'aVertexPosition'),
+            norm: gl.getAttribLocation(program, 'aNormal'),
+            offset: gl.getAttribLocation(program, 'aOffset'),
+            height: gl.getAttribLocation(program, 'aHeight'),
+        },
+        uniforms: {
+            proj: gl.getUniformLocation(program, 'uProjectionMatrix'),
+            view: gl.getUniformLocation(program, 'uViewMatrix'),
+        },
+    };
+
+    // Static Buffers
+    const hex = getHexData();
+    const posBuf = makeBuffer(gl, hex.pos);
+    const normBuf = makeBuffer(gl, hex.norm);
+
+    // Instanced Buffers (Data changes when building)
+    const grid = [];
+    const radius = 6;
+    for (let q = -radius; q <= radius; q++) {
+        for (let r = Math.max(-radius, -q - radius); r <= Math.min(radius, -q + radius); r++) {
+            grid.push({ q, r, h: 0.2 });
+        }
+    }
+
+    const offsetBuf = gl.createBuffer();
+    const heightBuf = gl.createBuffer();
+
+    function render() {
+        resize(gl);
+        gl.clearColor(0.1, 0.1, 0.15, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        const proj = perspective(40 * Math.PI / 180, canvas.width / canvas.height, 0.1, 100.0);
+        const view = lookAt([15, 20, 25], [0, 0, 0], [0, 1, 0]);
+
+        gl.useProgram(info.program);
+        gl.uniformMatrix4fv(info.uniforms.proj, false, proj);
+        gl.uniformMatrix4fv(info.uniforms.view, false, view);
+
+        // Bind Static Geometry
+        bindAttrib(gl, posBuf, info.attribs.pos, 3);
+        bindAttrib(gl, normBuf, info.attribs.norm, 3);
+
+        // Update & Bind Instanced Data
+        const offsets = new Float32Array(grid.flatMap(g => [g.q, g.r]));
+        gl.bindBuffer(gl.ARRAY_BUFFER, offsetBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, offsets, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(info.attribs.offset);
+        gl.vertexAttribPointer(info.attribs.offset, 2, gl.FLOAT, false, 0, 0);
+        ext.vertexAttribDivisorANGLE(info.attribs.offset, 1); // 1 = change every 1 instance
+
+        const heights = new Float32Array(grid.map(g => g.h));
+        gl.bindBuffer(gl.ARRAY_BUFFER, heightBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, heights, gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(info.attribs.height);
+        gl.vertexAttribPointer(info.attribs.height, 1, gl.FLOAT, false, 0, 0);
+        ext.vertexAttribDivisorANGLE(info.attribs.height, 1);
+
+        ext.drawArraysInstancedANGLE(gl.TRIANGLES, 0, hex.pos.length/3, grid.length);
+        requestAnimationFrame(render);
+    }
+
+    document.getElementById('buildBtn').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        for(let i=0; i<3; i++) {
+            const t = grid[Math.floor(Math.random() * grid.length)];
+            t.h = Math.min(t.h + 1.5, 8.0);
+        }
+    });
+
+    document.getElementById('scrapeBtn').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        grid.forEach(t => t.h = 0.2);
+    });
+
+    render();
+}
+
+/** UTILS **/
+function makeBuffer(gl, data) {
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    return b;
+}
+function bindAttrib(gl, buf, loc, size) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+}
+function initShaderProgram(gl, vs, fs) {
+    const s1 = loadShader(gl, gl.VERTEX_SHADER, vs);
+    const s2 = loadShader(gl, gl.FRAGMENT_SHADER, fs);
+    const p = gl.createProgram();
+    gl.attachShader(p, s1); gl.attachShader(p, s2);
+    gl.linkProgram(p);
+    return p;
+}
+function loadShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source); gl.compileShader(s);
+    return s;
+}
+function perspective(fov, aspect, near, far) {
+    const f = 1.0 / Math.tan(fov / 2), nf = 1 / (near - far);
+    return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(near+far)*nf,-1, 0,0,2*near*far*nf,0]);
+}
+function lookAt(eye, center, up) {
+    const z = normalize([eye[0]-center[0], eye[1]-center[1], eye[2]-center[2]]);
+    const x = normalize(cross(up, z)), y = normalize(cross(z, x));
+    return new Float32Array([x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0, -dot(x,eye),-dot(y,eye),-dot(z,eye),1]);
+}
+const normalize = v => { const l = Math.sqrt(v[0]**2 + v[1]**2 + v[2]**2); return [v[0]/l, v[1]/l, v[2]/l]; };
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const dot = (a, b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+function resize(gl) {
+    if (gl.canvas.width !== window.innerWidth || gl.canvas.height !== window.innerHeight) {
+        gl.canvas.width = window.innerWidth; gl.canvas.height = window.innerHeight;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+    }
+}
+main();
+</script>
+</body>
+</html>
