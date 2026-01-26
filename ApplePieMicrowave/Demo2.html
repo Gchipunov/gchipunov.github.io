@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Pie Microwave - Fixed</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: #0f0;
+            pointer-events: none; text-shadow: 0 0 5px #0f0;
+            background: rgba(0,0,0,0.5); padding: 15px; border: 1px solid #0f0;
+        }
+        #msg { font-size: 28px; font-weight: bold; margin-top: 10px; }
+        .timer { font-size: 40px; color: #f00; text-shadow: 0 0 10px #f00; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div>MICROWAVE STATUS: <span id="status">IDLE</span></div>
+    <div class="timer" id="timer">00:00</div>
+    <p>CLICK & HOLD TO BAKE</p>
+    <div id="msg"></div>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script>
+/**
+ * SHADER FIXES:
+ * 1. Removed "house" typo.
+ * 2. Moved lighting to Fragment Shader (Phong-style) for better visuals.
+ * 3. Added cook-color interpolation directly in shader.
+ */
+const vsSource = `
+    attribute vec4 aVertexPosition;
+    attribute vec3 aNormal;
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+    void main(void) {
+        vNormal = aNormal;
+        vPosition = aVertexPosition.xyz;
+        gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+    uniform float uCookLevel; 
+    uniform bool uIsBox;
+
+    void main(void) {
+        // Simple lighting
+        vec3 normal = normalize(vNormal);
+        vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));
+        float diff = max(dot(normal, lightDir), 0.2);
+
+        vec3 color;
+        if (uIsBox) {
+            // Microwave interior color (dark metallic)
+            color = vec3(0.1, 0.1, 0.15) * (vPosition.y + 2.0);
+        } else {
+            // PIE COLOR LOGIC:
+            // 0.0: Raw Beige | 0.7: Golden Brown | 1.0+: Black/Burnt
+            vec3 raw = vec3(0.9, 0.8, 0.6);
+            vec3 golden = vec3(0.6, 0.3, 0.1);
+            vec3 burnt = vec3(0.05, 0.05, 0.05);
+
+            if(uCookLevel < 0.7) {
+                color = mix(raw, golden, uCookLevel / 0.7);
+            } else {
+                color = mix(golden, burnt, (uCookLevel - 0.7) / 0.5);
+            }
+        }
+
+        gl_FragColor = vec4(color * diff, 1.0);
+    }
+`;
+
+let cookLevel = 0.0;
+let isCooking = false;
+let gameOver = false;
+
+const canvas = document.querySelector('#glCanvas');
+const gl = canvas.getContext('webgl');
+
+function initShaderProgram(gl, vs, fs) {
+    const vShader = loadShader(gl, gl.VERTEX_SHADER, vs);
+    const fShader = loadShader(gl, gl.FRAGMENT_SHADER, fs);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vShader);
+    gl.attachShader(prog, fShader);
+    gl.linkProgram(prog);
+    return prog;
+}
+
+function loadShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        return null;
+    }
+    return shader;
+}
+
+const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+const programInfo = {
+    program: shaderProgram,
+    attribLocations: {
+        vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+        normal: gl.getAttribLocation(shaderProgram, 'aNormal'),
+    },
+    uniformLocations: {
+        projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+        modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+        uCookLevel: gl.getUniformLocation(shaderProgram, 'uCookLevel'),
+        uIsBox: gl.getUniformLocation(shaderProgram, 'uIsBox'),
+    },
+};
+
+// --- Geometry Helpers ---
+function createCylinder(gl, radius, height, segments) {
+    const positions = [];
+    const normals = [];
+
+    // Side walls
+    for (let i = 0; i <= segments; i++) {
+        let theta = i * 2 * Math.PI / segments;
+        let x = Math.cos(theta) * radius;
+        let z = Math.sin(theta) * radius;
+        positions.push(x, height, z, x, -height, z);
+        normals.push(x, 0, z, x, 0, z);
+    }
+
+    // Top Cap
+    const topStart = positions.length / 3;
+    positions.push(0, height, 0); normals.push(0, 1, 0);
+    for (let i = 0; i <= segments; i++) {
+        let theta = i * 2 * Math.PI / segments;
+        positions.push(Math.cos(theta)*radius, height, Math.sin(theta)*radius);
+        normals.push(0, 1, 0);
+    }
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+    return { pos: posBuf, norm: normBuf, sideCount: (segments + 1) * 2, topStart, topCount: segments + 2 };
+}
+
+function createBox(gl) {
+    const s = 2.5;
+    const positions = [
+        -s,-s,-s,  s,-s,-s,  s, s,-s, -s, s,-s, // back
+        -s,-s, s,  s,-s, s,  s, s, s, -s, s, s, // front
+    ];
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    return buf;
+}
+
+const pieBuffers = createCylinder(gl, 1.2, 0.4, 40);
+const boxBuffer = createBox(gl);
+
+// --- Matrix Math ---
+function perspective(fovy, aspect, near, far) {
+    const f = 1.0 / Math.tan(fovy / 2);
+    const nf = 1 / (near - far);
+    return [f/aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far+near)*nf, -1, 0, 0, (2*far*near)*nf, 0];
+}
+
+let rotation = 0;
+function render() {
+    if (isCooking && !gameOver) {
+        cookLevel += 0.003;
+        document.getElementById('timer').innerText = `00:${Math.floor(cookLevel * 50).toString().padStart(2, '0')}`;
+        if (cookLevel > 1.2) endGame();
+    }
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.05, 0.05, 0.05, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    const projMatrix = perspective(45 * Math.PI / 180, canvas.width/canvas.height, 0.1, 100.0);
+    
+    gl.useProgram(programInfo.program);
+    gl.uniform1f(programInfo.uniformLocations.uCookLevel, cookLevel);
+
+    // Draw Microwave Box (Wireframe-ish)
+    gl.uniform1i(programInfo.uniformLocations.uIsBox, 1);
+    let boxMV = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-7,1];
+    gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projMatrix);
+    gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, boxMV);
+    gl.bindBuffer(gl.ARRAY_BUFFER, boxBuffer);
+    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    gl.drawArrays(gl.LINE_LOOP, 0, 4); gl.drawArrays(gl.LINE_LOOP, 4, 4);
+
+    // Draw Pie
+    gl.uniform1i(programInfo.uniformLocations.uIsBox, 0);
+    let pieMV = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,-0.5,-7,1];
+    const c = Math.cos(rotation), s = Math.sin(rotation);
+    const rY = [c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1];
+    // Multiply matrices (simplified)
+    pieMV[0] = c; pieMV[2] = -s; pieMV[8] = s; pieMV[10] = c;
+
+    gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, pieMV);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, pieBuffers.pos);
+    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, pieBuffers.norm);
+    gl.vertexAttribPointer(programInfo.attribLocations.normal, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.normal);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, pieBuffers.sideCount);
+    gl.drawArrays(gl.TRIANGLE_FAN, pieBuffers.topStart, pieBuffers.topCount);
+
+    rotation += isCooking ? 0.05 : 0.005;
+    requestAnimationFrame(render);
+}
+
+function endGame() {
+    gameOver = true;
+    isCooking = false;
+    const msg = document.getElementById('msg');
+    if (cookLevel < 0.4) {
+        msg.innerText = "CRUNCHY RAW DOUGH. ICK.";
+        msg.style.color = "#0ff";
+    } else if (cookLevel < 0.8) {
+        msg.innerText = "CHEF QUALITY PIE! YOU WIN!";
+        msg.style.color = "#ff0";
+    } else {
+        msg.innerText = "IT'S A LUMP OF CHARCOAL.";
+        msg.style.color = "#f00";
+    }
+    document.getElementById('status').innerText = "DONE";
+}
+
+window.addEventListener('mousedown', () => { if(!gameOver) { isCooking = true; document.getElementById('status').innerText = "COOKING..."; } });
+window.addEventListener('mouseup', () => { if(isCooking) endGame(); });
+window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
