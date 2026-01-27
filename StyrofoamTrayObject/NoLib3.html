@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OpenGLES 3.0 Styrofoam Icon Prototype</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: white; font-family: sans-serif; }
+        canvas { width: 600px; height: 600px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); background: radial-gradient(#444, #111); }
+        .label { margin-top: 20px; opacity: 0.7; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+<canvas id="glCanvas"></canvas>
+<div class="label">Raw WebGL 2.0 (OpenGLES 3.0 equivalent) • No Libraries</div>
+
+<script type="text/javascript">
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl2');
+
+if (!gl) { alert('WebGL 2.0 not supported'); }
+
+// --- SHADERS (GLSL 3.00 ES) ---
+const vsSource = `#version 300 es
+    in vec4 aPosition;
+    in vec3 aNormal;
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    out vec3 vNormal;
+    out vec3 vFragPos;
+
+    void main() {
+        vFragPos = vec3(uModelViewMatrix * aPosition);
+        vNormal = mat3(transpose(inverse(uModelViewMatrix))) * aNormal;
+        gl_Position = uProjectionMatrix * uModelViewMatrix * aPosition;
+    }
+`;
+
+const fsSource = `#version 300 es
+    precision highp float;
+    in vec3 vNormal;
+    in vec3 vFragPos;
+    out vec4 fragColor;
+
+    void main() {
+        vec3 lightPos = vec3(2.0, 5.0, 3.0);
+        vec3 lightColor = vec3(1.0, 1.0, 1.0);
+        vec3 objectColor = vec3(0.96, 0.97, 0.94); // Styrofoam White
+
+        // Ambient
+        float ambientStrength = 0.4;
+        vec3 ambient = ambientStrength * lightColor;
+
+        // Diffuse 
+        vec3 norm = normalize(vNormal);
+        vec3 lightDir = normalize(lightPos - vFragPos);
+        float diff = max(dot(norm, lightDir), 0.0);
+        vec3 diffuse = diff * lightColor;
+
+        // Specular (the "sheen")
+        float specularStrength = 0.3;
+        vec3 viewDir = normalize(-vFragPos);
+        vec3 reflectDir = reflect(-lightDir, norm);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 16.0);
+        vec3 specular = specularStrength * spec * lightColor;
+
+        fragColor = vec4((ambient + diffuse + specular) * objectColor, 1.0);
+    }
+`;
+
+// --- GEOMETRY ENGINE ---
+function createTrayMesh() {
+    const positions = [];
+    const normals = [];
+    const indices = [];
+
+    // Helper to add a quad with auto-normals
+    function addQuad(p1, p2, p3, p4) {
+        const startIdx = positions.length / 3;
+        positions.push(...p1, ...p2, ...p3, ...p4);
+        
+        // Calculate normal
+        const v1 = [p2[0]-p1[0], p2[1]-p1[1], p2[2]-p1[2]];
+        const v2 = [p3[0]-p1[0], p3[1]-p1[1], p3[2]-p1[2]];
+        const n = [
+            v1[1]*v2[2] - v1[2]*v2[1],
+            v1[2]*v2[0] - v1[0]*v2[2],
+            v1[0]*v2[1] - v1[1]*v2[0]
+        ];
+        const mag = Math.sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+        const norm = [n[0]/mag, n[1]/mag, n[2]/mag];
+        normals.push(...norm, ...norm, ...norm, ...norm);
+        
+        indices.push(startIdx, startIdx+1, startIdx+2, startIdx, startIdx+2, startIdx+3);
+    }
+
+    // DIMENSIONS
+    const W = 1.2, H = 0.15, D = 0.9; // Outer bounds
+    const T = 0.05; // Wall thickness/bevel
+    const floor = -0.05;
+
+    // 1. OUTER RIM (Top surface)
+  //  addQuad([-W, H, -D], [W, H, -D], [W, H, D], [-W, H, D]);
+
+    // 2. BIG SECTION (Right side)
+    // Sloped walls for the big compartment
+    addQuad([0.1, H, -0.8], [1.1, H, -0.8], [1.0, floor, -0.7], [0.2, floor, -0.7]); // Right wall back
+    addQuad([0.1, H,  0.8], [1.1, H,  0.8], [1.0, floor,  0.7], [0.2, floor,  0.7]); // Right wall front
+    addQuad([1.1, H, -0.8], [1.1, H,  0.8], [1.0, floor,  0.7], [1.0, floor, -0.7]); // Outer right wall
+    addQuad([0.1, H, -0.8], [0.1, H,  0.8], [0.2, floor,  0.7], [0.2, floor, -0.7]); // Middle vertical divider (right side)
+
+    // 3. SMALL SECTIONS (Left side)
+    // Top Left
+    addQuad([-1.1, H, -0.8], [-0.1, H, -0.8], [-0.2, floor, -0.7], [-1.0, floor, -0.7]);
+    addQuad([-0.1, H, -0.8], [-0.1, H, -0.05], [-0.2, floor, -0.1], [-0.2, floor, -0.7]);
+    // Bottom Left
+    addQuad([-1.1, H, 0.05], [-0.1, H, 0.05], [-0.2, floor, 0.1], [-1.0, floor, 0.1]);
+    addQuad([-1.1, H, 0.8], [-0.1, H, 0.8], [-0.2, floor, 0.7], [-1.0, floor, 0.7]);
+
+    // Floor plates
+    addQuad([-1.0, floor, -0.7], [-0.2, floor, -0.7], [-0.2, floor, -0.1], [-1.0, floor, -0.1]); // Small 1
+    addQuad([-1.0, floor,  0.1], [-0.2, floor,  0.1], [-0.2, floor,  0.7], [-1.0, floor,  0.7]); // Small 2
+    addQuad([ 0.2, floor, -0.7], [ 1.0, floor, -0.7], [ 1.0, floor,  0.7], [ 0.2, floor,  0.7]); // Big
+
+    return { positions: new Float32Array(positions), normals: new Float32Array(normals), indices: new Uint16Array(indices) };
+}
+
+// --- BOILERPLATE INITIALIZATION ---
+function initShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, initShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, initShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const mesh = createTrayMesh();
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+
+const posBuff = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, posBuff);
+gl.bufferData(gl.ARRAY_BUFFER, mesh.positions, gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(program, "aPosition");
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+const normBuff = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, normBuff);
+gl.bufferData(gl.ARRAY_BUFFER, mesh.normals, gl.STATIC_DRAW);
+const normLoc = gl.getAttribLocation(program, "aNormal");
+gl.enableVertexAttribArray(normLoc);
+gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 0, 0);
+
+const idxBuff = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuff);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
+
+const uProj = gl.getUniformLocation(program, "uProjectionMatrix");
+const uMV = gl.getUniformLocation(program, "uModelViewMatrix");
+
+// --- RENDER LOOP ---
+function render(time) {
+    gl.clearColor(0, 0, 0, 0);
+    gl.enable(gl.DEPTH_TEST);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const aspect = canvas.width / canvas.height;
+    const pMat = perspective(45 * Math.PI / 180, aspect, 0.1, 100.0);
+    
+    // Rotate for icon-style presentation
+    let mMat = identity();
+    mMat = translate(mMat, 0, 0, -3.5);
+    mMat = rotateX(mMat, 0.6);
+    mMat = rotateY(mMat, time * 0.0008);
+
+    gl.uniformMatrix4fv(uProj, false, pMat);
+    gl.uniformMatrix4fv(uMV, false, mMat);
+
+    gl.drawElements(gl.TRIANGLES, mesh.indices.length, gl.UNSIGNED_SHORT, 0);
+    requestAnimationFrame(render);
+}
+
+// --- MINIMAL MATH LIB ---
+function perspective(fovy, aspect, near, far) {
+    let f = 1.0 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return [f/aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far+near)*nf, -1, 0, 0, (2*far*near)*nf, 0];
+}
+function identity() { return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]; }
+function translate(m, x, y, z) { m[12]+=x; m[13]+=y; m[14]+=z; return m; }
+function rotateX(m, angle) {
+    let c = Math.cos(angle), s = Math.sin(angle), mv1 = m[1], mv5 = m[5], mv9 = m[9];
+    m[1] = m[1]*c-m[2]*s; m[5] = m[5]*c-m[6]*s; m[9] = m[9]*c-m[10]*s;
+    m[2] = mv1*s+m[2]*c; m[6] = mv5*s+m[6]*c; m[10] = mv9*s+m[10]*c;
+    return m;
+}
+function rotateY(m, angle) {
+    let c = Math.cos(angle), s = Math.sin(angle), mv0 = m[0], mv4 = m[4], mv8 = m[8];
+    m[0] = m[0]*c+m[2]*s; m[4] = m[4]*c+m[6]*s; m[8] = m[8]*c+m[10]*s;
+    m[2] = m[2]*c-mv0*s; m[6] = m[6]*c-mv4*s; m[10] = m[10]*c-mv8*s;
+    return m;
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
