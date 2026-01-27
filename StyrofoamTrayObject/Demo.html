@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Styrofoam Tray - WebGL</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; }
+        #info {
+            position: absolute;
+            top: 10px; width: 100%;
+            text-align: center;
+            color: white;
+            font-family: sans-serif;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">3D Styrofoam Tray (Click & Drag to Rotate)</div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.set(5, 5, 5);
+        controls.update();
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 10, 7);
+        scene.add(directionalLight);
+
+        // --- The Styrofoam Tray Logic ---
+        // We use a LatheGeometry or a ExtrudeGeometry for custom shapes, 
+        // but for a simple tray, a modified Box is efficient.
+        
+        const trayWidth = 4;
+        const trayDepth = 3;
+        const trayHeight = 0.5;
+        const thickness = 0.1;
+
+        // Material with a "styrofoam" feel (Matte, slightly bumpy)
+        const styroMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.9,
+            metalness: 0.0,
+            side: THREE.DoubleSide
+        });
+
+        // Create the base
+        const geometry = new THREE.BoxGeometry(trayWidth, thickness, trayDepth);
+        const trayBase = new THREE.Mesh(geometry, styroMaterial);
+        
+        // Create the 4 Walls (angled slightly outward)
+        const wallHeight = 0.6;
+        const wallAngle = 0.3; // Radians
+
+        function createWall(w, h, d, x, y, z, rotX, rotZ) {
+            const wallGeo = new THREE.BoxGeometry(w, h, d);
+            const wall = new THREE.Mesh(wallGeo, styroMaterial);
+            wall.position.set(x, y, z);
+            wall.rotation.x = rotX;
+            wall.rotation.z = rotZ;
+            return wall;
+        }
+
+        // Long sides
+        trayBase.add(createWall(trayWidth, wallHeight, thickness, 0, wallHeight/2, trayDepth/2, -wallAngle, 0));
+        trayBase.add(createWall(trayWidth, wallHeight, thickness, 0, wallHeight/2, -trayDepth/2, wallAngle, 0));
+        
+        // Short sides
+        trayBase.add(createWall(thickness, wallHeight, trayDepth, trayWidth/2, wallHeight/2, 0, 0, wallAngle));
+        trayBase.add(createWall(thickness, wallHeight, trayDepth, -trayWidth/2, wallHeight/2, 0, 0, -wallAngle));
+
+        scene.add(trayBase);
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            // Slow rotation for showcase
+            trayBase.rotation.y += 0.005;
+            renderer.render(scene, camera);
+        }
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
