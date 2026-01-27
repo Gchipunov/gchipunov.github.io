@@ -18,7 +18,8 @@ async function main() {
 attribute vec3 a_position;
 uniform mat4 u_lightProjectionMatrix;
 uniform mat4 u_lightViewMatrix;
-uniform float u_time;
+// uniform float u_time;
+uniform highp float u_time;
 
 varying vec3 v_worldPosition;
 
@@ -39,7 +40,8 @@ void main() {
 precision mediump float;
 
 varying vec3 v_worldPosition;
-uniform float u_time;
+//uniform float u_time;
+uniform highp float u_time;
 
 // Noise function to get normals
 vec3 getNormal(vec2 p) {
