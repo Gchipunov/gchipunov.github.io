@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>WebGL Motion Matching Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; }
+        .key { background: #444; padding: 2px 6px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>Motion Matching Lab</h2>
+        <p>Use <span class="key">WASD</span> to move the trajectory.</p>
+        <p id="status">Searching Database...</p>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+// --- SHADERS ---
+const vsSource = `
+    attribute vec4 aPosition;
+    attribute vec3 aColor;
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    varying lowp vec4 vColor;
+    void main() {
+        gl_Position = uProjectionMatrix * uModelViewMatrix * aPosition;
+        vColor = vec4(aColor, 1.0);
+    }
+`;
+
+const fsSource = `
+    varying lowp vec4 vColor;
+    void main() {
+        gl_FragColor = vColor;
+    }
+`;
+
+// --- INITIALIZATION ---
+function initShaderProgram(gl, vs, fs) {
+    const vShader = loadShader(gl, gl.VERTEX_SHADER, vs);
+    const fShader = loadShader(gl, gl.FRAGMENT_SHADER, fs);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vShader);
+    gl.attachShader(prog, fShader);
+    gl.linkProgram(prog);
+    return prog;
+}
+
+function loadShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+const programInfo = {
+    program: shaderProgram,
+    attribLocations: {
+        position: gl.getAttribLocation(shaderProgram, 'aPosition'),
+        color: gl.getAttribLocation(shaderProgram, 'aColor'),
+    },
+    uniformLocations: {
+        projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+        modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+    },
+};
+
+// --- MOTION MATCHING DATABASE ---
+// In a real app, this is thousands of frames of MoCap data.
+// Here, we generate a synthetic "Run/Idle/Turn" database.
+const animationDB = [];
+for (let i = 0; i < 200; i++) {
+    const t = i / 20;
+    animationDB.push({
+        pose: Math.sin(t * 10) * 0.5, // Knee lift
+        velocity: { x: Math.cos(t) * 0.1, z: Math.sin(t) * 0.1 },
+        frameIndex: i
+    });
+}
+
+// --- STATE ---
+let characterPos = { x: 0, z: 0 };
+let characterVel = { x: 0, z: 0 };
+let currentFrame = 0;
+const keys = {};
+
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+function findBestMatchingFrame(targetVel) {
+    let bestDist = Infinity;
+    let bestIdx = 0;
+    
+    // Core Motion Matching logic: Minimizing the cost function
+    // Cost = PoseDiff + TrajectoryDiff
+    for (let i = 0; i < animationDB.length; i++) {
+        const frame = animationDB[i];
+        const dX = frame.velocity.x - targetVel.x;
+        const dZ = frame.velocity.z - targetVel.z;
+        const dist = dX*dX + dZ*dZ; 
+        
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
+// --- RENDERING ---
+function createCube(gl) {
+    const positions = [-1,-1,1, 1,-1,1, 1,1,1, -1,1,1, -1,-1,-1, -1,1,-1, 1,1,-1, 1,-1,-1];
+    const colors = positions.map(() => Math.random());
+    const indices = [0,1,2, 0,2,3, 4,5,6, 4,6,7, 3,2,6, 3,6,5, 0,3,5, 0,5,4, 1,7,6, 1,6,2, 0,4,7, 0,7,1];
+    
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+    
+    const idxBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+    
+    return { posBuf, colBuf, idxBuf, count: indices.length };
+}
+
+const cube = createCube(gl);
+
+function render(now) {
+    // Update Input
+    const targetVel = { x: 0, z: 0 };
+    if (keys['w']) targetVel.z = -0.15;
+    if (keys['s']) targetVel.z = 0.15;
+    if (keys['a']) targetVel.x = -0.15;
+    if (keys['d']) targetVel.x = 0.15;
+
+    // Motion Matching Search (Every N frames)
+    if (Math.floor(now/100) % 5 === 0) {
+        currentFrame = findBestMatchingFrame(targetVel);
+    } else {
+        currentFrame = (currentFrame + 1) % animationDB.length;
+    }
+
+    const pose = animationDB[currentFrame];
+    characterPos.x += targetVel.x;
+    characterPos.z += targetVel.z;
+
+    // GL Setup
+    gl.viewport(0, 0, canvas.width = window.innerWidth, canvas.height = window.innerHeight);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    const projMatrix = new Float32Array([
+        1,0,0,0, 0,1,0,0, 0,0,-1,-1, 0,0,-2,0
+    ]); // Simple perspective
+
+    function drawBodyPart(x, y, z, sx, sy, sz) {
+        let modelView = new Float32Array([
+            sx,0,0,0, 0,sy,0,0, 0,0,sz,0, x,y,z-10,1
+        ]);
+        
+        gl.bindBuffer(gl.ARRAY_BUFFER, cube.posBuf);
+        gl.vertexAttribPointer(programInfo.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.position);
+        
+        gl.bindBuffer(gl.ARRAY_BUFFER, cube.colBuf);
+        gl.vertexAttribPointer(programInfo.attribLocations.color, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.color);
+        
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cube.idxBuf);
+        gl.useProgram(programInfo.program);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projMatrix);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelView);
+        gl.drawElements(gl.TRIANGLES, cube.count, gl.UNSIGNED_SHORT, 0);
+    }
+
+    // Draw Character (Simplified Humanoid)
+    const bx = characterPos.x, bz = characterPos.z;
+    const lift = Math.abs(pose.pose);
+    drawBodyPart(bx, 0, bz, 0.5, 0.8, 0.3); // Torso
+    drawBodyPart(bx - 0.4, -1 + lift, bz, 0.15, 0.5, 0.15); // Left Leg
+    drawBodyPart(bx + 0.4, -1 + (0.5 - lift), bz, 0.15, 0.5, 0.15); // Right Leg
+
+    requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
