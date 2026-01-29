@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Procedural Terrain</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; /* Sky color */ }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #instructions {
+            position: absolute; top: 10px; left: 10px;
+            color: white; font-family: sans-serif; font-weight: bold;
+            text-shadow: 1px 1px 2px black; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">Procedural Terrain: Water, Sand, Grass<br>Drag to Rotate</div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec3 aPosition;
+        attribute vec3 aNormal;
+
+        uniform mat4 uModelViewMatrix;
+        uniform mat4 uProjectionMatrix;
+        uniform mat4 uNormalMatrix;
+        uniform float uTime;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying float vHeight;
+
+        void main() {
+            vec3 pos = aPosition;
+            
+            // Simple water wave effect if height is at water level
+            if (pos.y <= -1.9) {
+                pos.y += sin(pos.x * 5.0 + uTime) * 0.05 + cos(pos.z * 5.0 + uTime) * 0.05;
+            }
+
+            vPosition = pos;
+            vHeight = aPosition.y;
+            
+            // Transform normal
+            vNormal = mat3(uNormalMatrix) * aNormal;
+
+            gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(pos, 1.0);
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        varying float vHeight;
+
+        // Light direction (fixed sun)
+        const vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+        const vec3 ambientColor = vec3(0.2, 0.2, 0.2);
+        const vec3 sunColor = vec3(1.0, 1.0, 0.9);
+
+        void main() {
+            vec3 normal = normalize(vNormal);
+            
+            // Calculate Diffuse Lighting (Lambert)
+            float diff = max(dot(normal, lightDir), 0.0);
+            
+            // Define biome colors
+            vec3 waterColor = vec3(0.0, 0.4, 0.8);
+            vec3 sandColor  = vec3(0.9, 0.85, 0.6);
+            vec3 grassColor = vec3(0.1, 0.6, 0.1);
+            vec3 rockColor  = vec3(0.5, 0.5, 0.5);
+
+            vec3 baseColor;
+
+            // Biome Blending Logic
+            // Water Level is around -2.0
+            // Sand Level is around -1.7
+            // Grass Level is standard
+            // Rock Level is high altitude
+
+            if (vHeight < -1.8) {
+                baseColor = waterColor;
+                // Add specular highlight for water
+                vec3 viewDir = normalize(-vPosition); // Simplified view dir
+                vec3 reflectDir = reflect(-lightDir, normal);
+                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+                baseColor += spec * 0.5; 
+            } else if (vHeight < -1.2) {
+                // Blend Water to Sand
+                float t = smoothstep(-1.8, -1.2, vHeight);
+                baseColor = mix(sandColor, sandColor * 1.1, t); // Slight noise
+            } else if (vHeight < 1.5) {
+                // Blend Sand to Grass
+                float t = smoothstep(-1.2, -0.5, vHeight);
+                baseColor = mix(sandColor, grassColor, t);
+            } else {
+                // Grass to Rock
+                float t = smoothstep(1.5, 2.5, vHeight);
+                baseColor = mix(grassColor, rockColor, t);
+            }
+
+            // Apply Light
+            vec3 finalColor = baseColor * (ambientColor + sunColor * diff);
+
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    </script>
+
+    <script>
+        // --- 1. SETUP WEBGL ---
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) { alert('WebGL not supported'); }
+
+        // Resize handling
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- 2. SHADER HELPERS ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vsSource = document.getElementById('vertex-shader').text;
+        const fsSource = document.getElementById('fragment-shader').text;
+        
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Program link error:', gl.getProgramInfoLog(program));
+        }
+
+        // --- 3. MATH LIBRARY (Since we have no libraries) ---
+        const Mat4 = {
+            perspective: function(fov, aspect, near, far) {
+                const f = 1.0 / Math.tan(fov / 2);
+                const nf = 1 / (near - far);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (far + near) * nf, -1,
+                    0, 0, (2 * far * near) * nf, 0
+                ];
+            },
+            identity: function() {
+                return [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+            },
+            rotateY: function(m, angle) {
+                const c = Math.cos(angle);
+                const s = Math.sin(angle);
+                const mv0 = m[0], mv2 = m[2], mv8 = m[8], mv10 = m[10];
+                const res = [...m];
+                res[0] = c * mv0 + s * mv2;
+                res[2] = c * mv2 - s * mv0;
+                res[8] = c * mv8 + s * mv10;
+                res[10] = c * mv10 - s * mv8;
+                return res;
+            },
+            rotateX: function(m, angle) {
+                const c = Math.cos(angle);
+                const s = Math.sin(angle);
+                const mv4 = m[4], mv5 = m[5], mv6 = m[6], mv7 = m[7];
+                const mv8 = m[8], mv9 = m[9], mv10 = m[10], mv11 = m[11];
+                const res = [...m];
+                res[4] = c * mv4 + s * mv8;
+                res[5] = c * mv5 + s * mv9;
+                res[6] = c * mv6 + s * mv10;
+                res[7] = c * mv7 + s * mv11;
+                res[8] = c * mv8 - s * mv4;
+                res[9] = c * mv9 - s * mv5;
+                res[10] = c * mv10 - s * mv6;
+                res[11] = c * mv11 - s * mv7;
+                return res;
+            },
+            translate: function(m, x, y, z) {
+                const res = [...m];
+                res[12] = m[0] * x + m[4] * y + m[8] * z + m[12];
+                res[13] = m[1] * x + m[5] * y + m[9] * z + m[13];
+                res[14] = m[2] * x + m[6] * y + m[10] * z + m[14];
+                res[15] = m[3] * x + m[7] * y + m[11] * z + m[15];
+                return res;
+            },
+            // Invert transpose (for normals) - Simplified for rotation/translation only
+            inverseTranspose: function(m) {
+                // For orthogonal matrices (rotation), inverse = transpose. 
+                // We just return m for this simple demo as we don't scale non-uniformly.
+                return m; 
+            }
+        };
+
+        // --- 4. TERRAIN GENERATION ---
+        const size = 60; 
+        const div = 80; // Divisions
+        const positions = [];
+        const indices = [];
+        const normals = [];
+
+        // Height function (Procedural Noise-ish)
+        function getHeight(x, z) {
+            let y = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 2.0;
+            y += Math.sin(x * 0.3 + z * 0.2) * 1.0;
+            y += Math.sin(x * 0.5 - z * 0.4) * 0.5;
+            
+            // Flatten valleys for water
+            if (y < -2.0) return -2.0;
+            return y;
+        }
+
+        // Generate Grid
+        for(let z = 0; z <= div; z++) {
+            for(let x = 0; x <= div; x++) {
+                const xPos = (x / div) * size - size / 2;
+                const zPos = (z / div) * size - size / 2;
+                const yPos = getHeight(xPos, zPos);
+                
+                positions.push(xPos, yPos, zPos);
+            }
+        }
+
+        // Calculate Normals
+        for(let z = 0; z <= div; z++) {
+            for(let x = 0; x <= div; x++) {
+                // Use finite difference to approximate normal
+                const d = 0.1;
+                const hL = getHeight(((x / div) * size - size / 2) - d, (z / div) * size - size / 2);
+                const hR = getHeight(((x / div) * size - size / 2) + d, (z / div) * size - size / 2);
+                const hD = getHeight((x / div) * size - size / 2, ((z / div) * size - size / 2) - d);
+                const hU = getHeight((x / div) * size - size / 2, ((z / div) * size - size / 2) + d);
+                
+                // Vectors
+                const vHorizontal = [2 * d, hR - hL, 0];
+                const vVertical = [0, hU - hD, 2 * d];
+                
+                // Cross Product
+                let nx = vVertical[1] * vHorizontal[2] - vVertical[2] * vHorizontal[1];
+                let ny = vVertical[2] * vHorizontal[0] - vVertical[0] * vHorizontal[2];
+                let nz = vVertical[0] * vHorizontal[1] - vVertical[1] * vHorizontal[0];
+                
+                // Normalize
+                const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
+                normals.push(nx/len, ny/len, nz/len);
+            }
+        }
+
+        // Generate Indices
+        for(let z = 0; z < div; z++) {
+            for(let x = 0; x < div; x++) {
+                const row1 = z * (div + 1);
+                const row2 = (z + 1) * (div + 1);
+                
+                // Triangle 1
+                indices.push(row1 + x, row2 + x, row1 + x + 1);
+                // Triangle 2
+                indices.push(row1 + x + 1, row2 + x, row2 + x + 1);
+            }
+        }
+
+        // --- 5. BUFFERS ---
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        const normalBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+        // --- 6. UNIFORM LOCATIONS & ATTRIBUTES ---
+        const aPosition = gl.getAttribLocation(program, 'aPosition');
+        const aNormal = gl.getAttribLocation(program, 'aNormal');
+        const uModelViewMatrix = gl.getUniformLocation(program, 'uModelViewMatrix');
+        const uProjectionMatrix = gl.getUniformLocation(program, 'uProjectionMatrix');
+        const uNormalMatrix = gl.getUniformLocation(program, 'uNormalMatrix');
+        const uTime = gl.getUniformLocation(program, 'uTime');
+
+        gl.enableVertexAttribArray(aPosition);
+        gl.enableVertexAttribArray(aNormal);
+
+        // --- 7. RENDER LOOP ---
+        let rotationX = 0.5;
+        let rotationY = 0;
+        let isDragging = false;
+        let lastX, lastY;
+
+        // Mouse Controls
+        canvas.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+        window.addEventListener('mouseup', () => isDragging = false);
+        window.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            rotationY += dx * 0.005;
+            rotationX += dy * 0.005;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+
+        function render(time) {
+            time *= 0.001; // seconds
+
+            gl.useProgram(program);
+            
+            // Set State
+            gl.enable(gl.DEPTH_TEST);
+            gl.clearColor(0.53, 0.81, 0.92, 1.0); // Sky color match
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Matrix setup
+            const fov = 45 * Math.PI / 180;
+            const aspect = canvas.width / canvas.height;
+            const projMatrix = Mat4.perspective(fov, aspect, 0.1, 100.0);
+            
+            let mvMatrix = Mat4.identity();
+            mvMatrix = Mat4.translate(mvMatrix, 0, 0, -35); // Zoom out
+            mvMatrix = Mat4.rotateX(mvMatrix, rotationX);
+            mvMatrix = Mat4.rotateY(mvMatrix, rotationY);
+            
+            // Normal matrix (for this demo, same as ModelView because we only rotate/translate)
+            const nMatrix = mvMatrix; 
+
+            // Bind Attributes
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+            // Set Uniforms
+            gl.uniformMatrix4fv(uProjectionMatrix, false, new Float32Array(projMatrix));
+            gl.uniformMatrix4fv(uModelViewMatrix, false, new Float32Array(mvMatrix));
+            gl.uniformMatrix4fv(uNormalMatrix, false, new Float32Array(nMatrix));
+            gl.uniform1f(uTime, time);
+
+            // Draw
+            gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
