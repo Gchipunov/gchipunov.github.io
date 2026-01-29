@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Capsule Geometry</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glcanvas"></canvas>
+
+<script>
+/**
+ * WebGL Capsule Rendering - No Libraries
+ */
+
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) {
+    alert('WebGL not supported');
+    throw new Error('WebGL not supported');
+}
+
+// ----------------------------------------------------------------------------
+// 1. SHADERS
+// ----------------------------------------------------------------------------
+
+const vertexShaderSource = `
+    attribute vec3 aPosition;
+    attribute vec3 aNormal;
+
+    uniform mat4 uModelViewProjection;
+    uniform mat4 uNormalMatrix;
+
+    varying vec3 vNormal;
+
+    void main() {
+        // Pass normal to fragment shader (transformed by normal matrix)
+        vNormal = normalize((uNormalMatrix * vec4(aNormal, 0.0)).xyz);
+        gl_Position = uModelViewProjection * vec4(aPosition, 1.0);
+    }
+`;
+
+const fragmentShaderSource = `
+    precision mediump float;
+    varying vec3 vNormal;
+
+    void main() {
+        // Simple Directional Lighting
+        vec3 lightDirection = normalize(vec3(0.5, 0.8, 1.0));
+        
+        // Ambient light
+        float ambient = 0.2;
+        
+        // Diffuse light (Lambertian)
+        float diff = max(dot(vNormal, lightDirection), 0.0);
+        
+        // Capsule Color (Teal)
+        vec3 color = vec3(0.0, 0.8, 0.7);
+        
+        // Final pixel color
+        gl_FragColor = vec4(color * (diff + ambient), 1.0);
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(program));
+}
+
+gl.useProgram(program);
+
+// ----------------------------------------------------------------------------
+// 2. GEOMETRY GENERATION (Capsule)
+// ----------------------------------------------------------------------------
+
+function createCapsule(radius, height, capsRings, sectors) {
+    const positions = [];
+    const normals = [];
+    const indices = [];
+
+    // Helper to push vertex data
+    function pushVertex(x, y, z) {
+        positions.push(x, y, z);
+        // For a capsule/sphere center at 0,0,0 (local to the hemisphere), 
+        // normal is usually position normalized. 
+        // However, we offset Y. We need the normal relative to the sphere center.
+        
+        // We will calculate normals based on the sphere logic, not the offset position.
+        // But for the cylinder part, the normal is just (x, 0, z) normalized.
+    }
+
+    // We generate the capsule by generating two hemispheres separated by a cylinder.
+    // However, an easier way for a single mesh is to generate rings.
+    // 1. Top Hemisphere rings (0 to PI/2) -> Offset by +height/2
+    // 2. Bottom Hemisphere rings (PI/2 to PI) -> Offset by -height/2
+    // The triangulation between the last top ring and first bottom ring creates the cylinder body.
+
+    const halfHeight = height / 2;
+    const totalRings = capsRings * 2; // Top cap + Bottom cap
+
+    for (let r = 0; r <= totalRings; r++) {
+        // Calculate Phi: 0 to PI
+        // But we need to handle the "split" at PI/2
+        
+        let phi = (Math.PI * r) / totalRings;
+        let yOffset = 0;
+
+        // Determine which part of the capsule we are in
+        if (r <= capsRings) {
+            // Top Hemisphere
+            yOffset = halfHeight;
+            // Remap phi to 0 -> PI/2
+            phi = (Math.PI * 0.5 * r) / capsRings; 
+        } else {
+            // Bottom Hemisphere
+            yOffset = -halfHeight;
+            // Remap phi to PI/2 -> PI
+            let r_bottom = r - capsRings;
+            phi = (Math.PI * 0.5) + (Math.PI * 0.5 * r_bottom) / capsRings;
+        }
+
+        for (let s = 0; s <= sectors; s++) {
+            const theta = (2 * Math.PI * s) / sectors;
+
+            // Spherical coordinates
+            const x = radius * Math.sin(phi) * Math.cos(theta);
+            const z = radius * Math.sin(phi) * Math.sin(theta);
+            let y = radius * Math.cos(phi);
+
+            // Normal is the vector from the specific hemisphere center
+            const nx = x / radius;
+            const ny = y / radius;
+            const nz = z / radius;
+
+            // Apply capsule body offset
+            y += yOffset;
+
+            positions.push(x, y, z);
+            normals.push(nx, ny, nz);
+        }
+    }
+
+    // Indices Generation
+    // We have (totalRings + 1) rings, each having (sectors + 1) vertices
+    const vertsPerRing = sectors + 1;
+    
+    for (let r = 0; r < totalRings; r++) {
+        for (let s = 0; s < sectors; s++) {
+            const row1 = r * vertsPerRing;
+            const row2 = (r + 1) * vertsPerRing;
+
+            // Triangle 1
+            indices.push(row1 + s);
+            indices.push(row2 + s);
+            indices.push(row2 + s + 1);
+
+            // Triangle 2
+            indices.push(row1 + s);
+            indices.push(row2 + s + 1);
+            indices.push(row1 + s + 1);
+        }
+    }
+
+    return { positions, normals, indices };
+}
+
+// Generate the shape: Radius 1, Body Height 2, 16 rings per cap, 32 sectors around
+const capsuleData = createCapsule(1.0, 2.0, 16, 32);
+
+// ----------------------------------------------------------------------------
+// 3. BUFFERS
+// ----------------------------------------------------------------------------
+
+// Position Buffer
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(capsuleData.positions), gl.STATIC_DRAW);
+const aPosition = gl.getAttribLocation(program, 'aPosition');
+gl.enableVertexAttribArray(aPosition);
+gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+
+// Normal Buffer
+const normalBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(capsuleData.normals), gl.STATIC_DRAW);
+const aNormal = gl.getAttribLocation(program, 'aNormal');
+gl.enableVertexAttribArray(aNormal);
+gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+
+// Index Buffer
+const indexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(capsuleData.indices), gl.STATIC_DRAW);
+
+// Uniform Locations
+const uModelViewProjection = gl.getUniformLocation(program, 'uModelViewProjection');
+const uNormalMatrix = gl.getUniformLocation(program, 'uNormalMatrix');
+
+// ----------------------------------------------------------------------------
+// 4. MATRIX MATH HELPERS (Minimal)
+// ----------------------------------------------------------------------------
+
+const Mat4 = {
+    identity: () => [
+        1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+    ],
+    
+    perspective: (fov, aspect, near, far) => {
+        const f = 1.0 / Math.tan(fov / 2);
+        const nf = 1 / (near - far);
+        return [
+            f / aspect, 0, 0, 0,
+            0, f, 0, 0,
+            0, 0, (far + near) * nf, -1,
+            0, 0, (2 * far * near) * nf, 0
+        ];
+    },
+
+    multiply: (a, b) => {
+        const out = new Array(16);
+        for (let i = 0; i < 4; i++) {
+            for (let j = 0; j < 4; j++) {
+                let sum = 0;
+                for (let k = 0; k < 4; k++) sum += a[i * 4 + k] * b[k * 4 + j];
+                out[i * 4 + j] = sum;
+            }
+        }
+        // WebGL matrices are column-major, but our simple math here is row-major logic stored flat.
+        // To fix this without complex transpose logic, we usually flip how we multiply or transpose the result.
+        // However, standard GL math libraries use column-major. Let's do a proper column-major multiply:
+        const res = new Float32Array(16);
+        const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+        const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+        const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+        const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+        let b0  = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+        res[0] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+        res[1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+        res[2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+        res[3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+        b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+        res[4] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+        res[5] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+        res[6] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+        res[7] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+        b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+        res[8] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+        res[9] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+        res[10] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+        res[11] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+        b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+        res[12] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+        res[13] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+        res[14] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+        res[15] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+        return res;
+    },
+
+    rotateX: (m, angle) => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        const mv1 = m[1], mv5 = m[5], mv9 = m[9];
+        const mv2 = m[2], mv6 = m[6], mv10 = m[10];
+        m[1] = mv1 * c - mv2 * s;
+        m[5] = mv5 * c - mv6 * s;
+        m[9] = mv9 * c - mv10 * s;
+        m[2] = mv2 * c + mv1 * s;
+        m[6] = mv6 * c + mv5 * s;
+        m[10] = mv10 * c + mv9 * s;
+    },
+
+    rotateY: (m, angle) => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        const mv0 = m[0], mv4 = m[4], mv8 = m[8];
+        const mv2 = m[2], mv6 = m[6], mv10 = m[10];
+        m[0] = c * mv0 + s * mv2;
+        m[4] = c * mv4 + s * mv6;
+        m[8] = c * mv8 + s * mv10;
+        m[2] = c * mv2 - s * mv0;
+        m[6] = c * mv6 - s * mv4;
+        m[10] = c * mv10 - s * mv8;
+    },
+
+    translate: (m, x, y, z) => {
+        m[12] = m[0] * x + m[4] * y + m[8] * z + m[12];
+        m[13] = m[1] * x + m[5] * y + m[9] * z + m[13];
+        m[14] = m[2] * x + m[6] * y + m[10] * z + m[14];
+        m[15] = m[3] * x + m[7] * y + m[11] * z + m[15];
+    },
+
+    transpose: (m) => {
+        return [
+            m[0], m[4], m[8], m[12],
+            m[1], m[5], m[9], m[13],
+            m[2], m[6], m[10], m[14],
+            m[3], m[7], m[11], m[15]
+        ];
+    },
+    
+    invert: (m) => {
+         // Simplified inversion for rotation/translation matrices only (sufficient for normals)
+         // Actually, for normals we usually need Transpose(Inverse(ModelView)).
+         // Since we only rotate and translate, the inverse is easy, but let's just stick 
+         // to passing the ModelView and letting the shader handle it if we don't scale non-uniformly.
+         // For this demo, we can just pass the ModelMatrix as the NormalMatrix if scaling is uniform (1.0).
+         return m; 
+    }
+};
+
+// ----------------------------------------------------------------------------
+// 5. RENDER LOOP
+// ----------------------------------------------------------------------------
+
+gl.enable(gl.DEPTH_TEST);
+gl.viewport(0, 0, canvas.width, canvas.height);
+
+function render(time) {
+    const t = time * 0.001;
+    
+    // Resize canvas if needed
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // 1. Projection Matrix
+    const aspect = canvas.width / canvas.height;
+    const projectionMatrix = Mat4.perspective(Math.PI / 4, aspect, 0.1, 100.0);
+
+    // 2. Model View Matrix
+    const modelViewMatrix = Mat4.identity();
+    Mat4.translate(modelViewMatrix, 0.0, 0.0, -8.0); // Move camera back
+    Mat4.rotateX(modelViewMatrix, t * 0.7);          // Rotate object
+    Mat4.rotateY(modelViewMatrix, t);
+
+    // 3. Combine
+    const finalMatrix = Mat4.multiply(projectionMatrix, modelViewMatrix);
+
+    // 4. Normal Matrix (For lighting) - If uniform scaling, just use ModelView rotation subcomponent
+    // We are passing the whole MV for simplicity as scaling is 1.
+    
+    gl.uniformMatrix4fv(uModelViewProjection, false, finalMatrix);
+    gl.uniformMatrix4fv(uNormalMatrix, false, modelViewMatrix);
+
+    gl.drawElements(gl.TRIANGLES, capsuleData.indices.length, gl.UNSIGNED_SHORT, 0);
+
+    requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+
+</script>
+</body>
+</html>
