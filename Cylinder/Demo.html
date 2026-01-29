@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Cylinder - No Libraries</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #instructions {
+            position: absolute; top: 10px; left: 10px;
+            color: white; font-family: sans-serif; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">WebGL Cylinder (Pure JS)</div>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec4 a_position;
+        attribute vec3 a_normal;
+
+        uniform mat4 u_worldViewProjection;
+        uniform mat4 u_worldInverseTranspose;
+
+        varying vec3 v_normal;
+
+        void main() {
+            // Multiply position by matrix
+            gl_Position = u_worldViewProjection * a_position;
+
+            // Orient the normals and pass to fragment shader
+            v_normal = mat3(u_worldInverseTranspose) * a_normal;
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+
+        varying vec3 v_normal;
+
+        void main() {
+            // Simple directional lighting
+            vec3 normal = normalize(v_normal);
+            vec3 lightDir = normalize(vec3(0.5, 0.7, 1.0)); // Light coming from top-right-front
+
+            // Calculate brightness (Dot product)
+            float light = max(dot(normal, lightDir), 0.0);
+            
+            // Base color (teal) + Ambient light
+            vec3 color = vec3(0.2, 0.6, 0.8);
+            vec3 ambient = vec3(0.2, 0.2, 0.2);
+
+            gl_FragColor = vec4(color * light + ambient, 1.0);
+        }
+    </script>
+
+    <script>
+        // --- 1. BOILERPLATE & INITIALIZATION ---
+        const canvas = document.getElementById("glCanvas");
+        const gl = canvas.getContext("webgl");
+
+        if (!gl) {
+            alert("WebGL not supported");
+            throw new Error("WebGL not supported");
+        }
+
+        // Resize canvas to full screen
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- 2. SHADER COMPILATION ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vsSource, fsSource) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error(gl.getProgramInfoLog(program));
+                return null;
+            }
+            return program;
+        }
+
+        const vsSource = document.getElementById("vertex-shader").text;
+        const fsSource = document.getElementById("fragment-shader").text;
+        const program = createProgram(gl, vsSource, fsSource);
+
+        // Look up locations
+        const positionLoc = gl.getAttribLocation(program, "a_position");
+        const normalLoc = gl.getAttribLocation(program, "a_normal");
+        const matrixLoc = gl.getUniformLocation(program, "u_worldViewProjection");
+        const worldInvTrLoc = gl.getUniformLocation(program, "u_worldInverseTranspose");
+
+        // --- 3. GEOMETRY GENERATION (CYLINDER) ---
+        function createCylinderData(radius, height, radialSegments) {
+            const positions = [];
+            const normals = [];
+            const indices = [];
+
+            // Helper to push vertex
+            function addVertex(x, y, z, nx, ny, nz) {
+                positions.push(x, y, z);
+                normals.push(nx, ny, nz);
+            }
+
+            const halfH = height / 2;
+
+            // A. Side Surface
+            for (let i = 0; i <= radialSegments; i++) {
+                const theta = (i / radialSegments) * Math.PI * 2;
+                const sinTheta = Math.sin(theta);
+                const cosTheta = Math.cos(theta);
+
+                // Normal is same for top and bottom vertex of the side
+                const nx = cosTheta;
+                const ny = 0;
+                const nz = sinTheta;
+
+                // Top vertex
+                addVertex(radius * cosTheta, halfH, radius * sinTheta, nx, ny, nz);
+                // Bottom vertex
+                addVertex(radius * cosTheta, -halfH, radius * sinTheta, nx, ny, nz);
+            }
+
+            // Indices for sides
+            for (let i = 0; i < radialSegments; i++) {
+                const top1 = i * 2;
+                const bottom1 = i * 2 + 1;
+                const top2 = (i * 2 + 2);
+                const bottom2 = (i * 2 + 3);
+
+                indices.push(top1, bottom1, top2);
+                indices.push(bottom1, bottom2, top2);
+            }
+
+            const sideVertexCount = positions.length / 3;
+
+            // B. Top Cap
+            // Center vertex
+            addVertex(0, halfH, 0, 0, 1, 0); 
+            const topCenterIndex = sideVertexCount;
+
+            // Perimeter vertices for top cap
+            for (let i = 0; i <= radialSegments; i++) {
+                const theta = (i / radialSegments) * Math.PI * 2;
+                const x = radius * Math.cos(theta);
+                const z = radius * Math.sin(theta);
+                addVertex(x, halfH, z, 0, 1, 0);
+            }
+
+            // Indices for Top Cap
+            for (let i = 0; i < radialSegments; i++) {
+                indices.push(topCenterIndex, topCenterIndex + i + 1, topCenterIndex + i + 2);
+            }
+
+            const topCapCount = positions.length / 3;
+
+            // C. Bottom Cap
+            // Center vertex
+            addVertex(0, -halfH, 0, 0, -1, 0);
+            const bottomCenterIndex = topCapCount;
+
+            // Perimeter vertices for bottom cap
+            for (let i = 0; i <= radialSegments; i++) {
+                const theta = (i / radialSegments) * Math.PI * 2;
+                const x = radius * Math.cos(theta);
+                const z = radius * Math.sin(theta);
+                addVertex(x, -halfH, z, 0, -1, 0);
+            }
+
+            // Indices for Bottom Cap (winding order reversed to face down)
+            for (let i = 0; i < radialSegments; i++) {
+                indices.push(bottomCenterIndex, bottomCenterIndex + i + 2, bottomCenterIndex + i + 1);
+            }
+
+            return { positions, normals, indices };
+        }
+
+        // Generate the mesh
+        const cylinderData = createCylinderData(1.0, 2.0, 32);
+
+        // --- 4. BUFFERS ---
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cylinderData.positions), gl.STATIC_DRAW);
+
+        const normalBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cylinderData.normals), gl.STATIC_DRAW);
+
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(cylinderData.indices), gl.STATIC_DRAW);
+
+        // --- 5. MATH HELPERS (Minimal Matrix Lib) ---
+        const m4 = {
+            perspective: function(fieldOfViewInRadians, aspect, near, far) {
+                const f = Math.tan(Math.PI * 0.5 - 0.5 * fieldOfViewInRadians);
+                const rangeInv = 1.0 / (near - far);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (near + far) * rangeInv, -1,
+                    0, 0, near * far * rangeInv * 2, 0
+                ];
+            },
+            projection: function(width, height, depth) {
+                // Note: For 3D we usually use perspective, but this is a standard orthographic projection
+                return [
+                    2 / width, 0, 0, 0,
+                    0, -2 / height, 0, 0,
+                    0, 0, 2 / depth, 0,
+                    -1, 1, 0, 1,
+                ];
+            },
+            multiply: function(a, b) {
+                const out = new Float32Array(16);
+                for (let i = 0; i < 4; i++) { // row
+                   for (let j = 0; j < 4; j++) { // col
+                       let sum = 0;
+                       for (let k = 0; k < 4; k++) {
+                           sum += a[i * 4 + k] * b[k * 4 + j]; // Corrected row-major logic
+                       }
+                       out[i * 4 + j] = sum;
+                   }
+                }
+                // WebGL uses column-major matrices.
+                // The loop above calculates row-major. Let's do standard column-major mult:
+                const dst = [];
+                const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+                const a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
+                let b0 = b[0], b1 = b[1], b2 = b[2], b3 = b[3];
+                dst[0] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+                dst[1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+                dst[2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+                dst[3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+                b0 = b[4]; b1 = b[5]; b2 = b[6]; b3 = b[7];
+                dst[4] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+                dst[5] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+                dst[6] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+                dst[7] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+                b0 = b[8]; b1 = b[9]; b2 = b[10]; b3 = b[11];
+                dst[8] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+                dst[9] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+                dst[10] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+                dst[11] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+                b0 = b[12]; b1 = b[13]; b2 = b[14]; b3 = b[15];
+                dst[12] = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+                dst[13] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+                dst[14] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+                dst[15] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+                return dst;
+            },
+            translation: function(tx, ty, tz) {
+                return [
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    tx, ty, tz, 1,
+                ];
+            },
+            xRotation: function(angleInRadians) {
+                const c = Math.cos(angleInRadians);
+                const s = Math.sin(angleInRadians);
+                return [
+                    1, 0, 0, 0,
+                    0, c, s, 0,
+                    0, -s, c, 0,
+                    0, 0, 0, 1,
+                ];
+            },
+            yRotation: function(angleInRadians) {
+                const c = Math.cos(angleInRadians);
+                const s = Math.sin(angleInRadians);
+                return [
+                    c, 0, -s, 0,
+                    0, 1, 0, 0,
+                    s, 0, c, 0,
+                    0, 0, 0, 1,
+                ];
+            },
+            inverseTranspose: function(m) {
+                // For orthogonal matrices (rotation), inverse = transpose. 
+                // Since we only translate and rotate, the top 3x3 orientation 
+                // is mostly safe, but let's do a quick transpose for normals 
+                // assuming uniform scaling.
+                // Strictly, normals require Inverse Transpose. 
+                // For simple rotation, just passing the matrix is usually fine, 
+                // but let's be cleaner. This is a simplified transpose helper.
+                return [
+                    m[0], m[4], m[8], 0,
+                    m[1], m[5], m[9], 0,
+                    m[2], m[6], m[10], 0,
+                    0, 0, 0, 1
+                ];
+            }
+        };
+
+        // --- 6. RENDER LOOP ---
+        let rotation = 0;
+
+        function drawScene(time) {
+            rotation += 0.01;
+
+            gl.enable(gl.CULL_FACE);
+            gl.enable(gl.DEPTH_TEST);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            gl.useProgram(program);
+
+            // Bind Attributes
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(positionLoc);
+            gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.enableVertexAttribArray(normalLoc);
+            gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+            // Calculate Matrices
+            const aspect = canvas.clientWidth / canvas.clientHeight;
+            const projectionMatrix = m4.perspective(60 * Math.PI / 180, aspect, 0.1, 100.0);
+            
+            // Move camera back by translating the world away
+            let worldMatrix = m4.translation(0, 0, -5);
+            
+            // Rotate the cylinder
+            worldMatrix = m4.multiply(worldMatrix, m4.xRotation(rotation * 0.5));
+            worldMatrix = m4.multiply(worldMatrix, m4.yRotation(rotation));
+
+            // Combine Projection * World
+            const matrix = m4.multiply(projectionMatrix, worldMatrix);
+            
+            // Inverse Transpose for lighting (simplified for this use case)
+            // Ideally, we'd compute the actual inverse, but for rotation+translation,
+            // the rotation part is orthogonal.
+            const invTranspose = m4.inverseTranspose(worldMatrix);
+
+            // Set Uniforms
+            gl.uniformMatrix4fv(matrixLoc, false, matrix);
+            gl.uniformMatrix4fv(worldInvTrLoc, false, invTranspose);
+
+            // Draw
+            gl.drawElements(gl.TRIANGLES, cylinderData.indices.length, gl.UNSIGNED_SHORT, 0);
+
+            requestAnimationFrame(drawScene);
+        }
+
+        requestAnimationFrame(drawScene);
+    </script>
+</body>
+</html>
