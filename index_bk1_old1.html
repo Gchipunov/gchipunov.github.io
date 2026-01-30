@@ -1,0 +1,111 @@
+
+<html>
+  <head>
+<title>
+  Gchipunov static developer page - profile
+</title>
+
+      <link href="textures-from-code.css" rel="stylesheet" type="text/css"/>
+  <script src="textures-from-code.js" type="text/javascript"> </script>
+  </head>
+<body>
+
+<div>
+
+  <a href="RTS1.html">
+   RTS1</a>
+</div>
+
+  <div>
+
+  <a href="RTS-Con3.html">
+   RTS-Con3.html</a>
+</div>
+  
+  <div>
+
+  <a href="RTS2.html">
+  RTS2.html</a>
+</div>
+
+  <div>
+
+  <a href="Source1-city.html">
+   Source1-city.html</a>
+</div>
+ <a href="Source1_city1_alt.html">
+   Source1_city1_alt.html</a>
+</div>
+<div>
+  <a href="https://gchipunov.github.io/2DScrollerWallJump/index2.html" >
+  2D Scroller Wall Jump / prototype webgl game
+  
+  <img src="https://gchipunov.github.io/2DScrollerWallJump/IMG_1048.jpeg" />
+  </a>
+</div>
+
+  
+<div>
+
+  <a href="Datacode-qr-code-generator.html">
+    Generate Datacode</a>
+</div>
+  <div>
+
+  <a href="Datacode-qr-code-gen.html">
+    Generate Datacode</a>
+</div>
+  <div>
+
+  <a href="Datacode-qr-code-gen2.html">
+    Generate Datacode 2</a>
+</div>
+
+  <div>
+
+  <a href="model-viewer1.html">
+    Generate Datacode</a>
+</div>
+  
+<p>Texture from code. Simple demonstration of procedural texturing</p>
+
+<canvas>Your browser does not seem to support canvases.</canvas>
+
+<script type="x-shader/x-vertex" id="vertex-shader">
+  #version 100
+  precision highp float;
+
+  attribute vec2 position;
+ uniform float time; // Add a uniform for time
+  void main() {
+    gl_Position = vec4(position, 0.0, 1.0);
+    gl_PointSize = 128.0;
+  }
+</script>
+
+  <p>
+
+    Under Construction 🏗️🚧  Get a S25 with Us to play Colos Game and Upcoming RTS Game Engine <a href="https://www.amazon.com/SAMSUNG-Smartphone-Unlocked-Processor-Manufacturer/dp/B0DP3GQ4QY?th=1&linkCode=ll1&tag=intmain-20&linkId=c2cbaba929682879b47c815b59938bb1&language=en_US&ref_=as_li_ss_tl" >Samsung S25 </a>
+  </p>
+<p>
+<a href="app-debug.zip"> Colo Game Download <img src="pessy2.png"> </a>
+  
+</p>
+<script type="x-shader/x-fragment" id="fragment-shader">
+  #version 100
+  precision mediump float;
+   uniform float time; // Add a uniform for time
+  void main() {
+    vec2 fragmentPosition = 2.0*gl_PointCoord - 1.0;
+    float distance = length(fragmentPosition);
+    float distanceSq = distance * distance;
+    gl_FragColor = vec4(
+      0.2/distanceSq,
+      0.4/distanceSq,
+      0.0, 1.0 );
+  }
+</script>
+
+  <a href="Android_Old_Building_App.html"> Android Old Building App</a> in Eclipse
+</body>
+  </html>
