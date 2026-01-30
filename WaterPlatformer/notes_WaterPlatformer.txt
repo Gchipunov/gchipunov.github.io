@@ -1,0 +1,2 @@
+make triangle springs for water and how objects are interacting
+https://www.youtube.com/watch?v=JqmoM9hihcE&t=34s
