@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>SpongeBob Physics Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; touch-action: none; }
+        #info {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+            font-size: 20px;
+            z-index: 10;
+        }
+        canvas { display: block; }
+
+        /* --- TOUCH CONTROLS --- */
+        .controls-container {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none; /* Let clicks pass through empty space */
+            padding: 0 20px;
+            box-sizing: border-box;
+            z-index: 20;
+        }
+
+        .dpad {
+            position: relative;
+            width: 150px;
+            height: 150px;
+            pointer-events: auto;
+        }
+
+        .btn {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 10px;
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            user-select: none;
+            cursor: pointer;
+            touch-action: none; /* Prevent browser zooming/scrolling */
+        }
+        
+        .btn:active, .btn.active {
+            background: rgba(255, 255, 0, 0.5); /* Spongebob Yellow Highlight */
+            border-color: yellow;
+        }
+
+        /* D-Pad Layout */
+        .btn-up { top: 0; left: 50px; width: 50px; height: 50px; }
+        .btn-down { bottom: 0; left: 50px; width: 50px; height: 50px; }
+        .btn-left { top: 50px; left: 0; width: 50px; height: 50px; }
+        .btn-right { top: 50px; right: 0; width: 50px; height: 50px; }
+
+        /* Jump Button */
+        .action-area {
+            pointer-events: auto;
+            display: flex;
+            align-items: flex-end;
+        }
+        .btn-jump {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin-bottom: 35px;
+            background: rgba(255, 100, 100, 0.4);
+        }
+        .btn-reset {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 5px;
+            font-size: 14px;
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        🧽 SPONGE-PHYSICS PLATFORMER 🧽<br>
+        WASD / Arrows to Move • SPACE to Jump
+    </div>
+
+    <div class="controls-container">
+        <div class="dpad">
+            <div class="btn btn-up" data-key="w">▲</div>
+            <div class="btn btn-left" data-key="a">◀</div>
+            <div class="btn btn-right" data-key="d">▶</div>
+            <div class="btn btn-down" data-key="s">▼</div>
+        </div>
+        <div class="action-area">
+            <div class="btn btn-jump" data-key="space">JUMP</div>
+        </div>
+    </div>
+    
+    <div class="btn btn-reset" id="resetBtn">R</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+
+        // --- CONFIGURATION ---
+        const TIME_STEP = 1 / 60;
+        
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x52b6ee); // Bikini Bottom Blue
+        scene.fog = new THREE.Fog(0x52b6ee, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 15);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        scene.add(dirLight);
+
+        // --- PHYSICS WORLD ---
+        const world = new CANNON.World();
+        world.gravity.set(0, -20, 0); // Stronger gravity for platformer feel
+        
+        // Materials
+        const groundMaterial = new CANNON.Material();
+        const playerMaterial = new CANNON.Material();
+        
+        // Friction/Bounce contact
+        const contactMaterial = new CANNON.ContactMaterial(groundMaterial, playerMaterial, {
+            friction: 0.0, // No friction on sides so he doesn't stick to walls
+            restitution: 0.1 // Slight bounce (he is a sponge)
+        });
+        world.addContactMaterial(contactMaterial);
+
+        // --- OBJECT CREATION HELPERS ---
+        const objects = []; // To sync physics and visuals
+
+        function createBox(x, y, z, w, h, d, color, mass, isPlayer = false) {
+            // 1. Visuals (Three.js)
+            let mesh;
+            
+            if (isPlayer) {
+                // Construct SpongeBob Visuals
+                const group = new THREE.Group();
+                
+                // Yellow Body
+                const bodyGeo = new THREE.BoxGeometry(w, h * 0.7, d);
+                const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffff00 }); // Sponge Yellow
+                const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+                bodyMesh.position.y = h * 0.15;
+                bodyMesh.castShadow = true;
+                group.add(bodyMesh);
+
+                // White Shirt
+                const shirtGeo = new THREE.BoxGeometry(w, h * 0.15, d);
+                const shirtMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                const shirtMesh = new THREE.Mesh(shirtGeo, shirtMat);
+                shirtMesh.position.y = -h * 0.275;
+                shirtMesh.castShadow = true;
+                group.add(shirtMesh);
+
+                // Brown Pants
+                const pantsGeo = new THREE.BoxGeometry(w, h * 0.15, d);
+                const pantsMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+                const pantsMesh = new THREE.Mesh(pantsGeo, pantsMat);
+                pantsMesh.position.y = -h * 0.425;
+                pantsMesh.castShadow = true;
+                group.add(pantsMesh);
+
+                // Eyes (Simple)
+                const eyeGeo = new THREE.SphereGeometry(0.15, 16, 16);
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const pupilMat = new THREE.MeshBasicMaterial({ color: 0x0000ff });
+                
+                const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+                leftEye.position.set(-0.2, 0.2, 0.5);
+                
+                const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+                rightEye.position.set(0.2, 0.2, 0.5);
+
+                const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.07), pupilMat);
+                leftPupil.position.z = 0.12;
+                leftEye.add(leftPupil);
+                
+                const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.07), pupilMat);
+                rightPupil.position.z = 0.12;
+                rightEye.add(rightPupil);
+
+                group.add(leftEye);
+                group.add(rightEye);
+
+                mesh = group;
+            } else {
+                // Standard Platforms
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mat = new THREE.MeshStandardMaterial({ color: color });
+                mesh = new THREE.Mesh(geo, mat);
+                mesh.receiveShadow = true;
+            }
+
+            scene.add(mesh);
+
+            // 2. Physics (Cannon.js)
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({
+                mass: mass,
+                material: isPlayer ? playerMaterial : groundMaterial
+            });
+            body.addShape(shape);
+            body.position.set(x, y, z);
+            
+            if (isPlayer) {
+                body.fixedRotation = true; // Prevent player from tipping over
+                body.updateMassProperties();
+            }
+
+            world.addBody(body);
+
+            // Store reference for update loop
+            objects.push({ mesh, body });
+
+            return body;
+        }
+
+        function createWedge(x, y, z, size) {
+            // Visual Wedge (Using a rotated Box for simplicity in WebGL/Physics alignment)
+            const w = size * 2;
+            const h = 0.5;
+            const d = size;
+
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xff69b4 }); // Pink wedge
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({ mass: 0, material: groundMaterial });
+            body.addShape(shape);
+            body.position.set(x, y, z);
+            
+            // Rotate 25 degrees to make it a ramp
+            const axis = new CANNON.Vec3(0, 0, 1);
+            body.quaternion.setFromAxisAngle(axis, -Math.PI / 6);
+            mesh.quaternion.copy(body.quaternion);
+
+            world.addBody(body);
+            objects.push({ mesh, body });
+        }
+
+        // --- BUILD LEVEL ---
+        
+        // 1. Ground
+        createBox(0, -1, 0, 50, 2, 10, 0xf4a460, 0); // Sand color
+
+        // 2. Platforms
+        // Low platform
+        createBox(-5, 2, 0, 4, 0.5, 4, 0x88cc88, 0);
+        // High platform
+        createBox(5, 4.5, 0, 4, 0.5, 4, 0x88cc88, 0);
+        // Moving/Top platform
+        createBox(0, 7, 0, 3, 0.5, 3, 0xffcc00, 0);
+
+        // 3. Wedge (Ramp)
+        createWedge(-12, 0.5, 0, 6);
+
+        // 4. Player (SpongeBob)
+        const playerBody = createBox(0, 5, 0, 1, 1, 1, null, 50, true);
+
+        // --- INPUT HANDLING ---
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+        let canJump = false;
+
+        // Keyboard Logic
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = true;
+            if (e.code === 'Space') keys.space = true;
+            if (key === 'r') resetPlayer();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = false;
+            if (e.code === 'Space') keys.space = false;
+        });
+
+        // Touch Control Logic
+        const touchBtns = document.querySelectorAll('.btn[data-key]');
+        const resetBtn = document.getElementById('resetBtn');
+
+        // Helper to update keys based on touch
+        function setKey(key, state) {
+            if (keys.hasOwnProperty(key)) {
+                keys[key] = state;
+            }
+        }
+
+        touchBtns.forEach(btn => {
+            const key = btn.getAttribute('data-key');
+            
+            // Touch Start
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // Prevent scroll/zoom
+                btn.classList.add('active');
+                setKey(key, true);
+            }, { passive: false });
+
+            // Touch End
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                btn.classList.remove('active');
+                setKey(key, false);
+            }, { passive: false });
+
+            // Mouse alternatives for testing on desktop
+            btn.addEventListener('mousedown', () => {
+                btn.classList.add('active');
+                setKey(key, true);
+            });
+            btn.addEventListener('mouseup', () => {
+                btn.classList.remove('active');
+                setKey(key, false);
+            });
+             btn.addEventListener('mouseleave', () => {
+                btn.classList.remove('active');
+                setKey(key, false);
+            });
+        });
+
+        resetBtn.addEventListener('click', resetPlayer);
+        resetBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            resetPlayer();
+        });
+
+        // Check for ground contact to allow jumping
+        playerBody.addEventListener('collide', (e) => {
+            const contactNormal = new CANNON.Vec3();
+            e.contact.ni.negate(contactNormal); // Direction from body to other
+            // If contact normal is pointing up (approx), we are on ground
+            if (Math.abs(contactNormal.dot(new CANNON.Vec3(0, 1, 0))) > 0.5) {
+                canJump = true;
+            }
+        });
+
+        function resetPlayer() {
+            playerBody.position.set(0, 5, 0);
+            playerBody.velocity.set(0, 0, 0);
+            playerBody.angularVelocity.set(0, 0, 0);
+        }
+
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Physics Step
+            world.step(TIME_STEP);
+
+            // 2. Player Logic
+            const speed = 7;
+            const jumpForce = 15;
+
+            // Reset velocity x/z for tight platformer control (remove sliding)
+            // But keep Y velocity (gravity)
+            const currentY = playerBody.velocity.y;
+            playerBody.velocity.set(0, currentY, 0);
+
+            if (keys.a || keys.arrowleft) {
+                playerBody.velocity.x = -speed;
+                // Face left
+                objects[objects.length-1].mesh.rotation.y = -Math.PI / 2; 
+            }
+            if (keys.d || keys.arrowright) {
+                playerBody.velocity.x = speed;
+                // Face right
+                objects[objects.length-1].mesh.rotation.y = Math.PI / 2;
+            }
+            // Z-axis movement (depth)
+            if (keys.w || keys.arrowup) {
+                playerBody.velocity.z = -speed;
+                objects[objects.length-1].mesh.rotation.y = Math.PI;
+            }
+            if (keys.s || keys.arrowdown) {
+                playerBody.velocity.z = speed;
+                objects[objects.length-1].mesh.rotation.y = 0;
+            }
+
+            // Jump
+            if (keys.space && canJump) {
+                playerBody.velocity.y = jumpForce;
+                canJump = false;
+            }
+
+            // Respawn if fallen
+            if (playerBody.position.y < -10) {
+                resetPlayer();
+            }
+
+            // 3. Sync Visuals
+            for (const obj of objects) {
+                obj.mesh.position.copy(obj.body.position);
+                
+                // If it's the player, we handle rotation manually for visuals to face direction
+                // If it's not the player, sync rotation (for the wedge)
+                if (obj.body !== playerBody) {
+                    obj.mesh.quaternion.copy(obj.body.quaternion);
+                }
+            }
+
+            // Camera Follow
+            camera.position.x += (playerBody.position.x - camera.position.x) * 0.1;
+            camera.position.y += (playerBody.position.y + 3 - camera.position.y) * 0.1;
+            camera.lookAt(playerBody.position);
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
