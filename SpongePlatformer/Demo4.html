@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SpongeBob Physics Platformer</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #52b6ee; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            touch-action: none; /* Prevent all default touch actions */
+            user-select: none; /* Prevent text selection */
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-weight: 900;
+            text-shadow: 2px 2px 0px #000, -1px -1px 0 #024da0;
+            pointer-events: none;
+            font-size: 24px;
+            z-index: 10;
+            letter-spacing: 1px;
+        }
+        canvas { display: block; }
+
+        /* --- TOUCH CONTROLS --- */
+        .controls-container {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none; 
+            padding: 0 40px;
+            box-sizing: border-box;
+            z-index: 20;
+        }
+
+        .dpad {
+            position: relative;
+            width: 160px;
+            height: 160px;
+            pointer-events: auto;
+        }
+
+        .btn {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.25);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.05s, background 0.05s;
+        }
+        
+        .btn:active, .btn.active {
+            background: rgba(255, 255, 0, 0.6); 
+            border-color: #fff;
+            transform: scale(0.92);
+            color: #333;
+        }
+
+        /* D-Pad Layout */
+        .btn-up { top: 0; left: 55px; width: 50px; height: 50px; }
+        .btn-down { bottom: 0; left: 55px; width: 50px; height: 50px; }
+        .btn-left { top: 55px; left: 0; width: 50px; height: 50px; }
+        .btn-right { top: 55px; right: 0; width: 50px; height: 50px; }
+
+        /* Jump Button */
+        .action-area {
+            pointer-events: auto;
+            display: flex;
+            align-items: flex-end;
+            padding-bottom: 10px;
+        }
+        .btn-jump {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: rgba(255, 80, 80, 0.5);
+            border: 3px solid rgba(255, 255, 255, 0.7);
+            font-size: 18px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            transition: transform 0.05s;
+        }
+        .btn-jump:active, .btn-jump.active {
+            background: rgba(255, 50, 50, 0.8);
+            transform: scale(0.92);
+        }
+
+        .btn-reset {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 44px;
+            height: 44px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            pointer-events: auto;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid rgba(255,255,255,0.5);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        🧽 SPONGE-PLATFORMER 🧽
+    </div>
+
+    <div class="controls-container">
+        <div class="dpad">
+            <div class="btn btn-up" data-key="w">▲</div>
+            <div class="btn btn-left" data-key="a">◀</div>
+            <div class="btn btn-right" data-key="d">▶</div>
+            <div class="btn btn-down" data-key="s">▼</div>
+        </div>
+        <div class="action-area">
+            <div class="btn btn-jump" data-key="space">JUMP</div>
+        </div>
+    </div>
+    
+    <div class="btn-reset" id="resetBtn">R</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+
+        // --- CONFIGURATION ---
+        const TIME_STEP = 1 / 60;
+        
+        // Physics Groups for filtering
+        const GROUP_GROUND = 1;
+        const GROUP_PLAYER = 2;
+
+        let playerMesh = null; 
+        
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x52b6ee); 
+        scene.fog = new THREE.Fog(0x52b6ee, 10, 60);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 20);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setPixelRatio(window.devicePixelRatio); // Sharp on mobile
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x0000ff, 0.6);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(10, 30, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.left = -30;
+        dirLight.shadow.camera.right = 30;
+        dirLight.shadow.camera.top = 30;
+        dirLight.shadow.camera.bottom = -30;
+        scene.add(dirLight);
+
+        // --- PHYSICS WORLD ---
+        const world = new CANNON.World();
+        world.gravity.set(0, -30, 0); // Snappy gravity
+        
+        // Materials
+        const groundMaterial = new CANNON.Material();
+        const playerMaterial = new CANNON.Material();
+        
+        const contactMaterial = new CANNON.ContactMaterial(groundMaterial, playerMaterial, {
+            friction: 0.0, // Frictionless sides
+            restitution: 0.0 // No bounce, tight controls
+        });
+        world.addContactMaterial(contactMaterial);
+
+        // --- OBJECT CREATION ---
+        const objects = []; 
+
+        function createBox(x, y, z, w, h, d, color, mass, isPlayer = false) {
+            let mesh;
+            
+            if (isPlayer) {
+                // --- SPONGEBOB VISUALS ---
+                const group = new THREE.Group();
+                
+                const spongeYellow = new THREE.MeshStandardMaterial({ color: 0xfff000, roughness: 0.8 });
+                const shirtWhite = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                const pantsBrown = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+
+                // Body
+                const bodyH = h * 0.65;
+                const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(w, bodyH, d), spongeYellow);
+                bodyMesh.position.y = h * 0.175;
+                bodyMesh.castShadow = true;
+                group.add(bodyMesh);
+
+                // Shirt
+                const shirtH = h * 0.15;
+                const shirtMesh = new THREE.Mesh(new THREE.BoxGeometry(w, shirtH, d), shirtWhite);
+                shirtMesh.position.y = -h * 0.225;
+                shirtMesh.castShadow = true;
+                group.add(shirtMesh);
+
+                // Pants
+                const pantsH = h * 0.20;
+                const pantsMesh = new THREE.Mesh(new THREE.BoxGeometry(w, pantsH, d), pantsBrown);
+                pantsMesh.position.y = -h * 0.40;
+                pantsMesh.castShadow = true;
+                group.add(pantsMesh);
+
+                // Eyes
+                const eyeGeo = new THREE.SphereGeometry(0.18, 16, 16);
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const pupilMat = new THREE.MeshBasicMaterial({ color: 0x3366cc });
+                
+                const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+                leftEye.position.set(-0.2, 0.2, 0.51);
+                const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+                rightEye.position.set(0.2, 0.2, 0.51);
+
+                const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.08), pupilMat);
+                leftPupil.position.z = 0.15;
+                leftEye.add(leftPupil);
+                
+                const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.08), pupilMat);
+                rightPupil.position.z = 0.15;
+                rightEye.add(rightPupil);
+
+                group.add(leftEye);
+                group.add(rightEye);
+                
+                mesh = group;
+                playerMesh = mesh;
+
+            } else {
+                // --- PLATFORM VISUALS ---
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mat = new THREE.MeshStandardMaterial({ 
+                    color: color,
+                    roughness: 0.9
+                });
+                mesh = new THREE.Mesh(geo, mat);
+                mesh.receiveShadow = true;
+            }
+
+            scene.add(mesh);
+
+            // Physics
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({
+                mass: mass,
+                material: isPlayer ? playerMaterial : groundMaterial
+            });
+            body.addShape(shape);
+            body.position.set(x, y, z);
+            
+            if (isPlayer) {
+                body.fixedRotation = true;
+                body.updateMassProperties();
+                // Collision Filtering: Player is group 2
+                body.collisionFilterGroup = GROUP_PLAYER;
+                body.collisionFilterMask = GROUP_GROUND; // Collide with ground (1)
+            } else {
+                // Ground is group 1
+                body.collisionFilterGroup = GROUP_GROUND;
+                body.collisionFilterMask = -1; // Collide with everything
+            }
+
+            world.addBody(body);
+            objects.push({ mesh, body });
+            return body;
+        }
+
+        function createWedge(x, y, z, size) {
+            const w = size * 2;
+            const h = 0.5;
+            const d = size;
+
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xff69b4, roughness: 0.4 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+
+            const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+            const body = new CANNON.Body({ mass: 0, material: groundMaterial });
+            body.addShape(shape);
+            body.position.set(x, y, z);
+            
+            const axis = new CANNON.Vec3(0, 0, 1);
+            body.quaternion.setFromAxisAngle(axis, -Math.PI / 6);
+            mesh.quaternion.copy(body.quaternion);
+
+            body.collisionFilterGroup = GROUP_GROUND;
+
+            world.addBody(body);
+            objects.push({ mesh, body });
+        }
+
+        // --- LEVEL DESIGN ---
+        createBox(0, -1, 0, 60, 2, 20, 0xE6C288, 0); // Sand
+        createBox(-6, 2, 0, 4, 0.5, 4, 0x90EE90, 0); // Platform 1
+        createBox(6, 4.5, 0, 4, 0.5, 4, 0x90EE90, 0); // Platform 2
+        createBox(0, 7.5, 0, 3, 0.5, 3, 0xFFD700, 0); // Top
+        createWedge(-14, 0.5, 0, 6); // Ramp
+
+        // Player
+        const playerBody = createBox(0, 5, 0, 1, 1, 1, null, 50, true);
+
+        // --- INPUT HANDLING ---
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+        let lastJumpPressTime = 0; // Timestamp for jump buffering
+
+        // Keyboard
+        window.addEventListener('keydown', (e) => {
+            const k = e.key.toLowerCase();
+            if (keys.hasOwnProperty(k)) keys[k] = true;
+            if (e.code === 'Space') {
+                keys.space = true;
+                lastJumpPressTime = Date.now(); // Record jump press time
+            }
+            if (k === 'r') resetPlayer();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const k = e.key.toLowerCase();
+            if (keys.hasOwnProperty(k)) keys[k] = false;
+            if (e.code === 'Space') keys.space = false;
+        });
+
+        // Touch
+        const touchBtns = document.querySelectorAll('.btn[data-key]');
+        const resetBtn = document.getElementById('resetBtn');
+
+        function setKey(key, state) {
+            if (keys.hasOwnProperty(key)) keys[key] = state;
+            if (key === 'space' && state === true) {
+                lastJumpPressTime = Date.now(); // Record touch jump time
+            }
+        }
+
+        touchBtns.forEach(btn => {
+            const key = btn.getAttribute('data-key');
+            
+            const activate = (e) => {
+                if(e.cancelable) e.preventDefault();
+                btn.classList.add('active');
+                setKey(key, true);
+            };
+            
+            const deactivate = (e) => {
+                if(e.cancelable) e.preventDefault();
+                btn.classList.remove('active');
+                setKey(key, false);
+            };
+
+            btn.addEventListener('touchstart', activate, { passive: false });
+            btn.addEventListener('touchend', deactivate);
+            btn.addEventListener('mousedown', activate);
+            btn.addEventListener('mouseup', deactivate);
+            btn.addEventListener('mouseleave', deactivate);
+        });
+
+        resetBtn.addEventListener('click', resetPlayer);
+        resetBtn.addEventListener('touchstart', (e) => { e.preventDefault(); resetPlayer(); });
+
+        function resetPlayer() {
+            playerBody.position.set(0, 5, 0);
+            playerBody.velocity.set(0, 0, 0);
+            playerBody.angularVelocity.set(0, 0, 0);
+        }
+
+        // --- HELPER: CHECK GROUND ---
+        // Uses Raycasting for robust ground detection
+        function checkGrounded() {
+            const start = playerBody.position;
+            // Raycast down (player height is 1, so half is 0.5. We check slightly below 0.55)
+            const end = new CANNON.Vec3(start.x, start.y - 0.55, start.z);
+            
+            const ray = new CANNON.Ray(start, end);
+            ray.skipBackfaces = true;
+            ray.collisionFilterMask = GROUP_GROUND; // Only look for ground, ignore player
+            
+            const result = new CANNON.RaycastResult();
+            ray.intersectWorld(world, { mode: CANNON.Ray.CLOSEST }, result);
+            
+            return result.hasHit;
+        }
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            world.step(TIME_STEP);
+
+            // 1. Movement Logic
+            const speed = 8;
+            const jumpForce = 18;
+
+            // Stop sliding (preserve Y velocity)
+            playerBody.velocity.x = 0;
+            playerBody.velocity.z = 0;
+
+            if (keys.a || keys.arrowleft) {
+                playerBody.velocity.x = -speed;
+                if(playerMesh) playerMesh.rotation.y = -Math.PI / 2; 
+            }
+            if (keys.d || keys.arrowright) {
+                playerBody.velocity.x = speed;
+                if(playerMesh) playerMesh.rotation.y = Math.PI / 2;
+            }
+            if (keys.w || keys.arrowup) {
+                playerBody.velocity.z = -speed;
+                if(playerMesh) playerMesh.rotation.y = Math.PI;
+            }
+            if (keys.s || keys.arrowdown) {
+                playerBody.velocity.z = speed;
+                if(playerMesh) playerMesh.rotation.y = 0;
+            }
+
+            // 2. Jump Logic with Buffering
+            const isGrounded = checkGrounded();
+            const now = Date.now();
+            const jumpBufferMs = 150; // 150ms allowance for pressing jump early
+            const jumpPressedRecently = (now - lastJumpPressTime) < jumpBufferMs;
+
+            // Jump if: (Holding Space OR Pressed Recently) AND (Is on Ground)
+            if ((keys.space || jumpPressedRecently) && isGrounded) {
+                // Ensure we haven't already jumped in this logic frame (prevent double boost)
+                if(playerBody.velocity.y < 1) { 
+                    playerBody.velocity.y = jumpForce;
+                    lastJumpPressTime = 0; // Consume the buffer
+                }
+            }
+
+            // Respawn
+            if (playerBody.position.y < -15) resetPlayer();
+
+            // 3. Sync Visuals
+            for (const obj of objects) {
+                obj.mesh.position.copy(obj.body.position);
+                if (obj.mesh !== playerMesh) {
+                    obj.mesh.quaternion.copy(obj.body.quaternion);
+                }
+            }
+
+            // 4. Smooth Camera
+            camera.position.x += (playerBody.position.x - camera.position.x) * 0.08;
+            camera.position.y += (playerBody.position.y + 4 - camera.position.y) * 0.08;
+            camera.lookAt(playerBody.position.x, playerBody.position.y, playerBody.position.z);
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
