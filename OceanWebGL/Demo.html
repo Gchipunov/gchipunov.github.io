@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js WebGPU Ocean (TSL)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        <h3>Three.js + WebGPU Ocean</h3>
+        TSL (Three Shading Language)<br/>
+        Procedural Waves, Foam, & SSS
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.173.0/build/three.webgpu.js",
+                "three/tsl": "https://unpkg.com/three@0.173.0/build/three.tsl.js",
+                "three/addons/": "https://unpkg.com/three@0.173.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { 
+            color, 
+            float, 
+            vec2, 
+            vec3, 
+            vec4,
+            positionLocal, 
+            normalLocal,
+            timerLocal, 
+            mix, 
+            sin, 
+            cos, 
+            max, 
+            min, 
+            smoothstep, 
+            dot, 
+            normalize, 
+            varying, 
+            uniform, 
+            Fn,
+            texture, 
+            uv,
+            positionWorld,
+            cameraPosition
+        } from 'three/tsl';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Init WebGPU Renderer ---
+        const renderer = new THREE.WebGPURenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        
+        // --- 2. Camera & Controls ---
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 15);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below water
+        controls.minDistance = 5;
+        controls.maxDistance = 100;
+
+        // --- 3. Lighting ---
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunLight.position.set(10, 10, 10);
+        scene.add(sunLight);
+
+        const ambientLight = new THREE.AmbientLight(0x001133, 0.5);
+        scene.add(ambientLight);
+
+        // --- 4. TSL Ocean Logic ---
+
+        // Constants
+        const NUM_WAVES = 8;
+        const time = timerLocal(1.0); // Global time multiplier
+
+        // TSL Function: Single Gerstner Wave
+        // Returns vec4: x,y,z = displacement, w = jacobian (for foam)
+        const calculateGerstnerWave = Fn(([position, direction, steepness, wavelength, speed, offset]) => {
+            const k = float(2.0 * Math.PI).div(wavelength);
+            const c = float(speed).mul(time).add(offset);
+            const f = k.mul(dot(direction, position.xz)).sub(c);
+            
+            // Amplitudes
+            const a = steepness.div(k);
+            
+            const cosf = cos(f);
+            const sinf = sin(f);
+
+            // Displacement vectors
+            const d = direction;
+            const x = d.x.mul(a).mul(cosf);
+            const y = a.mul(sinf);
+            const z = d.y.mul(a).mul(cosf);
+
+            // Jacobian (sharpness for foam)
+            // 1 - k * a * sin(f)
+            const wa = k.mul(a); // should be < 1 for no loop
+            const jacobian = float(1.0).sub(wa.mul(sinf));
+
+            return vec4(x, y, z, jacobian);
+        });
+
+        // TSL Function: Sum of Waves
+        const oceanFunction = Fn(([pos]) => {
+            const finalPos = vec3(pos);
+            const totalJacobian = float(0.0);
+            
+            // We manually unroll a few waves for variety
+            // Direction, Steepness, Wavelength, Speed, Offset
+            
+            const w1 = calculateGerstnerWave(pos, vec2(1.0, 0.2), float(0.25), float(20.0), float(1.5), float(0.0));
+            const w2 = calculateGerstnerWave(pos, vec2(0.7, 0.7), float(0.2), float(14.0), float(2.1), float(1.2));
+            const w3 = calculateGerstnerWave(pos, vec2(-0.2, 1.0), float(0.2), float(8.0), float(3.5), float(2.0));
+            const w4 = calculateGerstnerWave(pos, vec2(0.5, -0.4), float(0.15), float(4.0), float(4.0), float(3.4));
+            const w5 = calculateGerstnerWave(pos, vec2(-0.6, -0.5), float(0.1), float(2.0), float(5.5), float(0.0));
+            const w6 = calculateGerstnerWave(pos, vec2(0.0, 0.8), float(0.1), float(1.0), float(6.0), float(1.0));
+
+            // Sum displacements
+            const displacement = w1.xyz.add(w2.xyz).add(w3.xyz).add(w4.xyz).add(w5.xyz).add(w6.xyz);
+            
+            // Combine Jacobians (multiplicative is theoretically correct for sharpness, but additive works for visuals)
+            const foamFactor = float(1.0).sub(w1.w.mul(w2.w).mul(w3.w).mul(w4.w));
+
+            return vec4(displacement, foamFactor);
+        });
+
+
+        // --- 5. Construct Material ---
+
+        const waterMaterial = new THREE.MeshStandardNodeMaterial();
+        waterMaterial.roughness = float(0.1);
+        waterMaterial.metalness = float(0.8);
+        waterMaterial.color = color(0x004466); // Fallback
+
+        // Setup Varyings to pass data from Vertex to Fragment
+        const vFoam = varying(float(0.0));
+        const vWorldPos = varying(vec3(0.0));
+        const vViewDist = varying(float(0.0));
+
+        // -- Vertex Stage --
+        const originalPos = positionLocal;
+        const waveData = oceanFunction(originalPos);
+        const displacement = waveData.xyz;
+        const foamVal = waveData.w;
+
+        // Apply displacement
+        const newPos = originalPos.add(displacement);
+        
+        // Recalculate Normals analytically (simplified approximation)
+        // We take the cross product of partial derivatives
+        const delta = float(0.1);
+        const p_dx = oceanFunction(originalPos.add(vec3(delta, 0.0, 0.0))).xyz;
+        const p_dz = oceanFunction(originalPos.add(vec3(0.0, 0.0, delta))).xyz;
+        
+        // Tangent and Bitangent
+        const tangent = normalize(vec3(delta, 0.0, 0.0).add(p_dx.sub(displacement)));
+        const bitangent = normalize(vec3(0.0, 0.0, delta).add(p_dz.sub(displacement)));
+        const newNormal = normalize(bitangent.cross(tangent)); // Cross product gives normal
+
+        // Set Vertex Output
+        waterMaterial.positionNode = newPos;
+        waterMaterial.normalNode = newNormal;
+        
+        // Pass data to pixel shader
+        vFoam.assign(smoothstep(0.4, 1.5, foamVal)); // Contrast foam
+        vWorldPos.assign(positionWorld); 
+
+        // -- Fragment Stage --
+        
+        // Colors
+        const deepColor = color(0x001e36);
+        const shallowColor = color(0x006994);
+        const foamColor = color(0xffffff);
+        
+        // View Direction Calculation for Fresnel/SSS
+        const viewDir = normalize(cameraPosition.sub(vWorldPos));
+        
+        // 1. Base Gradient (Deep vs Shallow based on wave height)
+        // We use the displacement Y (stored in positionNode implicitly, but we can access positionWorld.y)
+        const heightFactor = smoothstep(-2.0, 3.0, vWorldPos.y);
+        const waterBase = mix(deepColor, shallowColor, heightFactor.mul(0.5));
+
+        // 2. Subsurface Scattering (Fake)
+        // Light passing through the top of the wave when looking against the light
+        // Simple dot product between view and light (Sun is roughly at 1,1,1)
+        const lightDir = normalize(vec3(1.0, 1.0, 1.0));
+        const sssFactor = max(0.0, dot(viewDir, lightDir.negate())); // Backlighting
+        const sssColor = color(0x00ffaa).mul(sssFactor).mul(heightFactor).mul(0.5);
+
+        // 3. Foam mixing
+        // Use the varying we calculated in vertex
+        const finalColor = mix(waterBase.add(sssColor), foamColor, vFoam);
+
+        waterMaterial.colorNode = finalColor;
+
+
+        // --- 6. Geometry & Mesh ---
+        const geometry = new THREE.PlaneGeometry(100, 100, 256, 256);
+        geometry.rotateX(-Math.PI / 2);
+        
+        const oceanMesh = new THREE.Mesh(geometry, waterMaterial);
+        scene.add(oceanMesh);
+
+        // --- 7. Skybox (Procedural TSL) ---
+        const skyY = positionLocal.y; // Normalized coordinates of skybox cube
+        const skyGradient = mix(
+            color(0x5588aa), // Horizon
+            color(0x001133), // Zenith
+            smoothstep(0.0, 1.0, skyY)
+        );
+        scene.backgroundNode = skyGradient;
+
+        // --- 8. Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+
+    </script>
+</body>
+</html>
