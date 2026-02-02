@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Ocean + Underwater Terrain</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: monospace;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="info">
+        <h3>Three.js Ocean</h3>
+        Standard WebGL<br/>
+        Waves, Foam, SSS & <b>Underwater Terrain</b>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.173.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.173.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Init Renderer ---
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        // Add blueish underwater fog
+        scene.fog = new THREE.FogExp2(0x001e36, 0.02);
+        
+        // --- 2. Camera & Controls ---
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 10, 20);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0, 0);
+        controls.enableDamping = true;
+        controls.minDistance = 5;
+        controls.maxDistance = 150;
+
+        // --- 3. Sun & Lighting System ---
+        const sunDirection = new THREE.Vector3();
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+
+        const ambientLight = new THREE.AmbientLight(0x001133, 0.4);
+        scene.add(ambientLight);
+
+        // Global Uniforms container
+        const globalUniforms = {
+            time: { value: 0 },
+            sunDir: { value: new THREE.Vector3() }
+        };
+
+        // --- 4. Ocean Material (GLSL Injection) ---
+
+        const oceanMaterial = new THREE.MeshStandardMaterial({
+            color: 0x006994, 
+            roughness: 0.1,
+            metalness: 0.1, // Reduced metalness for better transparency look
+            side: THREE.DoubleSide,
+            transparent: true, // Enable transparency
+            opacity: 0.7       // See-through
+        });
+
+        oceanMaterial.onBeforeCompile = (shader) => {
+            shader.uniforms.uTime = globalUniforms.time;
+            shader.uniforms.uSunDir = globalUniforms.sunDir;
+
+            // --- Vertex Shader ---
+            shader.vertexShader = `
+                uniform float uTime;
+                varying float vFoam;
+                varying vec3 vWorldPosition;
+
+                // Gerstner Wave Calculation
+                vec3 calculateGerstnerWave(vec3 position, vec2 direction, float steepness, float wavelength, float speed, float offset, inout float jacobian) {
+                    float k = 2.0 * 3.14159 / wavelength;
+                    float c = speed * uTime + offset;
+                    float f = k * dot(direction, position.xz) - c;
+                    
+                    float a = steepness / k;
+                    float cosf = cos(f);
+                    float sinf = sin(f);
+
+                    jacobian *= (1.0 - k * a * sinf);
+
+                    return vec3(
+                        direction.x * a * cosf,
+                        a * sinf,
+                        direction.y * a * cosf
+                    );
+                }
+
+                vec4 getOceanDisplacement(vec3 position) {
+                    vec3 finalPos = vec3(0.0);
+                    float jacobian = 1.0;
+                    // Summing waves
+                    finalPos += calculateGerstnerWave(position, vec2(1.0, 0.2), 0.25, 20.0, 1.5, 0.0, jacobian);
+                    finalPos += calculateGerstnerWave(position, vec2(0.7, 0.7), 0.2, 14.0, 2.1, 1.2, jacobian);
+                    finalPos += calculateGerstnerWave(position, vec2(-0.2, 1.0), 0.2, 8.0, 3.5, 2.0, jacobian);
+                    finalPos += calculateGerstnerWave(position, vec2(0.5, -0.4), 0.15, 4.0, 4.0, 3.4, jacobian);
+                    finalPos += calculateGerstnerWave(position, vec2(-0.6, -0.5), 0.1, 2.0, 5.5, 0.0, jacobian);
+                    
+                    return vec4(finalPos, 1.0 - jacobian);
+                }
+            ` + shader.vertexShader;
+
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `
+                vec4 wave = getOceanDisplacement(position);
+                vec3 displacedPosition = position + wave.xyz;
+                
+                // Finite Difference Normals
+                float delta = 0.1;
+                vec3 p_dx = (position + vec3(delta, 0.0, 0.0)) + getOceanDisplacement(position + vec3(delta, 0.0, 0.0)).xyz;
+                vec3 p_dz = (position + vec3(0.0, 0.0, delta)) + getOceanDisplacement(position + vec3(0.0, 0.0, delta)).xyz;
+                
+                vec3 tangent = normalize(p_dx - displacedPosition);
+                vec3 bitangent = normalize(p_dz - displacedPosition);
+                vec3 newNormal = normalize(cross(bitangent, tangent));
+
+                vec3 transformed = displacedPosition;
+                vNormal = normalMatrix * newNormal;
+
+                vFoam = smoothstep(0.4, 1.5, wave.w);
+                
+                vec4 worldPosition = modelMatrix * vec4(transformed, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                `
+            );
+
+            // --- Fragment Shader ---
+            shader.fragmentShader = `
+                uniform float uTime;
+                uniform vec3 uSunDir;
+                varying float vFoam;
+                varying vec3 vWorldPosition;
+            ` + shader.fragmentShader;
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <color_fragment>',
+                `
+                vec3 deepColor = vec3(0.0, 0.12, 0.21);
+                vec3 shallowColor = vec3(0.0, 0.41, 0.58);
+                vec3 foamColor = vec3(1.0);
+
+                vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+                
+                // Opacity based on viewing angle (Fresnel approximation)
+                float fresnel = 0.02 + 0.98 * pow(1.0 - dot(viewDir, vNormal), 5.0);
+                
+                float heightFactor = smoothstep(-2.0, 3.0, vWorldPosition.y);
+                vec3 waterBase = mix(deepColor, shallowColor, heightFactor * 0.5);
+
+                // SSS
+                float sssFactor = max(0.0, dot(viewDir, -uSunDir)); 
+                sssFactor = pow(sssFactor, 4.0); 
+                vec3 sssColor = vec3(0.0, 1.0, 0.66) * sssFactor * heightFactor * 0.8;
+
+                vec3 finalBaseColor = mix(waterBase + sssColor, foamColor, vFoam);
+                
+                diffuseColor.rgb = finalBaseColor;
+                diffuseColor.a = mix(0.7, 1.0, vFoam + fresnel * 0.5); // Foam is opaque
+                `
+            );
+        };
+
+        const oceanGeo = new THREE.PlaneGeometry(100, 100, 256, 256);
+        oceanGeo.rotateX(-Math.PI / 2);
+        const oceanMesh = new THREE.Mesh(oceanGeo, oceanMaterial);
+        scene.add(oceanMesh);
+
+
+        // --- 5. Underwater Ground Terrain ---
+
+        const groundMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: globalUniforms.time,
+                uColor: { value: new THREE.Color(0xc2b280) }, // Sand color
+                uFogColor: { value: new THREE.Color(0x001e36) }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                varying vec3 vWorldPos;
+                uniform float uTime;
+
+                void main() {
+                    vUv = uv;
+                    vec3 pos = position;
+                    
+                    // Procedural Dunes (simple sine waves)
+                    float duneHeight = sin(pos.x * 0.1) * sin(pos.y * 0.1) * 2.0;
+                    duneHeight += sin(pos.x * 0.5 + pos.y * 0.5) * 0.5;
+                    
+                    pos.z += duneHeight; 
+
+                    vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
+                    vWorldPos = worldPosition.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 uColor;
+                uniform vec3 uFogColor;
+                uniform float uTime;
+                varying vec2 vUv;
+                varying vec3 vWorldPos;
+
+                // Simple pseudo-random function
+                float random(vec2 st) {
+                    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+                }
+
+                // Value Noise for caustics
+                float noise(vec2 st) {
+                    vec2 i = floor(st);
+                    vec2 f = fract(st);
+                    float a = random(i);
+                    float b = random(i + vec2(1.0, 0.0));
+                    float c = random(i + vec2(0.0, 1.0));
+                    float d = random(i + vec2(1.0, 1.0));
+                    vec2 u = f * f * (3.0 - 2.0 * f);
+                    return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+                }
+
+                void main() {
+                    // 1. Base Sand Texture (Noise)
+                    float sandGrain = noise(vUv * 500.0) * 0.1;
+                    vec3 col = uColor - sandGrain;
+
+                    // 2. Fake Caustics (Light patterns)
+                    // We overlay two moving noise patterns to create the web-like effect
+                    vec2 causticsUv = vWorldPos.xz * 0.2;
+                    float c1 = noise(causticsUv + uTime * 0.5);
+                    float c2 = noise(causticsUv * 0.8 - uTime * 0.3);
+                    
+                    // Sharpen the noise to make it look like light rays
+                    float caustic = smoothstep(0.4, 0.6, c1 * c2); 
+                    
+                    // Add caustics to sand
+                    col += vec3(0.8, 0.9, 1.0) * caustic * 0.3;
+
+                    // 3. Underwater Fog (Distance fading)
+                    float dist = length(vWorldPos - cameraPosition);
+                    float fogFactor = smoothstep(10.0, 100.0, dist);
+                    col = mix(col, uFogColor, fogFactor);
+
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `
+        });
+
+        // Create Ground Plane
+        const groundGeo = new THREE.PlaneGeometry(100, 100, 128, 128); // High res for dunes
+        // Rotate flat (PlaneGeometry defaults to XY, we want XZ, but wait..)
+        // The standard Plane is XY. We usually rotate X by -PI/2.
+        // However, in my shader I used z as up (duneHeight += ... pos.z).
+        // Let's stick to standard Three.js orientation: Y is up.
+        // So we rotate geometry -PI/2 so it lays flat.
+        groundGeo.rotateX(-Math.PI / 2);
+        
+        const groundMesh = new THREE.Mesh(groundGeo, groundMaterial);
+        groundMesh.position.y = -12; // Place it below the water
+        scene.add(groundMesh);
+
+
+        // --- 6. Skybox ---
+        
+        const skyUniforms = {
+            uSunDir: { value: new THREE.Vector3() }
+        };
+
+        const skyGeo = new THREE.SphereGeometry(500, 32, 32);
+        const skyMat = new THREE.ShaderMaterial({
+            side: THREE.BackSide,
+            uniforms: skyUniforms,
+            vertexShader: `
+                varying vec3 vWorldPosition;
+                void main() {
+                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                    vWorldPosition = worldPosition.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform vec3 uSunDir;
+                varying vec3 vWorldPosition;
+                
+                void main() {
+                    vec3 h = normalize(vWorldPosition);
+                    vec3 topColor = vec3(0.05, 0.1, 0.3);
+                    vec3 bottomColor = vec3(0.5, 0.7, 0.9);
+                    float f = smoothstep(-0.2, 1.0, h.y);
+                    vec3 skyColor = mix(bottomColor, topColor, f);
+                    
+                    float sun = max(0.0, dot(h, uSunDir));
+                    float sunDisk = smoothstep(0.998, 0.999, sun); 
+                    float sunGlow = smoothstep(0.9, 1.0, sun);     
+                    vec3 sunColor = vec3(1.0, 0.9, 0.7) * 2.0;
+                    
+                    gl_FragColor = vec4(skyColor + (sunColor * sunDisk) + (sunColor * sunGlow * 0.3), 1.0);
+                }
+            `
+        });
+        const sky = new THREE.Mesh(skyGeo, skyMat);
+        scene.add(sky);
+
+        // --- 7. Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            const time = clock.getElapsedTime();
+            
+            // 1. Move Sun
+            const theta = Math.PI * 0.25; 
+            const phi = time * 0.05; // Slowed down sun
+            
+            sunDirection.x = Math.sin(phi) * Math.cos(theta);
+            sunDirection.y = Math.sin(theta);
+            sunDirection.z = Math.cos(phi) * Math.cos(theta);
+            sunDirection.normalize();
+
+            sunLight.position.copy(sunDirection).multiplyScalar(100);
+            
+            // 2. Update Shared Uniforms
+            globalUniforms.time.value = time;
+            globalUniforms.sunDir.value.copy(sunDirection);
+            skyUniforms.uSunDir.value.copy(sunDirection);
+
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+
+    </script>
+</body>
+</html>
