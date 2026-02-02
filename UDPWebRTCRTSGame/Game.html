@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>RTS WebRTC Client</title>
+    <style>
+        body { background-color: #1a1a1a; color: white; font-family: sans-serif; text-align: center; }
+        .ui-panel { display: flex; justify-content: center; gap: 20px; padding: 20px; background: #333; margin-bottom: 20px; }
+        .resource { font-size: 20px; font-weight: bold; color: gold; }
+        .power { color: cyan; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 800px; margin: auto; }
+        button { padding: 15px; background: #444; color: white; border: 1px solid #666; cursor: pointer; }
+        button:hover { background: #666; }
+        .active { border-color: lime; }
+    </style>
+</head>
+<body>
+
+    <div class="ui-panel">
+        <div class="resource">GOLD: <span id="gold">0</span></div>
+        <div class="resource power">POWER: <span id="power">0</span></div>
+        <div class="resource" style="color:red">SOLDIERS: <span id="soldiers">0</span></div>
+    </div>
+
+    <div class="grid">
+        <button onclick="sendCommand('build_power')">
+            Build Power Plant<br>
+            <small>Cost: 50 Gold | +50 Power</small>
+        </button>
+
+        <button onclick="sendCommand('build_refinery')">
+            Build Refinery<br>
+            <small>Cost: 100 Gold | -10 Power</small><br>
+            <em style="color:yellow">Generates Gold over time</em>
+        </button>
+
+        <button onclick="sendCommand('build_barracks')">
+            Build Barracks<br>
+            <small>Cost: 150 Gold | -20 Power</small>
+        </button>
+        
+        <button onclick="sendCommand('train_soldier')" style="grid-column: span 3; background: #500;">
+            Train Soldier<br>
+            <small>Cost: 20 Gold | -5 Power | Req: Barracks</small>
+        </button>
+    </div>
+
+    <h3>Building Inventory</h3>
+    <div id="debug"></div>
+
+    <script>
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+
+        // Create the "socket"
+        const dc = pc.createDataChannel("rts_game", { ordered: false, maxRetransmits: 0 });
+
+        dc.onopen = () => console.log("Connected to C++ RTS Server");
+        
+        // RECEIVE UPDATES
+        dc.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            updateUI(data);
+        };
+
+        // SEND COMMANDS
+        function sendCommand(cmd) {
+            if (dc.readyState === "open") {
+                dc.send(cmd);
+            }
+        }
+
+        function updateUI(data) {
+            // Update Resources
+            document.getElementById("gold").innerText = data.resources.gold;
+            document.getElementById("power").innerText = data.resources.power;
+            document.getElementById("soldiers").innerText = data.resources.soldiers;
+
+            // Update Debug/Inventory
+            document.getElementById("debug").innerText = 
+                `HQ: ${data.buildings.hq} | Power Plants: ${data.buildings.power_plant} | Refineries: ${data.buildings.refinery} | Barracks: ${data.buildings.barracks}`;
+        }
+
+        // --- Signaling Placeholder ---
+        // In a real implementation, you would use WebSocket to exchange SDP here.
+        // pc.createOffer().then(offer => pc.setLocalDescription(offer))...
+    </script>
+</body>
+</html>
