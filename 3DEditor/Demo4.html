@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL 3D Modeler - Multi Object</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; }
+        
+        /* Sidebar UI */
+        #sidebar {
+            position: absolute; top: 0; left: 0; width: 280px; height: 100vh;
+            background: #252526; border-right: 1px solid #3e3e42; padding: 20px; box-sizing: border-box;
+            overflow-y: auto; z-index: 10;
+        }
+        
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #555; padding-bottom: 10px; }
+        h3 { font-size: 0.9rem; color: #ccc; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .control-group { display: flex; align-items: center; margin-bottom: 10px; }
+        .control-group label { width: 30px; font-weight: bold; color: #aaa; }
+        .control-group input, .control-group select { 
+            flex: 1; background: #3c3c3c; border: 1px solid #555; 
+            color: white; padding: 5px; border-radius: 3px; 
+        }
+        
+        button {
+            width: 100%; padding: 10px; background: #3c3c3c; color: white;
+            border: 1px solid #555; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 5px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #505050; }
+        button.primary { background: #007acc; border: none; }
+        button.primary:hover { background: #0062a3; }
+        button.danger { background: #a32020; border: none; margin-top: 10px; }
+        button.danger:hover { background: #c92c2c; }
+        
+        #canvas-container { margin-left: 280px; width: calc(100vw - 280px); height: 100vh; touch-action: none; }
+        
+        /* Mobile Touch Tools */
+        #mobile-tools {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 20px; z-index: 20; pointer-events: none;
+        }
+        .tool-btn {
+            pointer-events: auto; width: 60px; height: 60px; border-radius: 50%;
+            background: rgba(40, 40, 40, 0.9); border: 2px solid #666; color: white;
+            font-size: 24px; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer;
+        }
+        .tool-btn.selected { background: #007acc; border-color: #fff; }
+
+        /* Mode Selector Tabs */
+        .mode-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+        .mode-tabs button { padding: 8px 5px; font-size: 0.8rem; }
+        .mode-tabs button.active { background: #d7ba7d; color: #1e1e1e; border-color: #d7ba7d; }
+
+        @media (max-width: 768px) {
+            #sidebar {
+                top: auto; bottom: 0; left: 0; width: 100%; height: 40vh;
+                border-right: none; border-top: 1px solid #3e3e42;
+            }
+            #canvas-container { margin-left: 0; width: 100%; height: 60vh; }
+            #mobile-tools { bottom: 20px; }
+        }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Multi-Object Modeler</h2>
+        
+        <h3>Creation</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            <button class="primary" id="btn-add-cube">Cube</button>
+            <button class="primary" id="btn-add-tri">Triangle</button>
+            <button class="primary" id="btn-add-circle">Circle</button>
+        </div>
+        <button class="danger" id="btn-delete">Delete Selected</button>
+
+        <h3>Edit Mode</h3>
+        <div class="mode-tabs">
+            <button id="mode-obj" class="active">Object</button>
+            <button id="mode-vert">Vertex</button>
+            <button id="mode-edge">Edge</button>
+        </div>
+
+        <h3>Transform</h3>
+        <div class="control-group"><label>X</label><input type="number" step="0.1" id="pos-x"></div>
+        <div class="control-group"><label>Y</label><input type="number" step="0.1" id="pos-y"></div>
+        <div class="control-group"><label>Z</label><input type="number" step="0.1" id="pos-z"></div>
+        
+        <br>
+        <div class="control-group"><label>RX</label><input type="number" step="5" id="rot-x"></div>
+        <div class="control-group"><label>RY</label><input type="number" step="5" id="rot-y"></div>
+        <div class="control-group"><label>RZ</label><input type="number" step="5" id="rot-z"></div>
+    </div>
+
+    <div id="canvas-container">
+        <div id="mobile-tools">
+            <button class="tool-btn selected" id="btn-tool-move">✥</button>
+            <button class="tool-btn" id="btn-tool-rotate">↻</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        // --- Configuration & State ---
+        let scene, camera, renderer, orbit, transformControl;
+        
+        // Object Management
+        let objects = [];        // List of all editable meshes
+        let activeObject = null; // Currently selected mesh
+        let helpers = [];        // Visual helpers for vertex/edge mode
+        
+        // Mode: 'object', 'vertex', 'edge'
+        let currentMode = 'object'; 
+        
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // UI References
+        const ui = {
+            pos: { x: document.getElementById('pos-x'), y: document.getElementById('pos-y'), z: document.getElementById('pos-z') },
+            rot: { x: document.getElementById('rot-x'), y: document.getElementById('rot-y'), z: document.getElementById('rot-z') },
+            modes: {
+                obj: document.getElementById('mode-obj'),
+                vert: document.getElementById('mode-vert'),
+                edge: document.getElementById('mode-edge')
+            },
+            tools: {
+                move: document.getElementById('btn-tool-move'),
+                rotate: document.getElementById('btn-tool-rotate')
+            }
+        };
+
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+            scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x333333));
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 100);
+            camera.position.set(5, 5, 8);
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 4. Lights
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            // 5. Controls
+            orbit = new OrbitControls(camera, renderer.domElement);
+            orbit.enableDamping = true;
+
+            transformControl = new TransformControls(camera, renderer.domElement);
+            transformControl.addEventListener('dragging-changed', (event) => { orbit.enabled = !event.value; });
+            transformControl.addEventListener('change', () => {
+                if (currentMode === 'vertex') updateGeometryFromVertex();
+                if (currentMode === 'edge') updateGeometryFromEdge();
+                updateUIValues(); 
+            });
+            scene.add(transformControl);
+
+            // 6. Events
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            setupUI();
+
+            // Start
+            animate();
+        }
+
+        // --- Object Management ---
+
+        function addObject(geometry) {
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x007acc, 
+                roughness: 0.4, 
+                metalness: 0.1,
+                side: THREE.DoubleSide,
+                emissive: 0x000000 
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            
+            // Random slight offset to prevent perfect overlap if adding multiple
+            mesh.position.set(Math.random() * 2 - 1, 1, Math.random() * 2 - 1);
+            
+            scene.add(mesh);
+            objects.push(mesh);
+            
+            // Auto-select the new object
+            selectObject(mesh);
+        }
+
+        function deleteSelected() {
+            if (!activeObject) return;
+
+            transformControl.detach();
+            clearHelpers();
+            scene.remove(activeObject);
+            
+            // Remove from array
+            objects = objects.filter(obj => obj !== activeObject);
+            
+            // Cleanup memory
+            if(activeObject.geometry) activeObject.geometry.dispose();
+            if(activeObject.material) activeObject.material.dispose();
+            
+            activeObject = null;
+            updateUIValues();
+        }
+
+        function selectObject(mesh) {
+            if (activeObject === mesh) return; // Already selected
+
+            // 1. Cleanup previous selection
+            if (activeObject) {
+                activeObject.material.emissive.setHex(0x000000); // Remove glow
+                clearHelpers(); // Remove vertex/edge handles from old object
+            }
+
+            // 2. Set new active object
+            activeObject = mesh;
+            
+            // 3. Highlight new selection (Subtle Glow)
+            if (activeObject) {
+                activeObject.material.emissive.setHex(0x222222);
+                transformControl.attach(activeObject);
+
+                // If we are in vertex or edge mode, regenerate helpers for this new object immediately
+                if (currentMode === 'vertex') buildVertexHelpers();
+                else if (currentMode === 'edge') buildEdgeHelpers();
+                
+                // If in vertex/edge mode, tool must be translate
+                if (currentMode !== 'object') transformControl.setMode('translate');
+            } else {
+                transformControl.detach();
+            }
+
+            updateUIValues();
+        }
+
+        function addCube() { addObject(new THREE.BoxGeometry(2, 2, 2)); }
+        function addTriangle() { addObject(new THREE.CircleGeometry(1.5, 3)); }
+        function addCircle() { addObject(new THREE.CircleGeometry(1.5, 32)); }
+
+        // --- Mode Switching ---
+
+        function setMode(mode) {
+            currentMode = mode;
+            
+            // UI Visuals
+            ui.modes.obj.className = mode === 'object' ? 'active' : '';
+            ui.modes.vert.className = mode === 'vertex' ? 'active' : '';
+            ui.modes.edge.className = mode === 'edge' ? 'active' : '';
+
+            // Logic
+            clearHelpers();
+
+            if (!activeObject) return;
+
+            if (mode === 'object') {
+                transformControl.attach(activeObject);
+                ui.tools.rotate.disabled = false;
+            } 
+            else if (mode === 'vertex') {
+                buildVertexHelpers();
+                transformControl.setMode('translate');
+                ui.tools.rotate.disabled = true;
+            }
+            else if (mode === 'edge') {
+                buildEdgeHelpers();
+                transformControl.setMode('translate');
+                ui.tools.rotate.disabled = true;
+            }
+            
+            ui.tools.move.classList.add('selected');
+            ui.tools.rotate.classList.remove('selected');
+        }
+
+        // --- Helpers (Vertex/Edge) ---
+
+        function buildVertexHelpers() {
+            if(!activeObject) return;
+            const posAttr = activeObject.geometry.attributes.position;
+            const uniquePosMap = {};
+
+            // Group vertices by position
+            for (let i = 0; i < posAttr.count; i++) {
+                const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+                const key = `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+                if (!uniquePosMap[key]) uniquePosMap[key] = { indices: [], x, y, z };
+                uniquePosMap[key].indices.push(i);
+            }
+
+            Object.values(uniquePosMap).forEach(data => {
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.1, 8, 8), 
+                    new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false })
+                );
+                sphere.position.set(data.x, data.y, data.z);
+                sphere.userData = { type: 'vertex', indices: data.indices };
+                
+                activeObject.add(sphere);
+                helpers.push(sphere);
+            });
+        }
+
+        function updateGeometryFromVertex() {
+            const helper = transformControl.object;
+            if (!helper || helper.userData.type !== 'vertex') return;
+            const posAttr = activeObject.geometry.attributes.position;
+            helper.userData.indices.forEach(idx => posAttr.setXYZ(idx, helper.position.x, helper.position.y, helper.position.z));
+            posAttr.needsUpdate = true;
+            activeObject.geometry.computeVertexNormals();
+            activeObject.geometry.computeBoundingSphere();
+        }
+
+        function buildEdgeHelpers() {
+            if(!activeObject) return;
+            const posAttr = activeObject.geometry.attributes.position;
+            const edgeMap = {}; 
+
+            const getEdgeKey = (pA, pB) => {
+                const kA = `${pA.x.toFixed(3)},${pA.y.toFixed(3)},${pA.z.toFixed(3)}`;
+                const kB = `${pB.x.toFixed(3)},${pB.y.toFixed(3)},${pB.z.toFixed(3)}`;
+                return kA < kB ? `${kA}|${kB}` : `${kB}|${kA}`;
+            };
+
+            const pA = new THREE.Vector3(); const pB = new THREE.Vector3(); const pC = new THREE.Vector3();
+
+            for (let i = 0; i < posAttr.count; i += 3) {
+                pA.fromBufferAttribute(posAttr, i);
+                pB.fromBufferAttribute(posAttr, i+1);
+                pC.fromBufferAttribute(posAttr, i+2);
+                processEdge(pA, pB, i, i+1, edgeMap, getEdgeKey);
+                processEdge(pB, pC, i+1, i+2, edgeMap, getEdgeKey);
+                processEdge(pC, pA, i+2, i, edgeMap, getEdgeKey);
+            }
+
+            Object.values(edgeMap).forEach(data => {
+                const center = new THREE.Vector3().addVectors(data.start, data.end).multiplyScalar(0.5);
+                const length = data.start.distanceTo(data.end);
+                const geom = new THREE.BoxGeometry(0.08, length, 0.08);
+                const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
+                const box = new THREE.Mesh(geom, mat);
+                box.position.copy(center);
+                box.lookAt(data.end);
+                box.rotateX(Math.PI / 2); 
+                box.userData = { 
+                    type: 'edge', 
+                    startPosLocal: data.start.clone(), 
+                    endPosLocal: data.end.clone(),
+                    startIndices: data.startIndices, 
+                    endIndices: data.endIndices
+                };
+                activeObject.add(box);
+                helpers.push(box);
+            });
+        }
+
+        function processEdge(vStart, vEnd, idxStart, idxEnd, map, keyFunc) {
+            const key = keyFunc(vStart, vEnd);
+            const kStart = `${vStart.x.toFixed(3)},${vStart.y.toFixed(3)},${vStart.z.toFixed(3)}`;
+            
+            if (!map[key]) map[key] = { start: vStart.clone(), end: vEnd.clone(), startIndices: [], endIndices: [] };
+            
+            if (kStart === `${map[key].start.x.toFixed(3)},${map[key].start.y.toFixed(3)},${map[key].start.z.toFixed(3)}`) {
+                map[key].startIndices.push(idxStart); map[key].endIndices.push(idxEnd);
+            } else {
+                map[key].endIndices.push(idxStart); map[key].startIndices.push(idxEnd);
+            }
+        }
+
+        function updateGeometryFromEdge() {
+            const helper = transformControl.object;
+            if (!helper || helper.userData.type !== 'edge') return;
+
+            const posAttr = activeObject.geometry.attributes.position;
+            const currentCenter = helper.position;
+            
+            const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(helper.quaternion); 
+            const halfLen = helper.userData.startPosLocal.distanceTo(helper.userData.endPosLocal) / 2;
+            
+            const newPosA = new THREE.Vector3().copy(currentCenter).sub(direction.clone().multiplyScalar(halfLen));
+            const newPosB = new THREE.Vector3().copy(currentCenter).add(direction.clone().multiplyScalar(halfLen));
+            
+            helper.userData.startIndices.forEach(idx => posAttr.setXYZ(idx, newPosA.x, newPosA.y, newPosA.z));
+            helper.userData.endIndices.forEach(idx => posAttr.setXYZ(idx, newPosB.x, newPosB.y, newPosB.z));
+            
+            posAttr.needsUpdate = true;
+            activeObject.geometry.computeVertexNormals();
+            activeObject.geometry.computeBoundingSphere();
+        }
+
+        function clearHelpers() {
+            if(activeObject) {
+                helpers.forEach(h => activeObject.remove(h));
+            }
+            helpers = [];
+        }
+
+        // --- Interaction ---
+
+        function onPointerDown(e) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // 1. Helpers (Vertex/Edge) priority
+            if (currentMode !== 'object' && helpers.length > 0) {
+                const intersectHelpers = raycaster.intersectObjects(helpers, false);
+                if (intersectHelpers.length > 0) {
+                    transformControl.attach(intersectHelpers[0].object);
+                    return;
+                }
+            }
+
+            // 2. Select Objects
+            const intersectObjects = raycaster.intersectObjects(objects, false);
+            if (intersectObjects.length > 0) {
+                selectObject(intersectObjects[0].object);
+            } else {
+                // Clicked empty space? deselect?
+                // selectObject(null); // Optional: Un-comment to allow deselecting everything
+            }
+        }
+
+        // --- UI Logic ---
+        function setupUI() {
+            // Creation
+            document.getElementById('btn-add-cube').onclick = addCube;
+            document.getElementById('btn-add-tri').onclick = addTriangle;
+            document.getElementById('btn-add-circle').onclick = addCircle;
+            document.getElementById('btn-delete').onclick = deleteSelected;
+
+            // Modes
+            ui.modes.obj.onclick = () => setMode('object');
+            ui.modes.vert.onclick = () => setMode('vertex');
+            ui.modes.edge.onclick = () => setMode('edge');
+
+            // Tools
+            ui.tools.move.onclick = () => transformControl.setMode('translate');
+            ui.tools.rotate.onclick = () => { if(currentMode === 'object') transformControl.setMode('rotate'); };
+
+            // Inputs
+            const updateObj = () => {
+                if (!activeObject || currentMode !== 'object') return;
+                activeObject.position.set(parseFloat(ui.pos.x.value), parseFloat(ui.pos.y.value), parseFloat(ui.pos.z.value));
+                activeObject.rotation.set(
+                    THREE.MathUtils.degToRad(ui.rot.x.value),
+                    THREE.MathUtils.degToRad(ui.rot.y.value),
+                    THREE.MathUtils.degToRad(ui.rot.z.value)
+                );
+            };
+            Object.values(ui.pos).forEach(el => el.oninput = updateObj);
+            Object.values(ui.rot).forEach(el => el.oninput = updateObj);
+        }
+
+        function updateUIValues() {
+            if (!activeObject) {
+                // clear inputs if nothing selected
+                Object.values(ui.pos).forEach(el => el.value = '');
+                Object.values(ui.rot).forEach(el => el.value = '');
+                return;
+            }
+            
+            if (currentMode === 'object' && document.activeElement.tagName !== 'INPUT') {
+                ui.pos.x.value = activeObject.position.x.toFixed(2);
+                ui.pos.y.value = activeObject.position.y.toFixed(2);
+                ui.pos.z.value = activeObject.position.z.toFixed(2);
+                ui.rot.x.value = THREE.MathUtils.radToDeg(activeObject.rotation.x).toFixed(0);
+                ui.rot.y.value = THREE.MathUtils.radToDeg(activeObject.rotation.y).toFixed(0);
+                ui.rot.z.value = THREE.MathUtils.radToDeg(activeObject.rotation.z).toFixed(0);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = document.getElementById('canvas-container').clientWidth / document.getElementById('canvas-container').clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(document.getElementById('canvas-container').clientWidth, document.getElementById('canvas-container').clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbit.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
