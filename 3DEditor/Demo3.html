@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL 3D Modeler - v2</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; }
+        
+        /* Sidebar UI */
+        #sidebar {
+            position: absolute; top: 0; left: 0; width: 280px; height: 100vh;
+            background: #252526; border-right: 1px solid #3e3e42; padding: 20px; box-sizing: border-box;
+            overflow-y: auto; z-index: 10;
+        }
+        
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #555; padding-bottom: 10px; }
+        h3 { font-size: 0.9rem; color: #ccc; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .control-group { display: flex; align-items: center; margin-bottom: 10px; }
+        .control-group label { width: 30px; font-weight: bold; color: #aaa; }
+        .control-group input, .control-group select { 
+            flex: 1; background: #3c3c3c; border: 1px solid #555; 
+            color: white; padding: 5px; border-radius: 3px; 
+        }
+        
+        button {
+            width: 100%; padding: 10px; background: #3c3c3c; color: white;
+            border: 1px solid #555; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 5px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #505050; }
+        button.primary { background: #007acc; border: none; }
+        button.primary:hover { background: #0062a3; }
+        
+        #canvas-container { margin-left: 280px; width: calc(100vw - 280px); height: 100vh; touch-action: none; }
+        
+        /* Mobile Touch Tools */
+        #mobile-tools {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 20px; z-index: 20; pointer-events: none;
+        }
+        .tool-btn {
+            pointer-events: auto; width: 60px; height: 60px; border-radius: 50%;
+            background: rgba(40, 40, 40, 0.9); border: 2px solid #666; color: white;
+            font-size: 24px; display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer;
+        }
+        .tool-btn.selected { background: #007acc; border-color: #fff; }
+
+        /* Mode Selector Tabs */
+        .mode-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+        .mode-tabs button { padding: 8px 5px; font-size: 0.8rem; }
+        .mode-tabs button.active { background: #d7ba7d; color: #1e1e1e; border-color: #d7ba7d; }
+
+        @media (max-width: 768px) {
+            #sidebar {
+                top: auto; bottom: 0; left: 0; width: 100%; height: 40vh;
+                border-right: none; border-top: 1px solid #3e3e42;
+            }
+            #canvas-container { margin-left: 0; width: 100%; height: 60vh; }
+            #mobile-tools { bottom: 20px; }
+        }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>WebGL Modeler</h2>
+        
+        <h3>Creation</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
+            <button class="primary" id="btn-add-cube">Cube</button>
+            <button class="primary" id="btn-add-tri">Triangle</button>
+            <button class="primary" id="btn-add-circle">Circle</button>
+        </div>
+
+        <h3>Edit Mode</h3>
+        <div class="mode-tabs">
+            <button id="mode-obj" class="active">Object</button>
+            <button id="mode-vert">Vertex</button>
+            <button id="mode-edge">Edge</button>
+        </div>
+
+        <h3>Transform</h3>
+        <div class="control-group"><label>X</label><input type="number" step="0.1" id="pos-x"></div>
+        <div class="control-group"><label>Y</label><input type="number" step="0.1" id="pos-y"></div>
+        <div class="control-group"><label>Z</label><input type="number" step="0.1" id="pos-z"></div>
+        
+        <br>
+        <div class="control-group"><label>RX</label><input type="number" step="5" id="rot-x"></div>
+        <div class="control-group"><label>RY</label><input type="number" step="5" id="rot-y"></div>
+        <div class="control-group"><label>RZ</label><input type="number" step="5" id="rot-z"></div>
+    </div>
+
+    <div id="canvas-container">
+        <div id="mobile-tools">
+            <button class="tool-btn selected" id="btn-tool-move">✥</button>
+            <button class="tool-btn" id="btn-tool-rotate">↻</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        // --- Configuration & State ---
+        let scene, camera, renderer, orbit, transformControl;
+        let activeObject = null;
+        let helpers = []; // Stores Vertex or Edge helpers
+        
+        // Mode: 'object', 'vertex', 'edge'
+        let currentMode = 'object'; 
+        
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // UI References
+        const ui = {
+            pos: { x: document.getElementById('pos-x'), y: document.getElementById('pos-y'), z: document.getElementById('pos-z') },
+            rot: { x: document.getElementById('rot-x'), y: document.getElementById('rot-y'), z: document.getElementById('rot-z') },
+            modes: {
+                obj: document.getElementById('mode-obj'),
+                vert: document.getElementById('mode-vert'),
+                edge: document.getElementById('mode-edge')
+            },
+            tools: {
+                move: document.getElementById('btn-tool-move'),
+                rotate: document.getElementById('btn-tool-rotate')
+            }
+        };
+
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+            scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x333333));
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 100);
+            camera.position.set(4, 4, 6);
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // 4. Lights
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            // 5. Controls
+            orbit = new OrbitControls(camera, renderer.domElement);
+            orbit.enableDamping = true;
+
+            transformControl = new TransformControls(camera, renderer.domElement);
+            // Disable camera orbit when dragging gizmo
+            transformControl.addEventListener('dragging-changed', (event) => { orbit.enabled = !event.value; });
+            // Update geometry when dragging vertices/edges
+            transformControl.addEventListener('change', () => {
+                if (currentMode === 'vertex') updateGeometryFromVertex();
+                if (currentMode === 'edge') updateGeometryFromEdge();
+                updateUIValues(); 
+            });
+            scene.add(transformControl);
+
+            // 6. Events
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            setupUI();
+
+            // Start
+            animate();
+        }
+
+        // --- Object Creation ---
+
+        function addObject(geometry) {
+            // Cleanup existing
+            if (activeObject) {
+                scene.remove(activeObject);
+                clearHelpers();
+            }
+
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x007acc, 
+                roughness: 0.4, 
+                metalness: 0.1,
+                side: THREE.DoubleSide 
+            });
+            
+            activeObject = new THREE.Mesh(geometry, material);
+            activeObject.position.y = 1;
+            scene.add(activeObject);
+            
+            // Reset to Object mode on new object
+            setMode('object');
+            updateUIValues();
+        }
+
+        function addCube() { addObject(new THREE.BoxGeometry(2, 2, 2)); }
+        // A triangle primitive can be a Circle with 3 segments (flat) or a Tetrahedron
+        function addTriangle() { addObject(new THREE.CircleGeometry(1.5, 3)); }
+        function addCircle() { addObject(new THREE.CircleGeometry(1.5, 32)); }
+
+        // --- Mode Switching & Logic ---
+
+        function setMode(mode) {
+            currentMode = mode;
+            
+            // UI visual update
+            ui.modes.obj.className = mode === 'object' ? 'active' : '';
+            ui.modes.vert.className = mode === 'vertex' ? 'active' : '';
+            ui.modes.edge.className = mode === 'edge' ? 'active' : '';
+
+            // Tool Logic
+            transformControl.detach();
+            clearHelpers();
+
+            if (mode === 'object') {
+                if (activeObject) transformControl.attach(activeObject);
+                ui.tools.rotate.disabled = false;
+            } 
+            else if (mode === 'vertex') {
+                if (activeObject) buildVertexHelpers();
+                transformControl.setMode('translate');
+                ui.tools.rotate.disabled = true; // Rotate makes no sense for single vertex
+            }
+            else if (mode === 'edge') {
+                if (activeObject) buildEdgeHelpers();
+                transformControl.setMode('translate');
+                ui.tools.rotate.disabled = true;
+            }
+            
+            // Update tool button visuals
+            ui.tools.move.classList.add('selected');
+            ui.tools.rotate.classList.remove('selected');
+        }
+
+        // --- Vertex Mode Implementation ---
+
+        function buildVertexHelpers() {
+            const posAttr = activeObject.geometry.attributes.position;
+            const uniquePosMap = {};
+
+            // 1. Group vertices by position (handling split normals)
+            for (let i = 0; i < posAttr.count; i++) {
+                const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+                const key = `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
+                
+                if (!uniquePosMap[key]) uniquePosMap[key] = { indices: [], x, y, z };
+                uniquePosMap[key].indices.push(i);
+            }
+
+            // 2. Create Helper Spheres
+            Object.values(uniquePosMap).forEach(data => {
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.1, 8, 8), 
+                    new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false })
+                );
+                sphere.position.set(data.x, data.y, data.z);
+                sphere.userData = { type: 'vertex', indices: data.indices };
+                
+                activeObject.add(sphere);
+                helpers.push(sphere);
+            });
+        }
+
+        function updateGeometryFromVertex() {
+            const helper = transformControl.object;
+            if (!helper || helper.userData.type !== 'vertex') return;
+
+            const posAttr = activeObject.geometry.attributes.position;
+            
+            // Apply helper position to all associated vertices
+            helper.userData.indices.forEach(idx => {
+                posAttr.setXYZ(idx, helper.position.x, helper.position.y, helper.position.z);
+            });
+            
+            posAttr.needsUpdate = true;
+            activeObject.geometry.computeVertexNormals();
+            activeObject.geometry.computeBoundingSphere();
+        }
+
+        // --- Edge Mode Implementation ---
+
+        function buildEdgeHelpers() {
+            // We need to find edges. In non-indexed geometry (like basic Three.js primitives),
+            // every 3 vertices make a face. Edges are v0-v1, v1-v2, v2-v0.
+            
+            const posAttr = activeObject.geometry.attributes.position;
+            const edgeMap = {}; // Key: "x1,y1,z1|x2,y2,z2" -> Value: { indicesA: [], indicesB: [], center: Vector3 }
+
+            // Helper to generate a consistent key for an edge regardless of direction
+            const getEdgeKey = (pA, pB) => {
+                const kA = `${pA.x.toFixed(3)},${pA.y.toFixed(3)},${pA.z.toFixed(3)}`;
+                const kB = `${pB.x.toFixed(3)},${pB.y.toFixed(3)},${pB.z.toFixed(3)}`;
+                return kA < kB ? `${kA}|${kB}` : `${kB}|${kA}`;
+            };
+
+            const pA = new THREE.Vector3();
+            const pB = new THREE.Vector3();
+            const pC = new THREE.Vector3();
+
+            // Loop through triangles
+            for (let i = 0; i < posAttr.count; i += 3) {
+                pA.fromBufferAttribute(posAttr, i);
+                pB.fromBufferAttribute(posAttr, i+1);
+                pC.fromBufferAttribute(posAttr, i+2);
+
+                processEdge(pA, pB, i, i+1, edgeMap);
+                processEdge(pB, pC, i+1, i+2, edgeMap);
+                processEdge(pC, pA, i+2, i, edgeMap);
+            }
+
+            // Create Visual helpers (Yellow Bars)
+            Object.values(edgeMap).forEach(data => {
+                // Calculate center
+                const center = new THREE.Vector3().addVectors(data.start, data.end).multiplyScalar(0.5);
+                const length = data.start.distanceTo(data.end);
+                
+                // Create capsule/box for edge handle
+                const geom = new THREE.BoxGeometry(0.08, length, 0.08);
+                const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false });
+                const box = new THREE.Mesh(geom, mat);
+                
+                // Orient box to match edge
+                box.position.copy(center);
+                box.lookAt(data.end);
+                box.rotateX(Math.PI / 2); // Box geometry is Y-up, lookAt aligns Z, so we adjust
+
+                // Store data needed to move the vertices later
+                // We need to know which vertices correspond to Start and which to End
+                box.userData = { 
+                    type: 'edge', 
+                    startPosLocal: data.start.clone(), // Original local pos relative to center
+                    endPosLocal: data.end.clone(),
+                    startIndices: data.startIndices, // Indices at point A
+                    endIndices: data.endIndices      // Indices at point B
+                };
+
+                activeObject.add(box);
+                helpers.push(box);
+            });
+        }
+
+        function processEdge(vStart, vEnd, idxStart, idxEnd, map) {
+            const key = getEdgeKey(vStart, vEnd);
+            
+            // Standardize key order to find "Point A" and "Point B"
+            const kStart = `${vStart.x.toFixed(3)},${vStart.y.toFixed(3)},${vStart.z.toFixed(3)}`;
+            const kEnd = `${vEnd.x.toFixed(3)},${vEnd.y.toFixed(3)},${vEnd.z.toFixed(3)}`;
+            
+            if (!map[key]) {
+                map[key] = { 
+                    start: vStart.clone(), 
+                    end: vEnd.clone(),
+                    startIndices: [], 
+                    endIndices: [] 
+                };
+            }
+            
+            // If the current vStart matches the map's stored 'start', add index there, else add to 'end'
+            // This handles shared edges where winding order might differ
+            if (kStart === `${map[key].start.x.toFixed(3)},${map[key].start.y.toFixed(3)},${map[key].start.z.toFixed(3)}`) {
+                map[key].startIndices.push(idxStart);
+                map[key].endIndices.push(idxEnd);
+            } else {
+                map[key].endIndices.push(idxStart);
+                map[key].startIndices.push(idxEnd);
+            }
+        }
+
+        function updateGeometryFromEdge() {
+            const helper = transformControl.object;
+            if (!helper || helper.userData.type !== 'edge') return;
+
+            const posAttr = activeObject.geometry.attributes.position;
+            const currentCenter = helper.position; // Where the user dragged the center to
+            
+            // Re-calculate where the start and end vertices should be relative to the new center
+            // We use the original offset vectors rotated by the helper's rotation
+            // (Simpler approach: Just move the vertices by the delta of the helper movement)
+            
+            // Since TransformControls moves the object absolutely, let's just reconstruct positions:
+            // The edge has a specific direction (Quaternion). 
+            // However, to keep it simple and robust: we calculate the delta from the *previous* known state? 
+            // Or simpler: We assume the edge doesn't rotate, it just translates.
+            // If we want rotation, it's harder. Let's stick to Translation for edges in this basic demo.
+
+            // Get orientation vector (half-length direction)
+            const halfVec = new THREE.Vector3(0, 1, 0).applyQuaternion(helper.quaternion).multiplyScalar(helper.geometry.parameters.height / 2);
+            
+            // New Point A and Point B based on Helper Position + Rotation
+            // Note: Helper Y-axis is the length axis due to BoxGeometry setup
+            // Actually, we rotated X by 90 deg in setup. So Z axis is length. 
+            // Let's rely on the stored local positions? No, they change.
+            
+            // Robust translation method:
+            // 1. We know the original vector between A and B.
+            // 2. We simply apply the translation of the helper to A and B.
+            // But we need to support arbitrary movement.
+            
+            // Let's recalculate A and B positions based on the helper's current position and orientation.
+            // The helper was created at midpoint.
+            // A = Center - (Direction * HalfLength)
+            // B = Center + (Direction * HalfLength)
+            
+            const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(helper.quaternion); // Box looked at Z
+            const halfLen = helper.userData.startPosLocal.distanceTo(helper.userData.endPosLocal) / 2;
+            
+            const newPosA = new THREE.Vector3().copy(currentCenter).sub(direction.clone().multiplyScalar(halfLen));
+            const newPosB = new THREE.Vector3().copy(currentCenter).add(direction.clone().multiplyScalar(halfLen));
+            
+            // Update Buffer
+            helper.userData.startIndices.forEach(idx => posAttr.setXYZ(idx, newPosA.x, newPosA.y, newPosA.z));
+            helper.userData.endIndices.forEach(idx => posAttr.setXYZ(idx, newPosB.x, newPosB.y, newPosB.z));
+            
+            posAttr.needsUpdate = true;
+            activeObject.geometry.computeVertexNormals();
+            activeObject.geometry.computeBoundingSphere();
+        }
+
+        function clearHelpers() {
+            helpers.forEach(h => activeObject.remove(h));
+            helpers = [];
+        }
+
+        // --- Interaction ---
+
+        function onPointerDown(e) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // 1. Check Helpers (Vertex/Edge)
+            if (currentMode !== 'object') {
+                const intersectHelpers = raycaster.intersectObjects(helpers, false);
+                if (intersectHelpers.length > 0) {
+                    transformControl.attach(intersectHelpers[0].object);
+                    return;
+                }
+            }
+
+            // 2. Check Main Object (if in Object Mode or clicking empty space)
+            const intersectObj = raycaster.intersectObjects(activeObject ? [activeObject] : [], false);
+            if (intersectObj.length > 0 && currentMode === 'object') {
+                transformControl.attach(activeObject);
+            } else if (intersectObj.length === 0) {
+                // Clicked empty space? Keep object selected but maybe detach gizmo if preferred
+                // transformControl.detach();
+            }
+        }
+
+        // --- UI Logic ---
+        function setupUI() {
+            // Creation
+            document.getElementById('btn-add-cube').onclick = addCube;
+            document.getElementById('btn-add-tri').onclick = addTriangle;
+            document.getElementById('btn-add-circle').onclick = addCircle;
+
+            // Modes
+            ui.modes.obj.onclick = () => setMode('object');
+            ui.modes.vert.onclick = () => setMode('vertex');
+            ui.modes.edge.onclick = () => setMode('edge');
+
+            // Tools
+            ui.tools.move.onclick = () => transformControl.setMode('translate');
+            ui.tools.rotate.onclick = () => { if(currentMode === 'object') transformControl.setMode('rotate'); };
+
+            // Inputs
+            const updateObj = () => {
+                if (!activeObject || currentMode !== 'object') return;
+                activeObject.position.set(parseFloat(ui.pos.x.value), parseFloat(ui.pos.y.value), parseFloat(ui.pos.z.value));
+                activeObject.rotation.set(
+                    THREE.MathUtils.degToRad(ui.rot.x.value),
+                    THREE.MathUtils.degToRad(ui.rot.y.value),
+                    THREE.MathUtils.degToRad(ui.rot.z.value)
+                );
+            };
+            Object.values(ui.pos).forEach(el => el.oninput = updateObj);
+            Object.values(ui.rot).forEach(el => el.oninput = updateObj);
+        }
+
+        function updateUIValues() {
+            if (!activeObject) return;
+            
+            // Only update inputs if we are in object mode (moving vertices doesn't change object origin)
+            if (currentMode === 'object' && document.activeElement.tagName !== 'INPUT') {
+                ui.pos.x.value = activeObject.position.x.toFixed(2);
+                ui.pos.y.value = activeObject.position.y.toFixed(2);
+                ui.pos.z.value = activeObject.position.z.toFixed(2);
+                ui.rot.x.value = THREE.MathUtils.radToDeg(activeObject.rotation.x).toFixed(0);
+                ui.rot.y.value = THREE.MathUtils.radToDeg(activeObject.rotation.y).toFixed(0);
+                ui.rot.z.value = THREE.MathUtils.radToDeg(activeObject.rotation.z).toFixed(0);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = document.getElementById('canvas-container').clientWidth / document.getElementById('canvas-container').clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(document.getElementById('canvas-container').clientWidth, document.getElementById('canvas-container').clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbit.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+    </script>
+</body>
+</html>
