@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL 3D Modeler</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; }
+        
+        /* Sidebar UI */
+        #sidebar {
+            position: absolute; top: 0; left: 0; width: 280px; height: 100vh;
+            background: #252526; border-right: 1px solid #3e3e42; padding: 20px; box-sizing: border-box;
+            overflow-y: auto; z-index: 10;
+        }
+        
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #555; padding-bottom: 10px; }
+        h3 { font-size: 0.9rem; color: #ccc; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .control-group { display: flex; align-items: center; margin-bottom: 10px; }
+        .control-group label { width: 30px; font-weight: bold; color: #aaa; }
+        .control-group input { 
+            flex: 1; background: #3c3c3c; border: 1px solid #555; 
+            color: white; padding: 5px; border-radius: 3px; 
+        }
+        
+        button {
+            width: 100%; padding: 10px; background: #007acc; color: white;
+            border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 10px;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0062a3; }
+        button.active { background: #d7ba7d; color: #1e1e1e; }
+        
+        #canvas-container { margin-left: 280px; width: calc(100vw - 280px); height: 100vh; }
+        
+        .hint { font-size: 0.8rem; color: #888; margin-top: 20px; line-height: 1.4; }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>3D Modeler</h2>
+        
+        <button id="btn-add-cube">Add Cube</button>
+        <button id="btn-mode-toggle">Mode: Object</button>
+
+        <h3>Position</h3>
+        <div class="control-group"><label>X</label><input type="number" step="0.1" id="pos-x"></div>
+        <div class="control-group"><label>Y</label><input type="number" step="0.1" id="pos-y"></div>
+        <div class="control-group"><label>Z</label><input type="number" step="0.1" id="pos-z"></div>
+
+        <h3>Rotation (Euler)</h3>
+        <div class="control-group"><label>X</label><input type="number" step="1" id="rot-x"></div>
+        <div class="control-group"><label>Y</label><input type="number" step="1" id="rot-y"></div>
+        <div class="control-group"><label>Z</label><input type="number" step="1" id="rot-z"></div>
+
+        <div class="hint">
+            <strong>Controls:</strong><br>
+            • Left Click: Select Object/Vertex<br>
+            • Drag Arrows: Move/Rotate<br>
+            • Right Click Drag: Pan Camera<br>
+            • Scroll: Zoom<br>
+            • T: Toggle Translate<br>
+            • R: Toggle Rotate (Object Mode only)
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        // --- Global Variables ---
+        let scene, camera, renderer, orbit, transformControl;
+        let activeObject = null;
+        let vertexHelpers = [];
+        let isVertexMode = false;
+        
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // UI Elements
+        const uiPos = { x: document.getElementById('pos-x'), y: document.getElementById('pos-y'), z: document.getElementById('pos-z') };
+        const uiRot = { x: document.getElementById('rot-x'), y: document.getElementById('rot-y'), z: document.getElementById('rot-z') };
+        const btnMode = document.getElementById('btn-mode-toggle');
+
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x333333);
+            
+            // Grid
+            const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x444444);
+            scene.add(gridHelper);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(5, 5, 8);
+            camera.lookAt(0, 0, 0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            // Orbit Controls (Camera Movement)
+            orbit = new OrbitControls(camera, renderer.domElement);
+            orbit.enableDamping = true;
+
+            // Transform Controls (Gizmo)
+            transformControl = new TransformControls(camera, renderer.domElement);
+            transformControl.addEventListener('dragging-changed', function (event) {
+                orbit.enabled = !event.value; // Disable camera orbit while dragging gizmo
+            });
+            transformControl.addEventListener('change', () => {
+                if (isVertexMode) updateGeometryFromVertex();
+                updateUI();
+            });
+            scene.add(transformControl);
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+            document.addEventListener('keydown', onKeyDown);
+            
+            setupUIListeners();
+            
+            // Start Loop
+            animate();
+        }
+
+        // --- Application Logic ---
+
+        function createCube() {
+            // Remove old object if exists for this simple demo
+            if (activeObject) {
+                scene.remove(activeObject);
+                cleanupVertexHelpers();
+            }
+
+            const geometry = new THREE.BoxGeometry(2, 2, 2);
+            // We use Phong material so we can see lighting
+            const material = new THREE.MeshStandardMaterial({ color: 0x007acc, roughness: 0.2, metalness: 0.1 });
+            const cube = new THREE.Mesh(geometry, material);
+            
+            cube.position.y = 1;
+            scene.add(cube);
+            
+            selectObject(cube);
+        }
+
+        function selectObject(object) {
+            activeObject = object;
+            
+            if (!isVertexMode) {
+                transformControl.attach(object);
+                transformControl.setMode('translate');
+            }
+            updateUI();
+        }
+
+        // --- Vertex Editing Logic ---
+
+        function toggleMode() {
+            isVertexMode = !isVertexMode;
+            btnMode.innerText = isVertexMode ? "Mode: Vertex" : "Mode: Object";
+            
+            if (isVertexMode) {
+                btnMode.classList.add('active');
+                transformControl.detach(); // Detach from main object
+                createVertexHelpers();
+            } else {
+                btnMode.classList.remove('active');
+                cleanupVertexHelpers();
+                if (activeObject) transformControl.attach(activeObject);
+            }
+        }
+
+        function createVertexHelpers() {
+            if (!activeObject) return;
+            
+            const positionAttribute = activeObject.geometry.attributes.position;
+            const vertexCount = positionAttribute.count;
+            
+            // Standard BoxGeometry has duplicated vertices for normals (24 vertices).
+            // We need to group them by position so one handle controls a corner (3 vertices usually).
+            const uniquePositions = {};
+            const tolerance = 0.001;
+
+            for (let i = 0; i < vertexCount; i++) {
+                const x = positionAttribute.getX(i);
+                const y = positionAttribute.getY(i);
+                const z = positionAttribute.getZ(i);
+                
+                // Create a key based on position to group them
+                const key = `${x.toFixed(3)}_${y.toFixed(3)}_${z.toFixed(3)}`;
+                
+                if (!uniquePositions[key]) {
+                    uniquePositions[key] = {
+                        indices: [],
+                        x: x, y: y, z: z
+                    };
+                }
+                uniquePositions[key].indices.push(i);
+            }
+
+            // Create spheres for each unique position
+            Object.values(uniquePositions).forEach(data => {
+                const geometry = new THREE.SphereGeometry(0.1, 16, 16);
+                const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const helper = new THREE.Mesh(geometry, material);
+                
+                // Position helper relative to parent
+                helper.position.set(data.x, data.y, data.z);
+                
+                // Store which indices this helper controls
+                helper.userData = { vertexIndices: data.indices };
+                
+                activeObject.add(helper); // Add as child so it moves with object
+                vertexHelpers.push(helper);
+            });
+        }
+
+        function cleanupVertexHelpers() {
+            transformControl.detach();
+            vertexHelpers.forEach(helper => {
+                activeObject.remove(helper);
+                helper.geometry.dispose();
+                helper.material.dispose();
+            });
+            vertexHelpers = [];
+        }
+
+        // Called when a Vertex Helper is moved via TransformControls
+        function updateGeometryFromVertex() {
+            if (!isVertexMode || !transformControl.object) return;
+
+            const helper = transformControl.object;
+            const positionAttribute = activeObject.geometry.attributes.position;
+            
+            // Update the actual geometry vertices based on helper position
+            helper.userData.vertexIndices.forEach(index => {
+                positionAttribute.setXYZ(index, helper.position.x, helper.position.y, helper.position.z);
+            });
+
+            positionAttribute.needsUpdate = true;
+            activeObject.geometry.computeVertexNormals(); // Recalculate lighting
+        }
+
+        // --- Input & Selection ---
+
+        function onPointerDown(event) {
+            // Calculate mouse position in normalized device coordinates
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            if (isVertexMode) {
+                // Raycast against vertex helpers
+                const intersects = raycaster.intersectObjects(vertexHelpers);
+                if (intersects.length > 0) {
+                    transformControl.attach(intersects[0].object);
+                    transformControl.setMode('translate'); // Vertices only translate
+                } else {
+                    transformControl.detach();
+                }
+            } else {
+                // Raycast against main objects
+                if (activeObject) {
+                   // Logic for selecting multiple objects could go here
+                }
+            }
+        }
+
+        // --- UI Updates ---
+
+        function updateUI() {
+            if (!activeObject) return;
+
+            // Prevent loops by checking if element is focused
+            if (document.activeElement.tagName !== 'INPUT') {
+                uiPos.x.value = activeObject.position.x.toFixed(2);
+                uiPos.y.value = activeObject.position.y.toFixed(2);
+                uiPos.z.value = activeObject.position.z.toFixed(2);
+
+                uiRot.x.value = THREE.MathUtils.radToDeg(activeObject.rotation.x).toFixed(0);
+                uiRot.y.value = THREE.MathUtils.radToDeg(activeObject.rotation.y).toFixed(0);
+                uiRot.z.value = THREE.MathUtils.radToDeg(activeObject.rotation.z).toFixed(0);
+            }
+        }
+
+        function setupUIListeners() {
+            document.getElementById('btn-add-cube').addEventListener('click', createCube);
+            btnMode.addEventListener('click', toggleMode);
+
+            // Helper to update object from input
+            const updateObj = () => {
+                if (!activeObject) return;
+                
+                activeObject.position.set(
+                    parseFloat(uiPos.x.value),
+                    parseFloat(uiPos.y.value),
+                    parseFloat(uiPos.z.value)
+                );
+                
+                activeObject.rotation.set(
+                    THREE.MathUtils.degToRad(parseFloat(uiRot.x.value)),
+                    THREE.MathUtils.degToRad(parseFloat(uiRot.y.value)),
+                    THREE.MathUtils.degToRad(parseFloat(uiRot.z.value))
+                );
+            };
+
+            // Attach listeners to all inputs
+            [...Object.values(uiPos), ...Object.values(uiRot)].forEach(input => {
+                input.addEventListener('input', updateObj);
+            });
+        }
+
+        function onKeyDown(event) {
+            switch (event.key.toLowerCase()) {
+                case 't': transformControl.setMode('translate'); break;
+                case 'r': if(!isVertexMode) transformControl.setMode('rotate'); break;
+            }
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbit.update();
+            renderer.render(scene, camera);
+        }
+
+        // Run Init
+        init();
+
+    </script>
+</body>
+</html>
