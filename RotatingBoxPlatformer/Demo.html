@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL SAT Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>WebGL OBB/SAT Platformer</h2>
+        <p>Arrow Keys to Move/Jump</p>
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+<script>
+/**
+ * 1. MATH & VECTOR LIBRARY
+ * Minimal vector math required for SAT and Matrix transformations.
+ */
+const Vec2 = {
+    add: (v1, v2) => ({ x: v1.x + v2.x, y: v1.y + v2.y }),
+    sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+    scale: (v, s) => ({ x: v.x * s, y: v.y * s }),
+    normalize: (v) => {
+        const len = Math.sqrt(v.x * v.x + v.y * v.y);
+        return len === 0 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+    },
+    rotate: (v, angle) => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+    },
+    perp: (v) => ({ x: -v.y, y: v.x }) // Perpendicular vector (90 deg rotation)
+};
+
+// Simple 3x3 Matrix for 2D Transformations in WebGL
+function createTransformationMatrix(x, y, width, height, rotation) {
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    
+    // Column-major order for WebGL
+    // [ scaleX * cos,  scaleX * sin,  0 ]
+    // [ scaleY * -sin, scaleY * cos,  0 ]
+    // [ x,             y,             1 ]
+    return [
+        width * c,  width * s,  0,
+        height * -s, height * c, 0,
+        x,          y,          1
+    ];
+}
+
+function createProjectionMatrix(width, height) {
+    // Maps 0..width and 0..height to -1..1
+    return [
+        2 / width, 0, 0,
+        0, -2 / height, 0,
+        -1, 1, 1
+    ];
+}
+
+/**
+ * 2. WEBGL BOILERPLATE
+ */
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// Vertex Shader
+const vsSource = `
+    attribute vec2 a_position;
+    uniform mat3 u_matrix;
+    uniform mat3 u_projection;
+    void main() {
+        // Multiply the position by the matrix
+        vec3 pos = u_projection * u_matrix * vec3(a_position, 1.0);
+        gl_Position = vec4(pos.xy, 0.0, 1.0);
+    }
+`;
+
+// Fragment Shader
+const fsSource = `
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Look up locations
+const positionLocation = gl.getAttribLocation(program, "a_position");
+const matrixLocation = gl.getUniformLocation(program, "u_matrix");
+const projectionLocation = gl.getUniformLocation(program, "u_projection");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+
+// Create a buffer for a unit square centered at 0,0 (from -0.5 to 0.5)
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+const positions = [
+    -0.5, -0.5,
+     0.5, -0.5,
+    -0.5,  0.5,
+    -0.5,  0.5,
+     0.5, -0.5,
+     0.5,  0.5,
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+gl.enableVertexAttribArray(positionLocation);
+gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+/**
+ * 3. SAT COLLISION LOGIC
+ */
+
+// Helper to get corners of an OBB
+function getCorners(box) {
+    const c = Math.cos(box.rotation);
+    const s = Math.sin(box.rotation);
+    const hw = box.width / 2;
+    const hh = box.height / 2;
+
+    // Local corners
+    // Top-Right, Top-Left, Bottom-Left, Bottom-Right relative to center
+    // We only need axes usually, but for projection we need corners
+    const corners = [
+        { x: hw, y: hh },
+        { x: -hw, y: hh },
+        { x: -hw, y: -hh },
+        { x: hw, y: -hh }
+    ];
+
+    // Rotate and translate
+    return corners.map(p => ({
+        x: (p.x * c - p.y * s) + box.x,
+        y: (p.x * s + p.y * c) + box.y
+    }));
+}
+
+// Get axes (normals) for SAT
+function getAxes(box) {
+    const c = Math.cos(box.rotation);
+    const s = Math.sin(box.rotation);
+    // Two axes for a rectangle: Local X and Local Y rotated
+    return [
+        { x: c, y: s },   // Local X axis
+        { x: -s, y: c }   // Local Y axis
+    ];
+}
+
+function projectShape(axis, corners) {
+    let min = Vec2.dot(axis, corners[0]);
+    let max = min;
+    for (let i = 1; i < corners.length; i++) {
+        const p = Vec2.dot(axis, corners[i]);
+        if (p < min) min = p;
+        if (p > max) max = p;
+    }
+    return { min, max };
+}
+
+// SAT Function
+function checkCollisionSAT(boxA, boxB) {
+    const cornersA = getCorners(boxA);
+    const cornersB = getCorners(boxB);
+    
+    // Combine axes from both shapes
+    const axes = [...getAxes(boxA), ...getAxes(boxB)];
+    
+    let minOverlap = Infinity;
+    let smallestAxis = null;
+
+    for (let i = 0; i < axes.length; i++) {
+        const axis = axes[i];
+        
+        // Project both shapes onto the axis
+        const projA = projectShape(axis, cornersA);
+        const projB = projectShape(axis, cornersB);
+
+        // Check for overlap
+        if (projA.max < projB.min || projB.max < projA.min) {
+            // Gap found, no collision
+            return null;
+        }
+
+        // Calculate overlap amount
+        const overlap1 = projA.max - projB.min;
+        const overlap2 = projB.max - projA.min;
+        const overlap = Math.min(overlap1, overlap2);
+
+        if (overlap < minOverlap) {
+            minOverlap = overlap;
+            smallestAxis = axis;
+            
+            // Correct axis direction to point from A to B
+            const centerA = { x: boxA.x, y: boxA.y };
+            const centerB = { x: boxB.x, y: boxB.y };
+            const dir = Vec2.sub(centerB, centerA);
+            if (Vec2.dot(dir, smallestAxis) < 0) {
+                smallestAxis = Vec2.scale(smallestAxis, -1);
+            }
+        }
+    }
+
+    return {
+        overlap: minOverlap,
+        axis: smallestAxis
+    };
+}
+
+/**
+ * 4. GAME OBJECTS & LOGIC
+ */
+
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+const player = {
+    x: 200, y: 300, width: 40, height: 40, rotation: 0,
+    color: [0.2, 0.8, 0.2, 1],
+    vx: 0, vy: 0, grounded: false
+};
+
+const ground = {
+    x: window.innerWidth / 2, y: window.innerHeight - 20,
+    width: window.innerWidth, height: 40, rotation: 0,
+    color: [0.5, 0.5, 0.5, 1],
+    type: 'static'
+};
+
+const spinner = {
+    x: 600, y: 400, width: 200, height: 30, rotation: 0,
+    color: [0.8, 0.3, 0.3, 1],
+    type: 'static'
+};
+
+const platform = {
+    x: 300, y: 500, width: 150, height: 20, rotation: -0.1,
+    color: [0.4, 0.4, 0.8, 1],
+    type: 'static'
+};
+
+const objects = [ground, spinner, platform];
+
+function update() {
+    // 1. Apply Gravity
+    player.vy += 0.5;
+
+    // 2. Input
+    if (keys['ArrowLeft']) player.vx -= 1;
+    if (keys['ArrowRight']) player.vx += 1;
+    if (keys['ArrowUp'] && player.grounded) {
+        player.vy = -12;
+        player.grounded = false;
+    }
+
+    // Friction / Damping
+    player.vx *= 0.9;
+    
+    // 3. Move Player (Tentative)
+    player.x += player.vx;
+    player.y += player.vy;
+    
+    // Rotate Spinner
+    spinner.rotation += 0.02;
+
+    // 4. Collision Detection
+    player.grounded = false;
+
+    // We check collision against all static objects
+    for (let obj of objects) {
+        const result = checkCollisionSAT(player, obj);
+        
+        if (result) {
+            // Resolve Collision
+            // Push player out of the object by the Minimum Translation Vector (MTV)
+            // MTV = axis * overlap
+            const pushX = -result.axis.x * result.overlap;
+            const pushY = -result.axis.y * result.overlap;
+
+            player.x += pushX;
+            player.y += pushY;
+
+            // Check if grounded (colliding from top)
+            // If the push vector is pointing upwards significantly
+            if (result.axis.y > 0.7) { 
+                player.grounded = true;
+                player.vy = 0; // Stop falling
+            } 
+            // Ceiling collision
+            else if (result.axis.y < -0.7) {
+                player.vy *= 0.5;
+            }
+        }
+    }
+    
+    // Reset if fell off screen
+    if (player.y > window.innerHeight + 100) {
+        player.x = 200;
+        player.y = 100;
+        player.vy = 0;
+    }
+}
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const projMatrix = createProjectionMatrix(canvas.width, canvas.height);
+    gl.uniformMatrix3fv(projectionLocation, false, projMatrix);
+
+    const drawBox = (box) => {
+        const matrix = createTransformationMatrix(box.x, box.y, box.width, box.height, box.rotation);
+        gl.uniformMatrix3fv(matrixLocation, false, matrix);
+        gl.uniform4fv(colorLocation, box.color);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    objects.forEach(drawBox);
+    drawBox(player);
+}
+
+function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+// Handle Resize
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    ground.width = window.innerWidth;
+    ground.x = window.innerWidth / 2;
+    ground.y = window.innerHeight - 20;
+});
+
+</script>
+</body>
+</html>
