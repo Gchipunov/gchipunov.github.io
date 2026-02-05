@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL SAT Platformer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; z-index: 10; }
+        
+        /* Mobile Controls Styling */
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            height: 100px;
+            pointer-events: none; /* Let clicks pass through empty space */
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            z-index: 20;
+        }
+
+        .d-pad, .action-btn {
+            pointer-events: auto; /* Re-enable clicks on buttons */
+            display: flex;
+            gap: 20px;
+        }
+
+        .btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        .btn:active {
+            background: rgba(255, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>WebGL OBB/SAT Camera & Rotating Boxes</h2>
+        <p>Arrow Keys or Touch to Move</p>
+    </div>
+
+    <div class="controls">
+        <div class="d-pad">
+            <div id="btn-left" class="btn">&larr;</div>
+            <div id="btn-right" class="btn">&rarr;</div>
+        </div>
+        <div class="action-btn">
+            <div id="btn-jump" class="btn">JUMP</div>
+        </div>
+    </div>
+
+    <canvas id="glcanvas"></canvas>
+
+<script>
+/**
+ * 1. MATH & VECTOR LIBRARY
+ */
+const Vec2 = {
+    add: (v1, v2) => ({ x: v1.x + v2.x, y: v1.y + v2.y }),
+    sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+    scale: (v, s) => ({ x: v.x * s, y: v.y * s }),
+    normalize: (v) => {
+        const len = Math.sqrt(v.x * v.x + v.y * v.y);
+        return len === 0 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+    },
+    rotate: (v, angle) => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+    },
+    perp: (v) => ({ x: -v.y, y: v.x })
+};
+
+function createTransformationMatrix(x, y, width, height, rotation) {
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    return [
+        width * c,  width * s,  0,
+        height * -s, height * c, 0,
+        x,          y,          1
+    ];
+}
+
+function createProjectionMatrix(width, height) {
+    // Maps 0..width and 0..height to -1..1
+    return [
+        2 / width, 0, 0,
+        0, -2 / height, 0,
+        -1, 1, 1
+    ];
+}
+
+/**
+ * 2. WEBGL BOILERPLATE
+ */
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const vsSource = `
+    attribute vec2 a_position;
+    uniform mat3 u_matrix;
+    uniform mat3 u_projection;
+    void main() {
+        vec3 pos = u_projection * u_matrix * vec3(a_position, 1.0);
+        gl_Position = vec4(pos.xy, 0.0, 1.0);
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const positionLocation = gl.getAttribLocation(program, "a_position");
+const matrixLocation = gl.getUniformLocation(program, "u_matrix");
+const projectionLocation = gl.getUniformLocation(program, "u_projection");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+const positions = [
+    -0.5, -0.5,
+     0.5, -0.5,
+    -0.5,  0.5,
+    -0.5,  0.5,
+     0.5, -0.5,
+     0.5,  0.5,
+];
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+gl.enableVertexAttribArray(positionLocation);
+gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+/**
+ * 3. SAT COLLISION LOGIC
+ */
+function getCorners(box) {
+    const c = Math.cos(box.rotation);
+    const s = Math.sin(box.rotation);
+    const hw = box.width / 2;
+    const hh = box.height / 2;
+    const corners = [
+        { x: hw, y: hh }, { x: -hw, y: hh },
+        { x: -hw, y: -hh }, { x: hw, y: -hh }
+    ];
+    return corners.map(p => ({
+        x: (p.x * c - p.y * s) + box.x,
+        y: (p.x * s + p.y * c) + box.y
+    }));
+}
+
+function getAxes(box) {
+    const c = Math.cos(box.rotation);
+    const s = Math.sin(box.rotation);
+    return [{ x: c, y: s }, { x: -s, y: c }];
+}
+
+function projectShape(axis, corners) {
+    let min = Vec2.dot(axis, corners[0]);
+    let max = min;
+    for (let i = 1; i < corners.length; i++) {
+        const p = Vec2.dot(axis, corners[i]);
+        if (p < min) min = p;
+        if (p > max) max = p;
+    }
+    return { min, max };
+}
+
+function checkCollisionSAT(boxA, boxB) {
+    const cornersA = getCorners(boxA);
+    const cornersB = getCorners(boxB);
+    const axes = [...getAxes(boxA), ...getAxes(boxB)];
+    
+    let minOverlap = Infinity;
+    let smallestAxis = null;
+
+    for (let i = 0; i < axes.length; i++) {
+        const axis = axes[i];
+        const projA = projectShape(axis, cornersA);
+        const projB = projectShape(axis, cornersB);
+
+        if (projA.max < projB.min || projB.max < projA.min) return null;
+
+        const overlap = Math.min(projA.max - projB.min, projB.max - projA.min);
+        if (overlap < minOverlap) {
+            minOverlap = overlap;
+            smallestAxis = axis;
+            
+            const dir = Vec2.sub({x: boxB.x, y: boxB.y}, {x: boxA.x, y: boxA.y});
+            if (Vec2.dot(dir, smallestAxis) < 0) {
+                smallestAxis = Vec2.scale(smallestAxis, -1);
+            }
+        }
+    }
+    return { overlap: minOverlap, axis: smallestAxis };
+}
+
+/**
+ * 4. GAME OBJECTS & LOGIC
+ */
+const keys = {};
+const handleKey = (code, val) => keys[code] = val;
+
+window.addEventListener('keydown', e => handleKey(e.code, true));
+window.addEventListener('keyup', e => handleKey(e.code, false));
+
+// --- MOBILE TOUCH CONTROLS ---
+function bindTouch(id, code) {
+    const btn = document.getElementById(id);
+    const setKey = (val) => (e) => { 
+        if(e.cancelable) e.preventDefault(); 
+        keys[code] = val; 
+    };
+    btn.addEventListener('touchstart', setKey(true), {passive: false});
+    btn.addEventListener('touchend', setKey(false), {passive: false});
+    btn.addEventListener('mousedown', setKey(true));
+    btn.addEventListener('mouseup', setKey(false));
+    btn.addEventListener('mouseleave', setKey(false));
+}
+bindTouch('btn-left', 'ArrowLeft');
+bindTouch('btn-right', 'ArrowRight');
+bindTouch('btn-jump', 'ArrowUp');
+
+// --- OBJECTS ---
+
+const player = {
+    x: 200, y: 300, width: 40, height: 40, rotation: 0,
+    color: [0.2, 0.8, 0.2, 1],
+    vx: 0, vy: 0, grounded: false
+};
+
+const camera = { x: 200, y: 300 };
+
+const startPlatform = {
+    x: 200, y: 400, width: 200, height: 20, rotation: 0,
+    color: [0.6, 0.6, 0.3, 1],
+    type: 'static'
+};
+
+const ground = {
+    x: 500, y: 700, width: 2000, height: 40, rotation: 0,
+    color: [0.5, 0.5, 0.5, 1],
+    type: 'static'
+};
+
+// Rotating elements with 'rotateSpeed'
+const spinner = {
+    x: 600, y: 350, width: 200, height: 30, rotation: 0,
+    rotateSpeed: 0.02,
+    color: [0.8, 0.3, 0.3, 1],
+    type: 'static'
+};
+
+const rotateBox1 = {
+    x: 900, y: 300, width: 80, height: 80, rotation: 0,
+    rotateSpeed: 0.03, // Clockwise
+    color: [0.8, 0.5, 0.2, 1],
+    type: 'static'
+};
+
+const rotateBox2 = {
+    x: 1200, y: 200, width: 60, height: 60, rotation: 0.5,
+    rotateSpeed: 0.05, // Faster Clockwise
+    color: [0.8, 0.5, 0.2, 1],
+    type: 'static'
+};
+
+const platform = {
+    x: 300, y: 500, width: 150, height: 20, rotation: -0.1,
+    color: [0.4, 0.4, 0.8, 1],
+    type: 'static'
+};
+
+const objects = [ground, spinner, platform, startPlatform, rotateBox1, rotateBox2];
+
+function update() {
+    // 1. Gravity & Movement
+    player.vy += 0.5;
+
+    if (keys['ArrowLeft']) player.vx -= 1;
+    if (keys['ArrowRight']) player.vx += 1;
+    if (keys['ArrowUp'] && player.grounded) {
+        player.vy = -12;
+        player.grounded = false;
+    }
+
+    // Friction
+    player.vx *= 0.9;
+    player.x += player.vx;
+    player.y += player.vy;
+    
+    // 2. Rotate World Objects
+    objects.forEach(obj => {
+        if(obj.rotateSpeed) {
+            obj.rotation += obj.rotateSpeed;
+        }
+    });
+
+    // 3. Collision
+    player.grounded = false;
+    for (let obj of objects) {
+        const result = checkCollisionSAT(player, obj);
+        if (result) {
+            const pushX = -result.axis.x * result.overlap;
+            const pushY = -result.axis.y * result.overlap;
+            player.x += pushX;
+            player.y += pushY;
+
+            if (result.axis.y > 0.7) { 
+                player.grounded = true;
+                player.vy = 0;
+            } else if (result.axis.y < -0.7) {
+                player.vy *= 0.5;
+            }
+        }
+    }
+    
+    // 4. Respawn if fallen
+    if (player.y > 2000) {
+        player.x = 200; player.y = 100; player.vy = 0;
+        camera.x = 200; camera.y = 100;
+    }
+
+    // 5. Update Camera (Smooth Follow)
+    // Lerp logic: current + (target - current) * factor
+    camera.x += (player.x - camera.x) * 0.1;
+    camera.y += (player.y - camera.y) * 0.1;
+}
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const projMatrix = createProjectionMatrix(canvas.width, canvas.height);
+    gl.uniformMatrix3fv(projectionLocation, false, projMatrix);
+
+    const drawBox = (box) => {
+        // Calculate position relative to camera
+        // We center the camera on screen: (obj.x - cam.x) + halfScreen
+        const drawX = box.x - camera.x + canvas.width / 2;
+        const drawY = box.y - camera.y + canvas.height / 2;
+
+        const matrix = createTransformationMatrix(drawX, drawY, box.width, box.height, box.rotation);
+        gl.uniformMatrix3fv(matrixLocation, false, matrix);
+        gl.uniform4fv(colorLocation, box.color);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    objects.forEach(drawBox);
+    drawBox(player);
+}
+
+function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+</script>
+</body>
+</html>
