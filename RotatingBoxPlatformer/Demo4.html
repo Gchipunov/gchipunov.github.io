@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Soft-Body Platformer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; z-index: 10; }
+        
+        .controls {
+            position: absolute; bottom: 20px; width: 100%; height: 100px;
+            pointer-events: none; display: flex; justify-content: space-between;
+            padding: 0 20px; box-sizing: border-box; z-index: 20;
+        }
+        .d-pad, .action-btn { pointer-events: auto; display: flex; gap: 20px; }
+        .btn {
+            width: 80px; height: 80px; background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5); border-radius: 50%;
+            color: white; font-size: 24px; display: flex; align-items: center;
+            justify-content: center; user-select: none; touch-action: none;
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.5); }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h2>WebGL Soft-Body Physics</h2>
+        <p>Jump on the Orange Box to squish it!</p>
+    </div>
+
+    <div class="controls">
+        <div class="d-pad">
+            <div id="btn-left" class="btn">&larr;</div>
+            <div id="btn-right" class="btn">&rarr;</div>
+        </div>
+        <div class="action-btn">
+            <div id="btn-jump" class="btn">JUMP</div>
+        </div>
+    </div>
+
+    <canvas id="glcanvas"></canvas>
+
+<script>
+/**
+ * 1. MATH & VECTOR LIBRARY
+ */
+const Vec2 = {
+    add: (v1, v2) => ({ x: v1.x + v2.x, y: v1.y + v2.y }),
+    sub: (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y }),
+    dot: (v1, v2) => v1.x * v2.x + v1.y * v2.y,
+    scale: (v, s) => ({ x: v.x * s, y: v.y * s }),
+    len: (v) => Math.sqrt(v.x * v.x + v.y * v.y),
+    normalize: (v) => {
+        const len = Math.sqrt(v.x * v.x + v.y * v.y);
+        return len === 0 ? { x: 0, y: 0 } : { x: v.x / len, y: v.y / len };
+    },
+    rotate: (v, angle) => {
+        const c = Math.cos(angle);
+        const s = Math.sin(angle);
+        return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+    },
+    perp: (v) => ({ x: -v.y, y: v.x })
+};
+
+/**
+ * 2. WEBGL SETUP
+ */
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const vsSource = `
+    attribute vec2 a_position;
+    uniform mat3 u_projection;
+    uniform mat3 u_matrix;
+    void main() {
+        // u_matrix is identity for polygons, but used for rigid sprites
+        vec3 pos = u_projection * u_matrix * vec3(a_position, 1.0);
+        gl_Position = vec4(pos.xy, 0.0, 1.0);
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+`;
+
+function createShader(gl, type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+        return null;
+    }
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const loc = {
+    pos: gl.getAttribLocation(program, "a_position"),
+    mat: gl.getUniformLocation(program, "u_matrix"),
+    proj: gl.getUniformLocation(program, "u_projection"),
+    col: gl.getUniformLocation(program, "u_color")
+};
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.enableVertexAttribArray(loc.pos);
+gl.vertexAttribPointer(loc.pos, 2, gl.FLOAT, false, 0, 0);
+
+// Matrices
+function projection(w, h) {
+    return [2/w, 0, 0, 0, -2/h, 0, -1, 1, 1];
+}
+function transform(x, y, w, h, r) {
+    const c = Math.cos(r), s = Math.sin(r);
+    return [w*c, w*s, 0, h*-s, h*c, 0, x, y, 1];
+}
+const identity = [1,0,0, 0,1,0, 0,0,1];
+
+/**
+ * 3. PHYSICS & SOFT BODY LOGIC
+ */
+
+class SpringBox {
+    constructor(x, y, size) {
+        this.color = [0.9, 0.5, 0.1, 1];
+        this.type = 'soft';
+        this.nodes = [
+            { x: x, y: y, vx: 0, vy: 0 },             // 0: Top-Left
+            { x: x+size, y: y, vx: 0, vy: 0 },        // 1: Top-Right
+            { x: x+size, y: y+size, vx: 0, vy: 0 },   // 2: Bottom-Right
+            { x: x, y: y+size, vx: 0, vy: 0 }         // 3: Bottom-Left
+        ];
+        
+        this.springs = [];
+        // Connect edges and cross-braces
+        const connect = (i, j, stiffness) => {
+            const dx = this.nodes[i].x - this.nodes[j].x;
+            const dy = this.nodes[i].y - this.nodes[j].y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            this.springs.push({ i, j, len, k: stiffness });
+        };
+
+        // Structural Springs (Edges)
+        connect(0, 1, 0.1); connect(1, 2, 0.1);
+        connect(2, 3, 0.1); connect(3, 0, 0.1);
+        
+        // Shear Springs (Cross Braces - Keep it from flattening)
+        connect(0, 2, 0.1); connect(1, 3, 0.1);
+    }
+
+    update() {
+        // 1. Accumulate Forces
+        for (let s of this.springs) {
+            const nA = this.nodes[s.i];
+            const nB = this.nodes[s.j];
+            
+            const diff = Vec2.sub(nB, nA);
+            const dist = Vec2.len(diff);
+            if (dist === 0) continue;
+
+            // Hooke's Law: F = k * (currentLen - restLen)
+            const forceMag = s.k * (dist - s.len);
+            const force = Vec2.scale(Vec2.normalize(diff), forceMag);
+
+            // Apply to nodes (Action / Reaction)
+            const damping = 0.05; // Simple velocity damping
+            
+            nA.vx += force.x - (nA.vx * damping);
+            nA.vy += force.y - (nA.vy * damping);
+            
+            nB.vx -= force.x - (nB.vx * damping); // Opposite direction
+            nB.vy -= force.y - (nB.vy * damping);
+        }
+
+        // 2. Integration & Gravity
+        for (let n of this.nodes) {
+            n.vy += 0.4; // Gravity
+            n.x += n.vx;
+            n.y += n.vy;
+
+            // Simple floor collision for the box itself
+            if (n.y > 600) {
+                n.y = 600;
+                n.vy *= -0.1; // Heavy friction/damping on ground
+                n.vx *= 0.8;
+            }
+        }
+    }
+}
+
+/**
+ * 4. COLLISION (SAT)
+ */
+
+// Return array of {x,y} points
+function getCorners(obj) {
+    if (obj.nodes) return obj.nodes; // Soft body
+    
+    // Rigid body
+    const c = Math.cos(obj.rotation);
+    const s = Math.sin(obj.rotation);
+    const hw = obj.width / 2, hh = obj.height / 2;
+    return [
+        { x: hw, y: hh }, { x: -hw, y: hh },
+        { x: -hw, y: -hh }, { x: hw, y: -hh }
+    ].map(p => ({
+        x: (p.x * c - p.y * s) + obj.x,
+        y: (p.x * s + p.y * c) + obj.y
+    }));
+}
+
+// Get normals of all edges
+function getAxes(corners) {
+    const axes = [];
+    for (let i = 0; i < corners.length; i++) {
+        const p1 = corners[i];
+        const p2 = corners[(i + 1) % corners.length];
+        const edge = Vec2.sub(p2, p1);
+        axes.push(Vec2.normalize(Vec2.perp(edge)));
+    }
+    return axes;
+}
+
+function project(axis, corners) {
+    let min = Vec2.dot(axis, corners[0]);
+    let max = min;
+    for (let i = 1; i < corners.length; i++) {
+        const p = Vec2.dot(axis, corners[i]);
+        if (p < min) min = p;
+        if (p > max) max = p;
+    }
+    return { min, max };
+}
+
+function checkCollisionSAT(objA, objB) {
+    const cornersA = getCorners(objA);
+    const cornersB = getCorners(objB);
+    const axes = [...getAxes(cornersA), ...getAxes(cornersB)];
+    
+    let minOverlap = Infinity;
+    let axis = null;
+
+    for (let a of axes) {
+        const pA = project(a, cornersA);
+        const pB = project(a, cornersB);
+        if (pA.max < pB.min || pB.max < pA.min) return null;
+        
+        const o = Math.min(pA.max - pB.min, pB.max - pA.min);
+        if (o < minOverlap) {
+            minOverlap = o;
+            axis = a;
+        }
+    }
+
+    // Ensure axis points from A to B (approx center)
+    // For soft body, average node position is center
+    const getCenter = (o) => o.nodes 
+        ? o.nodes.reduce((acc, n) => Vec2.add(acc, n), {x:0,y:0}) 
+        : {x: o.x, y: o.y};
+    
+    const ca = objA.nodes ? Vec2.scale(getCenter(objA), 0.25) : getCenter(objA);
+    const cb = objB.nodes ? Vec2.scale(getCenter(objB), 0.25) : getCenter(objB);
+
+    if (Vec2.dot(Vec2.sub(cb, ca), axis) < 0) axis = Vec2.scale(axis, -1);
+
+    return { overlap: minOverlap, axis: axis };
+}
+
+/**
+ * 5. GAME STATE
+ */
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// Touch Logic
+function bindTouch(id, code) {
+    const el = document.getElementById(id);
+    const set = (v) => (e) => { e.preventDefault(); keys[code] = v; };
+    el.addEventListener('touchstart', set(true));
+    el.addEventListener('touchend', set(false));
+    el.addEventListener('mousedown', set(true));
+    el.addEventListener('mouseup', set(false));
+}
+bindTouch('btn-left', 'ArrowLeft');
+bindTouch('btn-right', 'ArrowRight');
+bindTouch('btn-jump', 'ArrowUp');
+
+// Objects
+const player = { x: 100, y: 100, width: 40, height: 40, rotation: 0, color: [0.2, 0.8, 0.2, 1], vx: 0, vy: 0 };
+const camera = { x: 0, y: 0 };
+const ground = { x: 500, y: 700, width: 3000, height: 40, rotation: 0, color: [0.5, 0.5, 0.5, 1] };
+const startPlat = { x: 100, y: 300, width: 200, height: 20, rotation: 0, color: [0.4, 0.4, 0.8, 1] };
+
+// THE SOFT BOX
+const softBox = new SpringBox(300, 200, 80);
+
+const objects = [ground, startPlat, softBox];
+
+function update() {
+    // Player Physics
+    player.vy += 0.5;
+    if (keys['ArrowLeft']) player.vx -= 1;
+    if (keys['ArrowRight']) player.vx += 1;
+    player.vx *= 0.9;
+    player.x += player.vx;
+    player.y += player.vy;
+    
+    // Soft Body Physics
+    softBox.update();
+
+    // Collisions
+    player.grounded = false;
+    for (let obj of objects) {
+        const hit = checkCollisionSAT(player, obj);
+        if (hit) {
+            // Push Player Out
+            player.x -= hit.axis.x * hit.overlap;
+            player.y -= hit.axis.y * hit.overlap;
+
+            // Physics Responses
+            if (hit.axis.y > 0.7) {
+                player.grounded = true;
+                player.vy = 0;
+            } else if (hit.axis.y < -0.7) {
+                player.vy *= 0.5;
+            }
+
+            // SOFT BODY REACTION
+            // If we hit the soft box, impart velocity to its nodes
+            if (obj.type === 'soft') {
+                // Apply force to nodes based on impact direction
+                const force = Vec2.scale(hit.axis, hit.overlap * 0.5);
+                for(let n of obj.nodes) {
+                    // Simple: push all nodes slightly in direction of impact
+                    n.vx += force.x;
+                    n.vy += force.y;
+                }
+                // Interactive jump: if player jumps off soft box, push it down hard
+                if (keys['ArrowUp'] && player.grounded) {
+                     obj.nodes[0].vy += 5; obj.nodes[1].vy += 5; // Top nodes push down
+                     player.vy = -15; // Bounce higher
+                     player.grounded = false;
+                }
+            }
+        }
+    }
+
+    // Normal Jump
+    if (keys['ArrowUp'] && player.grounded) {
+        player.vy = -12;
+        player.grounded = false;
+    }
+
+    // Respawn
+    if (player.y > 1000) { player.x = 100; player.y = 100; player.vy = 0; }
+
+    // Camera
+    camera.x += (player.x - camera.x) * 0.1;
+    camera.y += (player.y - camera.y) * 0.1;
+}
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const proj = projection(canvas.width, canvas.height);
+    gl.uniformMatrix3fv(loc.proj, false, proj);
+
+    // Draw Rigid Bodies (Unit Square Transform)
+    const unitSquare = [ -0.5,-0.5, 0.5,-0.5, -0.5,0.5, -0.5,0.5, 0.5,-0.5, 0.5,0.5 ];
+    
+    const drawRigid = (o) => {
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(unitSquare), gl.STATIC_DRAW); // Restore unit square
+        
+        const dx = o.x - camera.x + canvas.width/2;
+        const dy = o.y - camera.y + canvas.height/2;
+        const mat = transform(dx, dy, o.width, o.height, o.rotation);
+        
+        gl.uniformMatrix3fv(loc.mat, false, mat);
+        gl.uniform4fv(loc.col, o.color);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    // Draw Polygon (Dynamic Vertices)
+    const drawPoly = (o) => {
+        const verts = [];
+        // Triangulate the 4 nodes (0,1,2) and (0,2,3)
+        const n = o.nodes;
+        // Transform to camera space
+        const toCam = (pt) => ({
+            x: pt.x - camera.x + canvas.width/2,
+            y: pt.y - camera.y + canvas.height/2
+        });
+        const p0 = toCam(n[0]), p1 = toCam(n[1]), p2 = toCam(n[2]), p3 = toCam(n[3]);
+
+        // Triangle 1
+        verts.push(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+        // Triangle 2
+        verts.push(p0.x, p0.y, p2.x, p2.y, p3.x, p3.y);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.DYNAMIC_DRAW);
+        
+        // Identity matrix because vertices are already transformed
+        gl.uniformMatrix3fv(loc.mat, false, identity); 
+        gl.uniform4fv(loc.col, o.color);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    objects.forEach(o => o.type === 'soft' ? drawPoly(o) : drawRigid(o));
+    drawRigid(player);
+}
+
+function loop() { update(); render(); requestAnimationFrame(loop); }
+loop();
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+</script>
+</body>
+</html>
