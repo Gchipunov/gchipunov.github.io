@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL 2D Platformer</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #111; 
+            color: white; 
+            font-family: sans-serif; 
+            touch-action: none; /* Prevents zooming/scrolling on mobile */
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #instructions { 
+            position: absolute; top: 10px; left: 10px; pointer-events: none; 
+            text-shadow: 1px 1px 2px black;
+        }
+
+        /* --- TOUCH CONTROLS STYLES --- */
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            height: 100px;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 40px;
+            box-sizing: border-box;
+            pointer-events: none; /* Let clicks pass through empty space */
+        }
+
+        .control-group {
+            display: flex;
+            gap: 20px;
+            pointer-events: auto; /* Re-enable clicks for buttons */
+        }
+
+        .touch-btn {
+            width: 70px;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            color: rgba(255, 255, 255, 0.8);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            transition: background 0.1s;
+        }
+
+        .touch-btn:active, .touch-btn.active {
+            background: rgba(255, 255, 255, 0.5);
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        <h2>WebGL Platformer</h2>
+        <p>Use <b>Arrow Keys</b> or <b>Touch Buttons</b> to Move</p>
+    </div>
+
+    <div id="controls">
+        <div class="control-group">
+            <div id="btn-left" class="touch-btn">←</div>
+            <div id="btn-right" class="touch-btn">→</div>
+        </div>
+        <div class="control-group">
+            <div id="btn-jump" class="touch-btn">↑</div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec2 a_position;
+        uniform mat3 u_matrix;
+        
+        void main() {
+            vec2 position = (u_matrix * vec3(a_position, 1)).xy;
+            gl_Position = vec4(position, 0, 1);
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform vec4 u_color;
+        
+        void main() {
+            gl_FragColor = u_color;
+        }
+    </script>
+
+    <script>
+        /** * SIMPLE MATH LIBRARY */
+        const m3 = {
+            projection: function(width, height) {
+                return [ 2 / width, 0, 0, 0, -2 / height, 0, -1, 1, 1 ];
+            },
+            translation: function(tx, ty) {
+                return [ 1, 0, 0, 0, 1, 0, tx, ty, 1 ];
+            },
+            scaling: function(sx, sy) {
+                return [ sx, 0, 0, 0, sy, 0, 0, 0, 1 ];
+            },
+            multiply: function(a, b) {
+                const a00 = a[0 * 3 + 0], a01 = a[0 * 3 + 1], a02 = a[0 * 3 + 2];
+                const a10 = a[1 * 3 + 0], a11 = a[1 * 3 + 1], a12 = a[1 * 3 + 2];
+                const a20 = a[2 * 3 + 0], a21 = a[2 * 3 + 1], a22 = a[2 * 3 + 2];
+                const b00 = b[0 * 3 + 0], b01 = b[0 * 3 + 1], b02 = b[0 * 3 + 2];
+                const b10 = b[1 * 3 + 0], b11 = b[1 * 3 + 1], b12 = b[1 * 3 + 2];
+                const b20 = b[2 * 3 + 0], b21 = b[2 * 3 + 1], b22 = b[2 * 3 + 2];
+                return [
+                    b00 * a00 + b01 * a10 + b02 * a20,
+                    b00 * a01 + b01 * a11 + b02 * a21,
+                    b00 * a02 + b01 * a12 + b02 * a22,
+                    b10 * a00 + b11 * a10 + b12 * a20,
+                    b10 * a01 + b11 * a11 + b12 * a21,
+                    b10 * a02 + b11 * a12 + b12 * a22,
+                    b20 * a00 + b21 * a10 + b22 * a20,
+                    b20 * a01 + b21 * a11 + b22 * a21,
+                    b20 * a02 + b21 * a12 + b22 * a22,
+                ];
+            }
+        };
+
+        /** * WEBGL SETUP */
+        const canvas = document.getElementById("gameCanvas");
+        const gl = canvas.getContext("webgl");
+
+        if (!gl) { alert("WebGL not supported"); }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShaderSrc = document.getElementById("vertex-shader").text;
+        const fragmentShaderSrc = document.getElementById("fragment-shader").text;
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSrc);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSrc);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        const positionLocation = gl.getAttribLocation(program, "a_position");
+        const matrixLocation = gl.getUniformLocation(program, "u_matrix");
+        const colorLocation = gl.getUniformLocation(program, "u_color");
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1,
+        ]), gl.STATIC_DRAW);
+
+        /**
+         * INPUT HANDLING (Keyboard + Touch)
+         */
+        const keys = {};
+
+        // Keyboard listeners
+        window.addEventListener("keydown", (e) => keys[e.code] = true);
+        window.addEventListener("keyup", (e) => keys[e.code] = false);
+
+        // Touch listener helper
+        function attachTouchControl(elementId, keyCode) {
+            const el = document.getElementById(elementId);
+            
+            // Prevent default ensures browser doesn't try to scroll/zoom/select text
+            const handleStart = (e) => { 
+                e.preventDefault(); 
+                keys[keyCode] = true; 
+                el.classList.add('active'); 
+            };
+            
+            const handleEnd = (e) => { 
+                e.preventDefault(); 
+                keys[keyCode] = false; 
+                el.classList.remove('active'); 
+            };
+
+            el.addEventListener("touchstart", handleStart, {passive: false});
+            el.addEventListener("touchend", handleEnd, {passive: false});
+            
+            // Mouse fallbacks for testing on desktop
+            el.addEventListener("mousedown", handleStart);
+            el.addEventListener("mouseup", handleEnd);
+            el.addEventListener("mouseleave", handleEnd);
+        }
+
+        // Map buttons to KeyCodes
+        attachTouchControl("btn-left", "ArrowLeft");
+        attachTouchControl("btn-right", "ArrowRight");
+        attachTouchControl("btn-jump", "Space");
+
+        /**
+         * GAME ENGINE
+         */
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener("resize", resize);
+        resize();
+
+        const GRAVITY = 0.8;
+        const FRICTION = 0.8;
+        const JUMP_FORCE = 15;
+        const SPEED = 1.5;
+
+        const player = {
+            x: 100, y: 300, w: 40, h: 40,
+            vx: 0, vy: 0,
+            color: [1.0, 0.2, 0.2, 1.0],
+            grounded: false
+        };
+
+        const platforms = [
+            { x: -500, y: 500, w: 4000, h: 500, color: [0.2, 0.8, 0.2, 1.0] }, // Ground
+            { x: 300, y: 400, w: 200, h: 20, color: [0.3, 0.6, 1.0, 1.0] },
+            { x: 600, y: 300, w: 200, h: 20, color: [0.3, 0.6, 1.0, 1.0] },
+            { x: 900, y: 200, w: 200, h: 20, color: [0.3, 0.6, 1.0, 1.0] },
+        ];
+
+        const bgObjects = [
+            { x: 100, y: 100, w: 100, h: 300, color: [0.2, 0.2, 0.25, 1.0], speed: 0.1 },
+            { x: 500, y: 150, w: 150, h: 350, color: [0.25, 0.25, 0.3, 1.0], speed: 0.1 },
+            { x: 200, y: 300, w: 80, h: 200, color: [0.3, 0.3, 0.35, 1.0], speed: 0.2 },
+            { x: 800, y: 250, w: 120, h: 250, color: [0.3, 0.3, 0.35, 1.0], speed: 0.2 },
+        ];
+
+        let cameraX = 0;
+        let cameraY = 0;
+
+        function updatePhysics() {
+            // Horizontal
+            if (keys['ArrowRight']) player.vx += SPEED;
+            if (keys['ArrowLeft']) player.vx -= SPEED;
+            player.vx *= FRICTION;
+            player.x += player.vx;
+
+            platforms.forEach(p => {
+                if (checkCollision(player, p)) {
+                    if (player.vx > 0) player.x = p.x - player.w;
+                    else if (player.vx < 0) player.x = p.x + p.w;
+                    player.vx = 0;
+                }
+            });
+
+            // Vertical
+            if (keys['Space'] || keys['ArrowUp']) {
+                if (player.grounded) {
+                    player.vy = -JUMP_FORCE;
+                    player.grounded = false;
+                }
+            }
+            player.vy += GRAVITY;
+            player.y += player.vy;
+
+            player.grounded = false;
+            platforms.forEach(p => {
+                if (checkCollision(player, p)) {
+                    if (player.vy > 0) {
+                        player.y = p.y - player.h;
+                        player.grounded = true;
+                        player.vy = 0;
+                    } else if (player.vy < 0) {
+                        player.y = p.y + p.h;
+                        player.vy = 0;
+                    }
+                }
+            });
+
+            if (player.y > 1000) {
+                player.x = 100; player.y = 100; player.vy = 0;
+            }
+        }
+
+        function checkCollision(r1, r2) {
+            return (r1.x < r2.x + r2.w && r1.x + r1.w > r2.x &&
+                    r1.y < r2.y + r2.h && r1.y + r1.h > r2.y);
+        }
+
+        function updateCamera() {
+            const targetX = player.x + player.w/2 - canvas.width/2;
+            const targetY = player.y + player.h/2 - canvas.height/2;
+            cameraX += (targetX - cameraX) * 0.05;
+            cameraY += (targetY - cameraY) * 0.05;
+            
+            if(cameraY > 200) cameraY = 200; 
+            if(cameraY < -200) cameraY = -200;
+        }
+
+        function drawRect(x, y, w, h, color, parallaxFactor = 1.0) {
+            gl.useProgram(program);
+            gl.enableVertexAttribArray(positionLocation);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+            let matrix = m3.projection(gl.canvas.clientWidth, gl.canvas.clientHeight);
+            matrix = m3.multiply(matrix, m3.translation(-cameraX * parallaxFactor, -cameraY * parallaxFactor));
+            matrix = m3.multiply(matrix, m3.translation(x, y));
+            matrix = m3.multiply(matrix, m3.scaling(w, h));
+
+            gl.uniformMatrix3fv(matrixLocation, false, matrix);
+            gl.uniform4fv(colorLocation, color);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        function loop() {
+            updatePhysics();
+            updateCamera();
+
+            gl.clearColor(0.1, 0.1, 0.15, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            bgObjects.forEach(obj => drawRect(obj.x, obj.y, obj.w, obj.h, obj.color, obj.speed));
+            platforms.forEach(p => drawRect(p.x, p.y, p.w, p.h, p.color));
+            drawRect(player.x, player.y, player.w, player.h, player.color);
+
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+</html>
