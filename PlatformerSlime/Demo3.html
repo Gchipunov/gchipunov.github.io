@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Slime Platformer</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #222; 
+            touch-action: none; 
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex; flex-direction: column; justify-content: space-between;
+            z-index: 10;
+        }
+
+        #instructions {
+            padding: 15px;
+            color: white; font-family: monospace; font-size: 14px;
+            background: rgba(0,0,0,0.5); 
+            text-shadow: 1px 1px 0 #000;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            padding-bottom: 40px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .d-pad { display: flex; gap: 20px; pointer-events: auto; }
+        .action-pad { pointer-events: auto; }
+
+        .btn {
+            width: 65px; height: 65px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            color: white;
+            font-family: sans-serif;
+            font-size: 24px;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(4px);
+            touch-action: none;
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.4); transform: scale(0.95); }
+        .btn-rect { width: 90px; border-radius: 20px; font-size: 16px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="instructions">
+            Desktop: ARROWS + SPACE<br>
+            Mobile: Touch Buttons<br>
+            <span style="color:#f55">Don't touch the green slime!</span>
+        </div>
+
+        <div id="controls">
+            <div class="d-pad">
+                <div class="btn" id="btn-left">←</div>
+                <div class="btn" id="btn-right">→</div>
+            </div>
+            <div class="action-pad">
+                <div class="btn btn-rect" id="btn-jump">JUMP</div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script id="vertex-shader-2d" type="x-shader/x-vertex">
+        precision mediump float; /* CRITICAL FOR MOBILE */
+
+        attribute vec2 a_position;
+
+        uniform vec2 u_resolution;
+        uniform vec2 u_translation;
+        uniform vec2 u_scale;
+        uniform float u_time;
+        uniform float u_isSlime; 
+
+        void main() {
+            vec2 position = a_position * u_scale;
+            
+            // SLIME LOGIC
+            if (u_isSlime > 0.5 && a_position.y > 0.5) {
+                float wave = sin(u_time * 5.0 + position.x * 0.1) * 5.0;
+                position.y += wave;
+                position.x += sin(u_time * 3.0) * 2.0;
+            }
+
+            position = position + u_translation;
+
+            vec2 zeroToOne = position / u_resolution;
+            vec2 zeroToTwo = zeroToOne * 2.0;
+            vec2 clipSpace = zeroToTwo - 1.0;
+
+            // FIX: Use 0.0 and 1.0 (Floats), NOT 0 and 1 (Integers)
+            // Mobile shaders crash with integers in vec4 constructors
+            gl_Position = vec4(clipSpace * vec2(1.0, 1.0), 0.0, 1.0);
+        }
+    </script>
+
+    <script id="fragment-shader-2d" type="x-shader/x-fragment">
+        precision mediump float;
+        uniform vec4 u_color;
+        void main() {
+            gl_FragColor = u_color;
+        }
+    </script>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        // FIX: alpha:false improves performance and fixes some transparent background bugs on mobile
+        const gl = canvas.getContext("webgl", { alpha: false });
+
+        if (!gl) {
+            alert("WebGL is not supported on this device.");
+        }
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            // Error Checking
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                // Alert the specific error so you can see it on mobile
+                alert("Shader Error: " + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vsSource = document.getElementById("vertex-shader-2d").text;
+        const fsSource = document.getElementById("fragment-shader-2d").text;
+        
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        if (!vertexShader || !fragmentShader) {
+            console.error("Shader compilation failed.");
+        }
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            alert("Program Link Error: " + gl.getProgramInfoLog(program));
+        }
+
+        const positionLocation = gl.getAttribLocation(program, "a_position");
+        const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+        const colorLocation = gl.getUniformLocation(program, "u_color");
+        const translationLocation = gl.getUniformLocation(program, "u_translation");
+        const scaleLocation = gl.getUniformLocation(program, "u_scale");
+        const timeLocation = gl.getUniformLocation(program, "u_time");
+        const isSlimeLocation = gl.getUniformLocation(program, "u_isSlime");
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            0, 0, 1, 0, 0, 1, 
+            0, 1, 1, 0, 1, 1,
+        ]), gl.STATIC_DRAW);
+
+        let width, height;
+        const keys = {}; 
+
+        const gravity = -0.6;
+        const jumpForce = 13;
+        const friction = 0.8;
+        const speed = 5;
+
+        const player = {
+            x: 50, y: 300, width: 30, height: 30,
+            dx: 0, dy: 0,
+            grounded: false, color: [1, 0.3, 0.3, 1]
+        };
+
+        const platforms = [];
+        const slimes = [];
+
+        function initLevel() {
+            platforms.length = 0;
+            slimes.length = 0;
+            platforms.push({ x: -100, y: -50, width: 3000, height: 50 });
+            platforms.push({ x: 200, y: 100, width: 200, height: 20 });
+            const slimePlat = { x: 500, y: 200, width: 200, height: 20 };
+            platforms.push(slimePlat);
+            slimes.push({ x: slimePlat.x, y: slimePlat.y + 20, width: slimePlat.width, height: 30, color: [0.2, 1.0, 0.2, 0.8] });
+            platforms.push({ x: 100, y: 300, width: 150, height: 20 });
+        }
+
+        window.addEventListener("keydown", (e) => keys[e.code] = true);
+        window.addEventListener("keyup", (e) => keys[e.code] = false);
+
+        function bindTouch(id, code) {
+            const btn = document.getElementById(id);
+            const setKey = (val) => { keys[code] = val; };
+            
+            // Use Touch events specifically for mobile response
+            btn.addEventListener("touchstart", (e) => { e.preventDefault(); setKey(true); }, {passive: false});
+            btn.addEventListener("touchend", (e) => { e.preventDefault(); setKey(false); }, {passive: false});
+            
+            // Mouse fallbacks
+            btn.addEventListener("mousedown", () => setKey(true));
+            btn.addEventListener("mouseup", () => setKey(false));
+            btn.addEventListener("mouseleave", () => setKey(false));
+        }
+
+        bindTouch("btn-left", "ArrowLeft");
+        bindTouch("btn-right", "ArrowRight");
+        bindTouch("btn-jump", "Space");
+
+        window.addEventListener("resize", resize);
+        function resize() {
+            // Handle high-DPI displays (Retina) for sharper text/edges
+            const pixelRatio = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * pixelRatio;
+            canvas.height = window.innerHeight * pixelRatio;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        resize();
+        initLevel();
+
+        function update() {
+            if (keys["ArrowLeft"]) player.dx = -speed;
+            if (keys["ArrowRight"]) player.dx = speed;
+            if (keys["Space"] && player.grounded) {
+                player.dy = jumpForce;
+                player.grounded = false;
+            }
+
+            player.dy += gravity;
+            player.dx *= friction;
+            player.x += player.dx;
+            player.y += player.dy;
+            player.grounded = false;
+
+            if (player.y < 0) { player.y = 0; player.dy = 0; player.grounded = true; }
+
+            for (const plat of platforms) {
+                if (player.x < plat.x + plat.width && player.x + player.width > plat.x &&
+                    player.y < plat.y + plat.height && player.y + player.height > plat.y) {
+                    
+                    const prevY = player.y - player.dy;
+                    if (player.dy < 0 && prevY >= plat.y + plat.height) {
+                        player.y = plat.y + plat.height;
+                        player.dy = 0;
+                        player.grounded = true;
+                    } else if (player.dy > 0 && prevY + player.height <= plat.y) {
+                        player.y = plat.y - player.height;
+                        player.dy = 0;
+                    }
+                }
+            }
+
+            for (const slime of slimes) {
+                const pad = 5;
+                if (player.x + pad < slime.x + slime.width &&
+                    player.x + player.width - pad > slime.x &&
+                    player.y < slime.y + slime.height - pad &&
+                    player.y + player.height > slime.y) {
+                    player.x = 50; player.y = 300; player.dx = 0; player.dy = 0;
+                }
+            }
+        }
+
+        function drawRect(x, y, w, h, color, isSlime = false) {
+            // Important: we must pass the actual drawing buffer width/height
+            // because of the devicePixelRatio changes in resize()
+            gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+            gl.uniform4fv(colorLocation, color);
+            gl.uniform2f(translationLocation, x, y);
+            gl.uniform2f(scaleLocation, w, h);
+            gl.uniform1f(isSlimeLocation, isSlime ? 1.0 : 0.0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        function render(time) {
+            time *= 0.001; 
+            update();
+
+            gl.clearColor(0.15, 0.15, 0.2, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+            gl.enableVertexAttribArray(positionLocation);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+            
+            gl.uniform1f(timeLocation, time);
+
+            for (const plat of platforms) drawRect(plat.x, plat.y, plat.width, plat.height, [0.6, 0.6, 0.6, 1]);
+            for (const slime of slimes) drawRect(slime.x, slime.y, slime.width, slime.height, slime.color, true);
+            drawRect(player.x, player.y, player.width, player.height, player.color);
+
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
