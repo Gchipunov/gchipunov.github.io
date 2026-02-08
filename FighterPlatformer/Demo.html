@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL 2D Fighter</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; }
+        canvas { background: #333; box-shadow: 0 0 20px rgba(0,0,0,0.5); border-bottom: 5px solid #555; }
+        .ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 2px 2px 2px black; }
+        .controls { position: absolute; bottom: 10px; font-size: 0.8em; color: #aaa; }
+    </style>
+</head>
+<body>
+
+    <div class="ui">
+        <h2>WEBGL FIGHTER</h2>
+        <div id="moveDisplay">State: IDLE</div>
+    </div>
+
+    <canvas id="glCanvas"></canvas>
+
+    <div class="controls">
+        ARROWS: Move & Jump | A: Punch | S: Uppercut | D: Swing | Z: Kick | X: Low Kick | C: Back Kick | V: Trip
+    </div>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+canvas.width = 800;
+canvas.height = 400;
+
+// --- SHADERS ---
+const vsSource = `
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform mat3 u_matrix;
+    void main() {
+        vec2 position = (u_matrix * vec3(a_position, 1)).xy;
+        vec2 zeroToOne = position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 u_color;
+    void main() {
+        gl_FragColor = u_color;
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const positionLocation = gl.getAttribLocation(program, "a_position");
+const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+const colorLocation = gl.getUniformLocation(program, "u_color");
+const matrixLocation = gl.getUniformLocation(program, "u_matrix");
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+// Unit square
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+
+// --- MATH UTILS ---
+const m3 = {
+    identity: () => [1,0,0, 0,1,0, 0,0,1],
+    translation: (tx, ty) => [1,0,0, 0,1,0, tx,ty,1],
+    rotation: (angle) => {
+        let c = Math.cos(angle), s = Math.sin(angle);
+        return [c,s,0, -s,c,0, 0,0,1];
+    },
+    scaling: (sx, sy) => [sx,0,0, 0,sy,0, 0,0,1],
+    multiply: (a, b) => {
+        let a00 = a[0], a01 = a[1], a02 = a[2], a10 = a[3], a11 = a[4], a12 = a[5], a20 = a[6], a21 = a[7], a22 = a[8];
+        let b00 = b[0], b01 = b[1], b02 = b[2], b10 = b[3], b11 = b[4], b12 = b[5], b20 = b[6], b21 = b[7], b22 = b[8];
+        return [
+            b00 * a00 + b01 * a10 + b02 * a20, b00 * a01 + b01 * a11 + b02 * a21, b00 * a02 + b01 * a12 + b02 * a22,
+            b10 * a00 + b11 * a10 + b12 * a20, b10 * a01 + b11 * a11 + b12 * a21, b10 * a02 + b11 * a12 + b12 * a22,
+            b20 * a00 + b21 * a10 + b22 * a20, b20 * a01 + b21 * a11 + b22 * a21, b20 * a02 + b21 * a12 + b22 * a22,
+        ];
+    }
+};
+
+// --- GAME STATE ---
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+const player = {
+    x: 100, y: 300, vx: 0, vy: 0,
+    w: 40, h: 80,
+    facing: 1,
+    state: 'IDLE',
+    animTimer: 0,
+    grounded: true,
+    color: [0.2, 0.6, 1.0, 1.0]
+};
+
+function setAction(name, duration) {
+    if (player.state === 'IDLE' || player.state === 'WALK') {
+        player.state = name;
+        player.animTimer = duration;
+        document.getElementById('moveDisplay').innerText = "State: " + name;
+    }
+}
+
+// --- RENDERING HELPERS ---
+function drawRect(x, y, width, height, color, rotation = 0, originX = 0, originY = 0) {
+    let mat = m3.translation(x, y);
+    mat = m3.multiply(mat, m3.rotation(rotation));
+    mat = m3.multiply(mat, m3.translation(-originX * width, -originY * height));
+    mat = m3.multiply(mat, m3.scaling(width, height));
+
+    gl.uniformMatrix3fv(matrixLocation, false, mat);
+    gl.uniform4fv(colorLocation, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+// --- MAIN LOOP ---
+function update() {
+    // Physics
+    if (player.animTimer > 0) {
+        player.animTimer--;
+        if (player.animTimer <= 0) player.state = 'IDLE';
+    }
+
+    if (player.state === 'IDLE' || player.state === 'WALK') {
+        if (keys['ArrowLeft']) { player.vx = -4; player.facing = -1; player.state = 'WALK'; }
+        else if (keys['ArrowRight']) { player.vx = 4; player.facing = 1; player.state = 'WALK'; }
+        else { player.vx *= 0.8; player.state = 'IDLE'; }
+
+        if (keys['Space'] && player.grounded) {
+            player.vy = -12;
+            player.grounded = false;
+        }
+        
+        // Attacks
+        if (keys['KeyA']) setAction('PUNCH', 15);
+        if (keys['KeyS']) setAction('UPPERCUT', 20);
+        if (keys['KeyD']) setAction('SWING', 25);
+        if (keys['KeyZ']) setAction('KICK', 18);
+        if (keys['KeyX']) setAction('LOWKICK', 15);
+        if (keys['KeyC']) setAction('BACKKICK', 20);
+        if (keys['KeyV']) setAction('TRIP', 22);
+    }
+
+    player.vy += 0.6; // Gravity
+    player.x += player.vx;
+    player.y += player.vy;
+
+    if (player.y > 300) {
+        player.y = 300;
+        player.vy = 0;
+        player.grounded = true;
+    }
+
+    render();
+    requestAnimationFrame(update);
+}
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+    gl.enableVertexAttribArray(positionLocation);
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    // Draw Floor
+    drawRect(0, 380, 800, 20, [0.4, 0.4, 0.4, 1.0]);
+
+    // Character Animation Logic
+    const t = player.animTimer;
+    const f = player.facing;
+    let bodyY = player.y;
+    let rArmAngle = 0, lArmAngle = 0, rLegAngle = 0, lLegAngle = 0;
+    let armW = 30, legH = 40;
+
+    // Procedural Animation States
+    if (player.state === 'PUNCH') {
+        rArmAngle = f * -1.2; 
+    } else if (player.state === 'UPPERCUT') {
+        rArmAngle = f * -2.5;
+        bodyY -= (t > 10 ? 10 : 0);
+    } else if (player.state === 'SWING') {
+        rArmAngle = f * (Math.sin(t * 0.5) * 2);
+    } else if (player.state === 'KICK') {
+        rLegAngle = f * -1.5;
+    } else if (player.state === 'LOWKICK') {
+        bodyY += 20;
+        rLegAngle = f * -1.2;
+    } else if (player.state === 'BACKKICK') {
+        lLegAngle = f * 1.5;
+    } else if (player.state === 'TRIP') {
+        bodyY += 30;
+        rLegAngle = f * -1.8;
+    } else if (player.state === 'WALK') {
+        const walkCycle = Math.sin(Date.now() * 0.01);
+        rLegAngle = walkCycle * 0.5;
+        lLegAngle = -walkCycle * 0.5;
+    }
+
+    // Draw Character Parts
+    // Torso
+    drawRect(player.x - 15, bodyY, 30, 50, player.color);
+    // Head
+    drawRect(player.x - 10, bodyY - 25, 20, 20, [0.9, 0.8, 0.7, 1.0]);
+    
+    // Legs
+    drawRect(player.x - 10, bodyY + 45, 10, legH, [0.1, 0.3, 0.6, 1.0], lLegAngle, 0.5, 0);
+    drawRect(player.x + 5, bodyY + 45, 10, legH, [0.1, 0.3, 0.6, 1.0], rLegAngle, 0.5, 0);
+
+    // Arms
+    drawRect(player.x - 18, bodyY + 10, armW, 10, player.color, lArmAngle, (f>0?1:0), 0.5);
+    drawRect(player.x + 18, bodyY + 10, armW, 10, player.color, rArmAngle, (f>0?0:1), 0.5);
+}
+
+update();
+</script>
+</body>
+</html>
