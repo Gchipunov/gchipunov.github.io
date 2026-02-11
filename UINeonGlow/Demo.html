@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CrimeWars - WebGL UI</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Engine Setup ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(window.innerWidth / -2, window.innerWidth / 2, window.innerHeight / 2, window.innerHeight / -2, 1, 1000);
+    camera.position.z = 10;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let currentMenu = "MAIN_MENU";
+    const uiGroups = {};
+
+    // --- UI Component Factory ---
+    function createButton(text, x, y, width, height, color, onClick) {
+        const group = new THREE.Group();
+        
+        // Background
+        const geometry = new THREE.PlaneGeometry(width, height);
+        const material = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // Simple Border
+        const edges = new THREE.EdgesGeometry(geometry);
+        const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ffcc }));
+        
+        // Text (Canvas Texture)
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 256; canvas.height = 64;
+        context.fillStyle = 'white';
+        context.font = 'Bold 40px Courier New';
+        context.textAlign = 'center';
+        context.fillText(text, 128, 45);
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        const textMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+        const textMesh = new THREE.Mesh(new THREE.PlaneGeometry(width * 0.8, height * 0.8), textMaterial);
+        textMesh.position.z = 1;
+
+        group.add(mesh, line, textMesh);
+        group.position.set(x, y, 0);
+        group.userData = { onClick, isButton: true, baseColor: color };
+        
+        return group;
+    }
+
+    // --- Panel Creator ---
+    function createPanel(title, x, y, w, h) {
+        const group = new THREE.Group();
+        const bg = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0x111111, opacity: 0.9, transparent: true }));
+        const border = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, h)), new THREE.LineBasicMaterial({ color: 0x555555 }));
+        group.add(bg, border);
+        group.position.set(x, y, 0);
+        return group;
+    }
+
+    // --- Screens Definition ---
+    function initMenus() {
+        // 1. MAIN MENU
+        uiGroups["MAIN_MENU"] = new THREE.Group();
+        uiGroups["MAIN_MENU"].add(createButton("PLAY", 0, 100, 300, 60, 0x1a1a1a, () => switchMenu("PLAY")));
+        uiGroups["MAIN_MENU"].add(createButton("SETTINGS", 0, 20, 300, 60, 0x1a1a1a, () => switchMenu("SETTINGS")));
+        uiGroups["MAIN_MENU"].add(createButton("INVENTORY", 0, -60, 300, 60, 0x1a1a1a, () => switchMenu("INVENTORY")));
+
+        // 2. PLAY / MISSIONS
+        uiGroups["PLAY"] = new THREE.Group();
+        uiGroups["PLAY"].add(createButton("MISSION 1: BANK JOB", -200, 50, 250, 100, 0x330000, () => alert("Starting heist...")));
+        uiGroups["PLAY"].add(createButton("BACK", 0, -200, 150, 50, 0x444444, () => switchMenu("MAIN_MENU")));
+
+        // 3. SETTINGS
+        uiGroups["SETTINGS"] = new THREE.Group();
+        uiGroups["SETTINGS"].add(createButton("AUDIO: ON", 0, 50, 300, 60, 0x222222, () => {}));
+        uiGroups["SETTINGS"].add(createButton("BACK", 0, -200, 150, 50, 0x444444, () => switchMenu("MAIN_MENU")));
+
+        // 4. INVENTORY + LOADOUT SUBPANEL
+        uiGroups["INVENTORY"] = new THREE.Group();
+        const invPanel = createPanel("STASH", -200, 0, 350, 500);
+        invPanel.add(createButton("GLOCK 17", 0, 150, 280, 50, 0x222222, () => {}));
+        invPanel.add(createButton("BODY ARMOR", 0, 80, 280, 50, 0x222222, () => {}));
+        
+        const loadoutPanel = createPanel("LOADOUT", 200, 0, 350, 500);
+        loadoutPanel.add(createButton("EQUIPPED: AK-47", 0, 150, 280, 50, 0x003300, () => {}));
+        
+        uiGroups["INVENTORY"].add(invPanel, loadoutPanel);
+        uiGroups["INVENTORY"].add(createButton("BACK", 0, -300, 150, 50, 0x444444, () => switchMenu("MAIN_MENU")));
+
+        // Initial Scene Setup
+        Object.values(uiGroups).forEach(g => {
+            g.visible = false;
+            scene.add(g);
+        });
+        uiGroups[currentMenu].visible = true;
+    }
+
+    function switchMenu(key) {
+        uiGroups[currentMenu].visible = false;
+        currentMenu = key;
+        uiGroups[currentMenu].visible = true;
+    }
+
+    // --- Interaction Logic ---
+    window.addEventListener('mousedown', (event) => {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(uiGroups[currentMenu].children, true);
+
+        for (let intersect of intersects) {
+            let obj = intersect.object;
+            while(obj.parent && !obj.userData.isButton) obj = obj.parent;
+            
+            if (obj.userData.isButton && obj.userData.onClick) {
+                obj.userData.onClick();
+                break;
+            }
+        }
+    });
+
+    // --- Animation Loop ---
+    function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.left = window.innerWidth / -2;
+        camera.right = window.innerWidth / 2;
+        camera.top = window.innerHeight / 2;
+        camera.bottom = window.innerHeight / -2;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    initMenus();
+    animate();
+
+</script>
+</body>
+</html>
