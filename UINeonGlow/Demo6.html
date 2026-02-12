@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CrimeWars - Live Construction Sandbox</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Config & State ---
+    const MAX_BUILDINGS = 15;
+    const BUILD_INTERVAL = 800; // ms between new blocks
+    let lastBlockTime = 0;
+    const buildings = [];
+    const uiGroups = {};
+    let currentMenu = "MAIN_MENU";
+    let hoveredObject = null;
+
+    // --- Shaders ---
+    const CITY_VERTEX_SHADER = `
+        varying vec2 vUv;
+        varying vec3 vPos;
+        void main() {
+            vUv = uv;
+            vPos = position;
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vPos = worldPos.xyz;
+            gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+    `;
+
+    const CITY_FRAGMENT_SHADER = `
+        varying vec2 vUv;
+        varying vec3 vPos;
+        uniform float time;
+        void main() {
+            vec3 baseColor = vec3(0.02, 0.05, 0.1);
+            // Grid effect
+            float grid = step(0.05, fract(vUv.x * 2.0)) * step(0.05, fract(vUv.y * 4.0));
+            
+            // Scanner Sweep effect
+            float scannerY = mod(time * 50.0, 300.0);
+            float scanLine = smoothstep(scannerY - 5.0, scannerY, vPos.y) * smoothstep(scannerY + 5.0, scannerY, vPos.y);
+            
+            vec3 finalColor = mix(vec3(0.0, 1.0, 1.0), baseColor, grid);
+            finalColor += scanLine * vec3(0.0, 1.0, 0.5) * 2.0;
+            
+            gl_FragColor = vec4(finalColor, 1.0);
+        }
+    `;
+
+    // --- Engine Setup ---
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.autoClear = false;
+    document.body.appendChild(renderer.domElement);
+
+    const sceneCity = new THREE.Scene();
+    sceneCity.fog = new THREE.FogExp2(0x00050a, 0.003);
+    const cameraCity = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 1, 2000);
+    cameraCity.position.set(200, 150, 200);
+
+    const sceneUI = new THREE.Scene();
+    const cameraUI = new THREE.OrthographicCamera(window.innerWidth/-2, window.innerWidth/2, window.innerHeight/2, window.innerHeight/-2, 1, 1000);
+    cameraUI.position.z = 10;
+
+    const cityMat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 } },
+        vertexShader: CITY_VERTEX_SHADER,
+        fragmentShader: CITY_FRAGMENT_SHADER
+    });
+
+    const boxGeom = new THREE.BoxGeometry(15, 10, 15);
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    // --- Building Logic ---
+    function initBuilding() {
+        const x = (Math.random() - 0.5) * 400;
+        const z = (Math.random() - 0.5) * 400;
+        return {
+            x, z,
+            height: 0,
+            targetHeight: 5 + Math.random() * 15,
+            isFinished: false
+        };
+    }
+
+    function buildStep() {
+        buildings.forEach(b => {
+            if (b.height < b.targetHeight) {
+                const block = new THREE.Mesh(boxGeom, cityMat);
+                block.position.set(b.x, b.height * 11, b.z);
+                block.scale.set(0.1, 0.1, 0.1);
+                sceneCity.add(block);
+                
+                // Tween-like growth
+                const grow = () => {
+                    if(block.scale.x < 1) {
+                        block.scale.x += 0.1; block.scale.y += 0.1; block.scale.z += 0.1;
+                        requestAnimationFrame(grow);
+                    }
+                };
+                grow();
+
+                // Build random bridge
+                if (Math.random() > 0.9) {
+                    const bridge = new THREE.Mesh(new THREE.BoxGeometry(50, 2, 5), cityMat);
+                    bridge.position.set(b.x + 25, b.height * 11, b.z);
+                    sceneCity.add(bridge);
+                }
+                b.height++;
+            }
+        });
+
+        if (buildings.length < MAX_BUILDINGS && Math.random() > 0.5) {
+            buildings.push(initBuilding());
+        }
+    }
+
+    // --- UI Logic ---
+    function createButton(text, x, y, width, height, onClick) {
+        const group = new THREE.Group();
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 512; canvas.height = 128;
+        
+        const draw = (isHover) => {
+            ctx.clearRect(0,0,512,128);
+            ctx.fillStyle = isHover ? '#00ffcc' : '#005555';
+            ctx.fillRect(0,0,512,128);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 10;
+            ctx.strokeRect(5,5,502,118);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 60px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText(text.toUpperCase(), 256, 85);
+            texture.needsUpdate = true;
+        };
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture, transparent: true }));
+        
+        draw(false);
+        group.add(mesh);
+        group.position.set(x, y, 0);
+        group.userData = { onClick, isButton: true, update: draw };
+        return group;
+    }
+
+    function initUI() {
+        uiGroups["MAIN_MENU"] = new THREE.Group();
+        
+        // Neon Sign
+        const signCanvas = document.createElement('canvas');
+        const sCtx = signCanvas.getContext('2d');
+        signCanvas.width = 1024; signCanvas.height = 256;
+        sCtx.fillStyle = '#ff00ff'; sCtx.font = '900 130px Courier'; sCtx.textAlign = 'center';
+        sCtx.shadowBlur = 40; sCtx.shadowColor = '#ff00ff';
+        sCtx.fillText("CRIMEWARS", 512, 160);
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(600, 150), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(signCanvas), transparent: true }));
+        sign.position.y = 220;
+        uiGroups["MAIN_MENU"].add(sign);
+
+        uiGroups["MAIN_MENU"].add(createButton("Enter Zone", 0, 40, 350, 80, () => alert("Loading Mission...")));
+        uiGroups["MAIN_MENU"].add(createButton("Inventory", 0, -60, 350, 80, () => {}));
+        uiGroups["MAIN_MENU"].add(createButton("Wipe City", 0, -160, 350, 80, () => location.reload()));
+
+        Object.values(uiGroups).forEach(g => sceneUI.add(g));
+    }
+
+    // --- Loops ---
+    function animate(t) {
+        requestAnimationFrame(animate);
+        const time = t / 1000;
+
+        // Construction Timing
+        if (t - lastBlockTime > BUILD_INTERVAL) {
+            buildStep();
+            lastBlockTime = t;
+        }
+
+        // Camera Orbit
+        cameraCity.position.x = Math.sin(time * 0.1) * 350;
+        cameraCity.position.z = Math.cos(time * 0.1) * 350;
+        cameraCity.lookAt(0, 80, 0);
+
+        cityMat.uniforms.time.value = time;
+
+        renderer.clear();
+        renderer.render(sceneCity, cameraCity);
+        renderer.clearDepth();
+        renderer.render(sceneUI, cameraUI);
+    }
+
+    // --- Interactivity ---
+    window.addEventListener('mousemove', (e) => {
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, cameraUI);
+        const intersects = raycaster.intersectObjects(uiGroups[currentMenu].children, true);
+        
+        if (hoveredObject) hoveredObject.userData.update(false);
+        hoveredObject = null;
+        
+        if (intersects.length > 0) {
+            let obj = intersects[0].object;
+            while(obj.parent && !obj.userData.isButton) obj = obj.parent;
+            if (obj.userData.isButton) {
+                hoveredObject = obj;
+                obj.userData.update(true);
+            }
+        }
+    });
+
+    window.addEventListener('mousedown', () => { if(hoveredObject) hoveredObject.userData.onClick(); });
+    window.addEventListener('resize', () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        cameraCity.aspect = window.innerWidth / window.innerHeight;
+        cameraCity.updateProjectionMatrix();
+    });
+
+    initUI();
+    animate(0);
+</script>
+</body>
+</html>
