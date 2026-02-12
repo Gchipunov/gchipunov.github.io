@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CrimeWars - Neon City UI</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Shader Definitions ---
+    const UI_VERTEX_SHADER = `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+    `;
+
+    // Shader for the main Title Sign with flickering effect
+    const NEON_TITLE_SHADER = `
+        uniform float time;
+        uniform vec3 color;
+        varying vec2 vUv;
+        void main() {
+            float flicker = sin(time * 10.0) * cos(time * 7.0);
+            float intensity = (flicker > 0.8) ? 0.2 : 1.0; // Simulated "broken" flicker
+            intensity += sin(time * 2.0) * 0.1; // Soft hum
+            
+            vec3 neon = color * intensity;
+            float dist = distance(vUv, vec2(0.5));
+            float glow = exp(-dist * 4.0);
+            
+            gl_FragColor = vec4(neon + (glow * color * 0.5), 1.0);
+        }
+    `;
+
+    const UI_FRAGMENT_SHADER = `
+        uniform vec3 color; uniform float hover; uniform float time; varying vec2 vUv;
+        void main() {
+            float border = 0.02;
+            float isBorder = step(1.0 - border, vUv.x) + step(vUv.x, border) + step(1.0 - border, vUv.y) + step(vUv.y, border);
+            float pulse = (sin(time * 3.0) * 0.1 + 0.9) * hover;
+            vec3 finalColor = color;
+            if(isBorder > 0.0) finalColor += vec3(0.0, 1.0, 0.8) * (0.5 + pulse);
+            gl_FragColor = vec4(finalColor + (hover * 0.2), 0.85 + (hover * 0.15));
+        }
+    `;
+
+    const BUILDING_FRAGMENT_SHADER = `
+        varying vec2 vUv;
+        uniform float time;
+        void main() {
+            vec3 baseColor = vec3(0.02, 0.02, 0.05);
+            float windowX = step(0.2, fract(vUv.x * 12.0));
+            float windowY = step(0.3, fract(vUv.y * 30.0));
+            float isWindow = windowX * windowY;
+            float noise = fract(sin(dot(floor(vUv * vec2(12.0, 30.0)), vec2(12.9898, 78.233))) * 43758.5453);
+            vec3 windowColor = (noise > 0.7) ? vec3(0.0, 0.8, 1.0) : (noise > 0.5) ? vec3(1.0, 0.4, 0.0) : baseColor;
+            vec3 final = mix(baseColor, windowColor * (0.5 + 0.5 * sin(time + noise * 10.0)), isWindow);
+            gl_FragColor = vec4(final, 1.0);
+        }
+    `;
+
+    // --- Setup ---
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.autoClear = false;
+    document.body.appendChild(renderer.domElement);
+
+    const sceneCity = new THREE.Scene();
+    sceneCity.fog = new THREE.FogExp2(0x000205, 0.005);
+    const cameraCity = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+    cameraCity.position.set(0, 50, 200);
+
+    const sceneUI = new THREE.Scene();
+    const cameraUI = new THREE.OrthographicCamera(window.innerWidth / -2, window.innerWidth / 2, window.innerHeight / 2, window.innerHeight / -2, 1, 1000);
+    cameraUI.position.z = 10;
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let currentMenu = "MAIN_MENU";
+    const uiGroups = {};
+    let hoveredObject = null;
+    let titleMaterial;
+
+    // --- Neon Sign Generator ---
+    function createNeonSign(text, x, y) {
+        const group = new THREE.Group();
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 1024; canvas.height = 256;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 120px Courier New';
+        ctx.textAlign = 'center';
+        ctx.shadowBlur = 30;
+        ctx.shadowColor = '#ff00ff';
+        ctx.fillText(text, 512, 160);
+        
+        titleMaterial = new THREE.ShaderMaterial({
+            uniforms: { 
+                time: { value: 0 }, 
+                color: { value: new THREE.Color(0xff00ff) },
+                uTex: { value: new THREE.CanvasTexture(canvas) }
+            },
+            vertexShader: UI_VERTEX_SHADER,
+            fragmentShader: `
+                uniform float time;
+                uniform vec3 color;
+                uniform sampler2D uTex;
+                varying vec2 vUv;
+                void main() {
+                    float flick = step(0.95, fract(sin(time * 20.0)));
+                    vec4 tex = texture2D(uTex, vUv);
+                    if(tex.a < 0.1) discard;
+                    gl_FragColor = vec4(color * (1.0 - flick * 0.8), tex.a);
+                }
+            `,
+            transparent: true
+        });
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 150), titleMaterial);
+        group.add(mesh);
+        group.position.set(x, y, 0);
+        return group;
+    }
+
+    // --- City Generation ---
+    const buildingMat = new THREE.ShaderMaterial({
+        uniforms: { time: { value: 0 } },
+        vertexShader: UI_VERTEX_SHADER,
+        fragmentShader: BUILDING_FRAGMENT_SHADER
+    });
+
+    const cityGroup = new THREE.Group();
+    for(let i = 0; i < 150; i++) {
+        const h = 40 + Math.random() * 250;
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(20, h, 20), buildingMat);
+        mesh.position.set((Math.random() - 0.5) * 800, h/2, (Math.random() - 0.5) * 800);
+        cityGroup.add(mesh);
+    }
+    sceneCity.add(cityGroup);
+
+    // Flying Traffic
+    const trafficGroup = new THREE.Group();
+    const carGeom = new THREE.BoxGeometry(1, 0.5, 4);
+    for(let i = 0; i < 80; i++) {
+        const car = new THREE.Mesh(carGeom, new THREE.MeshBasicMaterial({ color: Math.random() > 0.5 ? 0x00ffff : 0xffaa00 }));
+        car.userData = { speed: 1.5 + Math.random() * 3 };
+        car.position.set((Math.random() - 0.5) * 600, 20 + Math.random() * 100, (Math.random() - 0.5) * 800);
+        trafficGroup.add(car);
+    }
+    sceneCity.add(trafficGroup);
+
+    // --- UI Logic ---
+    function createClippedRect(w, h, notchSize) {
+        const shape = new THREE.Shape();
+        shape.moveTo(-w/2 + notchSize, h/2); shape.lineTo(w/2, h/2);
+        shape.lineTo(w/2, -h/2 + notchSize); shape.lineTo(w/2 - notchSize, -h/2);
+        shape.lineTo(-w/2, -h/2); shape.lineTo(-w/2, h/2 - notchSize);
+        shape.closePath();
+        return new THREE.ShapeGeometry(shape);
+    }
+
+    function createButton(text, x, y, width, height, color, onClick) {
+        const group = new THREE.Group();
+        const material = new THREE.ShaderMaterial({
+            uniforms: { color: { value: new THREE.Color(color) }, hover: { value: 0.0 }, time: { value: 0.0 } },
+            vertexShader: UI_VERTEX_SHADER, fragmentShader: UI_FRAGMENT_SHADER, transparent: true
+        });
+        const mesh = new THREE.Mesh(createClippedRect(width, height, 15), material);
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 512; canvas.height = 128;
+        context.fillStyle = '#00ffcc'; context.font = 'Bold 50px Courier New'; context.textAlign = 'center';
+        context.fillText(text.toUpperCase(), 256, 80);
+        const textMesh = new THREE.Mesh(new THREE.PlaneGeometry(width * 0.8, height * 0.6), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true }));
+        textMesh.position.z = 0.1;
+        group.add(mesh, textMesh);
+        group.position.set(x, y, 0);
+        group.userData = { onClick, isButton: true, material };
+        return group;
+    }
+
+    function initMenus() {
+        uiGroups["MAIN_MENU"] = new THREE.Group();
+        // Add THE CRIMEWARS SIGN
+        uiGroups["MAIN_MENU"].add(createNeonSign("CRIMEWARS", 0, 220));
+        
+        uiGroups["MAIN_MENU"].add(createButton("Enter Zone", 0, 20, 350, 70, 0x0a0a0a, () => switchMenu("INVENTORY")));
+        uiGroups["MAIN_MENU"].add(createButton("Settings", 0, -80, 350, 70, 0x0a0a0a, () => switchMenu("MAIN_MENU")));
+        uiGroups["MAIN_MENU"].add(createButton("Exit", 0, -180, 350, 70, 0x220000, () => location.reload()));
+        
+        uiGroups["INVENTORY"] = new THREE.Group();
+        uiGroups["INVENTORY"].add(createButton("BACK", 0, -250, 200, 50, 0x333333, () => switchMenu("MAIN_MENU")));
+
+        Object.values(uiGroups).forEach(g => { g.visible = false; sceneUI.add(g); });
+        uiGroups[currentMenu].visible = true;
+    }
+
+    function switchMenu(key) {
+        uiGroups[currentMenu].visible = false;
+        currentMenu = key;
+        uiGroups[currentMenu].visible = true;
+    }
+
+    // --- Animation ---
+    function animate(t) {
+        requestAnimationFrame(animate);
+        const time = t / 1000;
+
+        cameraCity.position.x = Math.sin(time * 0.05) * 80;
+        cameraCity.lookAt(0, 60, 0);
+        buildingMat.uniforms.time.value = time;
+        if(titleMaterial) titleMaterial.uniforms.time.value = time;
+
+        trafficGroup.children.forEach(car => {
+            car.position.z += car.userData.speed;
+            if(car.position.z > 400) car.position.z = -400;
+        });
+
+        uiGroups[currentMenu].traverse(child => {
+            if (child.userData.isButton) child.userData.material.uniforms.time.value = time;
+        });
+
+        renderer.clear();
+        renderer.render(sceneCity, cameraCity);
+        renderer.clearDepth();
+        renderer.render(sceneUI, cameraUI);
+    }
+
+    // Interaction handled as before
+    window.addEventListener('mousemove', (e) => {
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, cameraUI);
+        const intersects = raycaster.intersectObjects(uiGroups[currentMenu].children, true);
+        if (hoveredObject) hoveredObject.userData.material.uniforms.hover.value = 0;
+        hoveredObject = null;
+        for (let intersect of intersects) {
+            let obj = intersect.object;
+            while(obj.parent && !obj.userData.isButton) obj = obj.parent;
+            if (obj.userData.isButton) { hoveredObject = obj; obj.userData.material.uniforms.hover.value = 1.0; break; }
+        }
+    });
+    window.addEventListener('mousedown', () => { if (hoveredObject) hoveredObject.userData.onClick(); });
+    window.addEventListener('resize', () => {
+        const w = window.innerWidth, h = window.innerHeight;
+        renderer.setSize(w, h);
+        cameraCity.aspect = w / h; cameraCity.updateProjectionMatrix();
+        cameraUI.left = -w/2; cameraUI.right = w/2; cameraUI.top = h/2; cameraUI.bottom = -h/2; cameraUI.updateProjectionMatrix();
+    });
+
+    initMenus();
+    animate(0);
+</script>
+</body>
+</html>
