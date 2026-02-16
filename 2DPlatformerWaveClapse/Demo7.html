@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>WebGL 2D - The Gauntlet: Parallax & Breaking</title>
+    <style>
+        * {
+            user-select: none; -webkit-user-select: none; 
+            -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; 
+            touch-action: none; 
+        }
+        body { 
+            margin: 0; overflow: hidden; background: #020205; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            position: fixed; width: 100%; height: 100%;
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; text-shadow: 2px 2px #000; }
+        .hud-btn { 
+            position: absolute; padding: 10px; background: rgba(255,0,255,0.3); 
+            color: white; border: 1px solid #f0f; cursor: pointer; pointer-events: auto; z-index: 100;
+        }
+        #regenBtn { top: 20px; right: 20px; }
+        #camBtn { top: 70px; right: 20px; }
+        .controls { position: absolute; bottom: 30px; left: 20px; right: 20px; display: flex; justify-content: space-between; pointer-events: none; z-index: 100; }
+        .btn { width: 70px; height: 70px; background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #0ff; font-weight: bold; pointer-events: auto; backdrop-filter: blur(2px); }
+        .btn:active { background: rgba(0, 255, 255, 0.4); }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>GAUNTLET: BREAKOUT</h1>
+        <p id="camStatus">Camera: SMOOTH LERP</p>
+    </div>
+    <button class="hud-btn" id="regenBtn">REGEN LEVEL</button>
+    <button class="hud-btn" id="camBtn">TOGGLE CAMERA</button>
+    
+    <div class="controls">
+        <div style="display:flex; gap:15px;">
+            <div class="btn" id="btnLeft">L</div>
+            <div class="btn" id="btnRight">R</div>
+        </div>
+        <div class="btn" id="btnJump" style="width:100px; border-radius: 15px;">JUMP</div>
+    </div>
+
+    <canvas id="glCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+const vsSource = `
+    attribute vec2 aPos;
+    uniform vec2 uRes, uTrans, uScale;
+    uniform float uRot;
+    void main() {
+        float s = sin(uRot), c = cos(uRot);
+        mat2 rot = mat2(c, s, -s, c);
+        vec2 p = (aPos - 0.5) * uScale;
+        p = rot * p + 0.5 * uScale + uTrans;
+        gl_Position = vec4((p / uRes * 2.0 - 1.0) * vec2(1, -1), 0, 1);
+    }
+`;
+const fsSource = `precision mediump float; uniform vec4 uCol; void main() { gl_FragColor = uCol; }`;
+
+function mkShdr(t, s) { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; }
+const prog = gl.createProgram();
+gl.attachShader(prog, mkShdr(gl.VERTEX_SHADER, vsSource));
+gl.attachShader(prog, mkShdr(gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, 'uRes');
+const uTrans = gl.getUniformLocation(prog, 'uTrans');
+const uScale = gl.getUniformLocation(prog, 'uScale');
+const uRot = gl.getUniformLocation(prog, 'uRot');
+const uCol = gl.getUniformLocation(prog, 'uCol');
+
+// --- GAME STATE ---
+let player = { x: 150, y: 300, w: 25, h: 25, vx: 0, vy: 0, jumps: 0 };
+let world = [], enemies = [], projectiles = [], parallaxStars = [];
+let camX = 0, targetCamX = 0, camMode = 0; // 0: Smooth, 1: Snap
+const LVL_WIDTH = 12000;
+
+function generate() {
+    world = []; enemies = []; projectiles = []; parallaxStars = [];
+    player.x = 150; player.y = 300; player.vx = 0; player.vy = 0;
+    
+    // Parallax background stars
+    for(let i=0; i<200; i++) {
+        parallaxStars.push({
+            x: Math.random() * LVL_WIDTH,
+            y: Math.random() * 800,
+            s: 2 + Math.random() * 4,
+            depth: 0.1 + Math.random() * 0.5
+        });
+    }
+
+    // World Boundaries
+    spawn(0, 0, LVL_WIDTH, 40, 'wall', [0.1, 0.1, 0.15, 1]);
+    spawn(0, 800, LVL_WIDTH, 40, 'wall', [0.1, 0.1, 0.15, 1]);
+
+    for (let x = 0; x < LVL_WIDTH; x += 1000) {
+        spawn(x, 40, 40, 760, 'wall', [0.2, 0.2, 0.2, 1]);
+        for(let i=0; i<3; i++) {
+            let rx = x + 150 + i*300;
+            let ry = 250 + Math.random() * 300;
+            
+            // BREAKABLE WALLS
+            if(Math.random() > 0.5) {
+                spawn(rx + 100, ry - 100, 30, 100, 'breakable', [0.8, 0.3, 0.1, 1]);
+            }
+
+            spawn(rx, ry, 200, 25, 'conveyer', [0.2, 0.5, 0.8, 1]);
+            world.push({ x: rx+100, y: ry-150, w: 150, h: 20, type: 'rotor', color: [0, 1, 0.5, 1], rot: 0 });
+            enemies.push({ x: rx + 50, y: ry - 40, w: 30, h: 30, type: 'fighter', timer: 0, vx: 0 });
+        }
+    }
+}
+
+function spawn(x, y, w, h, type, color) {
+    world.push({ x, y, w, h, type, color, rot: 0, hp: 1, speed: (type === 'conveyer' ? 3 : 0) });
+}
+
+// --- INPUTS ---
+const keys = {};
+const jump = () => { if(player.jumps < 2) { player.vy = -12; player.jumps++; } };
+
+const setupBtn = (id, key) => {
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; }, {passive: false});
+    el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; }, {passive: false});
+    el.addEventListener('mousedown', () => keys[key] = true);
+    el.addEventListener('mouseup', () => keys[key] = false);
+};
+
+setupBtn('btnLeft', 'KeyA');
+setupBtn('btnRight', 'KeyD');
+document.getElementById('btnJump').addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, {passive: false});
+document.getElementById('btnJump').onmousedown = jump;
+document.getElementById('regenBtn').onclick = generate;
+document.getElementById('camBtn').onclick = () => {
+    camMode = (camMode + 1) % 2;
+    document.getElementById('camStatus').innerText = "Camera: " + (camMode === 0 ? "SMOOTH LERP" : "FIXED SNAP");
+};
+
+window.onkeydown = e => { keys[e.code] = true; if(e.code==='Space') jump(); };
+window.onkeyup = e => keys[e.code] = false;
+
+// --- LOOP ---
+function update() {
+    if (keys.KeyA || keys.ArrowLeft) player.vx = -7;
+    else if (keys.KeyD || keys.ArrowRight) player.vx = 7;
+    else player.vx *= 0.85;
+
+    player.vy += 0.6;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Camera Logic
+    targetCamX = player.x - canvas.width / 3;
+    if(camMode === 0) {
+        camX += (targetCamX - camX) * 0.1; // Smooth Lerp
+    } else {
+        camX = targetCamX; // Snap
+    }
+
+    world = world.filter(o => {
+        if(o.type === 'rotor') o.rot += 0.04;
+        let isColliding = player.x < o.x + o.w && player.x + player.width > o.x && 
+                         player.y < o.y + o.h && player.y + player.height > o.y;
+        
+        if(isColliding) {
+            // BREAKING LOGIC: If hitting a breakable wall with horizontal speed
+            if(o.type === 'breakable' && Math.abs(player.vx) > 4) {
+                return false; // Destroy object
+            }
+
+            if(o.type === 'conveyer') player.x += o.speed;
+            if(player.vy > 0 && player.y + player.h - player.vy <= o.y) {
+                player.y = o.y - player.h; player.vy = 0; player.jumps = 0;
+            } else if(o.type === 'wall' || o.type === 'breakable') {
+                player.x -= player.vx;
+                player.vx = 0;
+            }
+        }
+        return true;
+    });
+
+    enemies.forEach(e => {
+        e.timer++;
+        if(e.type === 'fighter') {
+            if(e.timer % 120 === 0) e.vx = (player.x < e.x ? -10 : 10);
+            e.x += e.vx; e.vx *= 0.95;
+        }
+        if(Math.abs(player.x - e.x) < 25 && Math.abs(player.y - e.y) < 25) generate();
+    });
+
+    if(player.y > 1200) generate();
+}
+
+function draw() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+
+    const render = (x, y, w, h, col, r=0, scrollFactor=1) => {
+        // Apply parallax by shifting X based on depth
+        let finalX = (x - camX * scrollFactor);
+        gl.uniform2f(uTrans, finalX, y); 
+        gl.uniform2f(uScale, w, h);
+        gl.uniform1f(uRot, r); 
+        gl.uniform4f(uCol, ...col);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    // 1. Draw Parallax Background
+    parallaxStars.forEach(s => render(s.x, s.y, s.s, s.s, [0.5, 0.5, 0.8, s.depth], 0, s.depth));
+
+    // 2. Draw World
+    world.forEach(o => render(o.x, o.y, o.w, o.h, o.color, o.rot, 1));
+    
+    // 3. Draw Enemies
+    enemies.forEach(e => render(e.x, e.y, e.w, e.h, [1,0,0,1], 0, 1));
+
+    // 4. Draw Player
+    render(player.x, player.y, player.w, player.h, [0, 1, 1, 1], 0, 1);
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+generate();
+draw();
+</script>
+</body>
+</html>
