@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Gauntlet: Chaos Fracture & Sub-Boss</title>
+    <style>
+        * { user-select: none; -webkit-user-select: none; touch-action: none; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; overflow: hidden; background: #020205; font-family: 'Segoe UI', sans-serif; position: fixed; width: 100%; height: 100%; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; text-shadow: 2px 2px #000; z-index: 10; }
+        .inventory { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; z-index: 100; }
+        .slot { width: 60px; height: 60px; background: rgba(0,0,0,0.6); border: 2px solid #555; color: white; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; cursor: pointer; border-radius: 8px; }
+        .slot.active { border-color: #f0f; box-shadow: 0 0 10px #f0f; background: rgba(255, 0, 255, 0.2); }
+        .controls { position: absolute; bottom: 30px; left: 20px; right: 20px; display: flex; justify-content: space-between; pointer-events: none; z-index: 100; }
+        .btn-group { display: flex; gap: 15px; pointer-events: none; }
+        .btn { width: 75px; height: 75px; background: rgba(0, 255, 255, 0.1); border: 2px solid #0ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #0ff; font-weight: bold; pointer-events: auto; backdrop-filter: blur(4px); }
+        .btn:active { background: rgba(0, 255, 255, 0.4); }
+        #btnAttack { border-color: #f44; color: #f44; width: 85px; height: 85px; }
+        #stats { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); border: 2px solid #0ff; color: #0ff; padding: 30px; text-align: center; z-index: 200; pointer-events: auto; border-radius: 15px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1 style="margin:0; font-size: 18px;">GAUNTLET: CHAOS</h1>
+        <p>Tool: <span id="toolName">HAMMER</span> | Boss Dist: <span id="bossDist">0</span></p>
+    </div>
+
+    <div id="stats">
+        <h2>SECTOR CLEARED</h2>
+        <p id="statDetail"></p>
+        <button onclick="location.reload()" style="background:#0ff; border:none; padding:10px 20px; cursor:pointer; font-weight:bold;">REBOOT</button>
+    </div>
+
+    <div class="inventory">
+        <div class="slot active" id="slotHammer">HAMMER</div>
+        <div class="slot" id="slotKick">KICK</div>
+        <div class="slot" id="regenBtn" style="border-color: #0f0; color: #0f0;">REGEN</div>
+    </div>
+    
+    <div class="controls">
+        <div class="btn-group"><div class="btn" id="btnLeft">L</div><div class="btn" id="btnRight">R</div></div>
+        <div class="btn-group"><div class="btn" id="btnAttack">SWING</div><div class="btn" id="btnJump">JUMP</div></div>
+    </div>
+
+    <canvas id="glCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+const vsSource = `attribute vec2 aPos; uniform vec2 uRes, uTrans, uScale; uniform float uRot; void main() { float s=sin(uRot), c=cos(uRot); mat2 rot=mat2(c,s,-s,c); vec2 p=(aPos-0.5)*uScale; p=rot*p+0.5*uScale+uTrans; gl_Position=vec4((p/uRes*2.0-1.0)*vec2(1,-1),0,1); }`;
+const fsSource = `precision mediump float; uniform vec4 uCol; void main() { gl_FragColor=uCol; }`;
+function mkShdr(t, s) { const sh=gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; }
+const prog = gl.createProgram();
+gl.attachShader(prog, mkShdr(gl.VERTEX_SHADER, vsSource));
+gl.attachShader(prog, mkShdr(gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes=gl.getUniformLocation(prog, 'uRes'), uTrans=gl.getUniformLocation(prog, 'uTrans'), uScale=gl.getUniformLocation(prog, 'uScale'), uRot=gl.getUniformLocation(prog, 'uRot'), uCol=gl.getUniformLocation(prog, 'uCol');
+
+// --- GAME STATE ---
+let player = { x: 150, y: 300, w: 25, h: 25, vx: 0, vy: 0, jumps: 0, tool: 'hammer', attackTimer: 0, wallHits: 0 };
+let boss = { y: 2000, speed: 1.2 };
+let world = [], stars = [], debris = [], enemies = [];
+let camX = 0, camY = 0, isCleared = false;
+const LVL_WIDTH = 10000;
+const TILE_SIZE = 20;
+
+function spawn(x, y, w, h, type, color) {
+    if(type === 'breakable') {
+        // Chaos Fracture: Spawn as individual tiles
+        for(let tx=0; tx<w; tx+=TILE_SIZE) {
+            for(let ty=0; ty<h; ty+=TILE_SIZE) {
+                world.push({ x: x+tx, y: y+ty, w: TILE_SIZE, h: TILE_SIZE, type: 'tile', color: [...color], isDebris: false, vx: 0, vy: 0 });
+            }
+        }
+    } else {
+        world.push({ x, y, w, h, type, color, rot: 0 });
+    }
+}
+
+function generate() {
+    world = []; debris = []; stars = []; player.wallHits = 0;
+    player.x = 200; player.y = 300; player.vx = 0; player.vy = 0; boss.y = 2500;
+    for(let i=0; i<100; i++) stars.push({ x: Math.random()*2000, y: Math.random()*1500, s: 2, d: Math.random()*0.5 });
+    
+    // Level End Trigger
+    world.push({ x: LVL_WIDTH-200, y: -500, w: 100, h: 2000, type: 'goal', color: [1, 1, 0, 0.3] });
+
+    for (let x = 0; x < LVL_WIDTH; x += 1000) {
+        spawn(x, -200, 60, 1400, 'breakable', [0.4, 0.4, 0.4, 1]); // Room Dividers
+        let ry = 400 + Math.random() * 400;
+        spawn(x + 200, ry, 500, 30, 'conveyer', [0.2, 0.5, 0.8, 1]);
+    }
+}
+
+// --- INPUTS ---
+const keys = {};
+const handleJump = () => { if(player.jumps < 2) { player.vy = -13; player.jumps++; } };
+const handleAttack = () => { player.attackTimer = 15; };
+
+const setupBtn = (id, key, callback) => {
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); if(callback) callback(); else keys[key] = true; }, {passive: false});
+    el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; }, {passive: false});
+    el.onmousedown = () => { if(callback) callback(); else keys[key] = true; };
+    el.onmouseup = () => keys[key] = false;
+};
+setupBtn('btnLeft', 'KeyA'); setupBtn('btnRight', 'KeyD');
+setupBtn('btnJump', null, handleJump); setupBtn('btnAttack', null, handleAttack);
+document.getElementById('slotHammer').onclick = () => player.tool = 'hammer';
+document.getElementById('slotKick').onclick = () => player.tool = 'kick';
+document.getElementById('regenBtn').onclick = generate;
+
+// --- PHYSICS ---
+function update() {
+    if (isCleared) return;
+    if (keys.KeyA) player.vx = -7; else if (keys.KeyD) player.vx = 7; else player.vx *= 0.85;
+    player.x += player.vx; resolveCollision('x');
+    player.vy += 0.6; player.y += player.vy; resolveCollision('y');
+
+    // Boss Logic
+    boss.y -= boss.speed;
+    document.getElementById('bossDist').innerText = Math.floor(boss.y - player.y);
+    if(player.y > boss.y) generate(); // Boss caught you
+
+    // Camera
+    camX += (player.x - canvas.width / 3 - camX) * 0.1;
+    camY += (player.y - canvas.height / 2 - camY) * 0.05;
+
+    // Hammer Swing & Fracture
+    if(player.attackTimer > 0) {
+        player.attackTimer--;
+        fractureCheck();
+    }
+
+    // Debris Physics
+    world.forEach(o => {
+        if(o.isDebris) {
+            o.vy += 0.4; o.x += o.vx; o.y += o.vy;
+            o.vx *= 0.98;
+            if(o.y > 2000) o.active = false;
+        }
+    });
+}
+
+function fractureCheck() {
+    const range = 60;
+    const hitX = player.x + (player.vx >= 0 ? player.w : -range);
+    const hitY = player.y - 20;
+
+    world.forEach(o => {
+        if(o.type === 'tile' && !o.isDebris) {
+            if(o.x > hitX - range && o.x < hitX + range && o.y > hitY - range && o.y < hitY + range) {
+                // Fractured! Turn into physics object
+                o.isDebris = true;
+                o.vx = (Math.random() - 0.5) * 10 + (player.vx * 0.5);
+                o.vy = (Math.random() - 2) * 5;
+                player.wallHits++;
+            }
+        }
+    });
+}
+
+function resolveCollision(axis) {
+    world.forEach((o, idx) => {
+        if(o.isDebris || o.active === false) return;
+        if(player.x < o.x + o.w && player.x + player.w > o.x && player.y < o.y + o.h && player.y + player.h > o.y) {
+            if(o.type === 'goal') {
+                isCleared = true;
+                document.getElementById('stats').style.display = 'block';
+                document.getElementById('statDetail').innerText = `Walls Fractured: ${player.wallHits}\nBoss Distance: ${Math.floor(boss.y - player.y)}m`;
+                return;
+            }
+            if(axis === 'x') {
+                player.x = (player.vx > 0) ? o.x - player.w : o.x + o.w;
+                player.vx = 0;
+            } else {
+                if(player.vy > 0) { player.y = o.y - player.h; player.vy = 0; player.jumps = 0; }
+                else { player.y = o.y + o.h; player.vy = 0; }
+            }
+        }
+    });
+}
+
+function draw() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+
+    const render = (x, y, w, h, col, r=0, sf=1) => {
+        gl.uniform2f(uTrans, x - camX * sf, y - camY * sf); gl.uniform2f(uScale, w, h);
+        gl.uniform1f(uRot, r); gl.uniform4f(uCol, ...col);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    stars.forEach(s => render(s.x, s.y, s.s, s.s, [1,1,1,s.d], 0, s.d));
+    
+    // Boss Visual
+    render(0, boss.y, LVL_WIDTH, 1000, [0.8, 0, 0, 0.4], 0, 1);
+
+    world.forEach(o => {
+        if(o.active === false) return;
+        render(o.x, o.y, o.w, o.h, o.color, o.isDebris ? o.x*0.01 : 0, 1);
+    });
+
+    // Hammer Swing Arc
+    if(player.attackTimer > 0) {
+        let arcX = player.x + (player.vx >= 0 ? 20 : -40);
+        render(arcX, player.y - 10, 40, 60, [1,1,1,0.5], player.attackTimer * 0.2, 1);
+    }
+
+    render(player.x, player.y, player.w, player.h, [0,1,1,1], 0, 1);
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+generate();
+draw();
+</script>
+</body>
+</html>
