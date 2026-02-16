@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL 2D - The Gauntlet</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; font-family: 'Courier New', monospace; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0f0; pointer-events: none; text-shadow: 2px 2px #000; }
+        .gen-btn { position: absolute; top: 20px; right: 20px; padding: 12px; background: #f0f; color: white; border: none; font-weight: bold; cursor: pointer; pointer-events: auto; }
+        .controls { position: absolute; bottom: 30px; left: 20px; right: 20px; display: flex; justify-content: space-between; pointer-events: none; }
+        .btn { width: 65px; height: 65px; background: rgba(0, 255, 0, 0.2); border: 2px solid #0f0; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #0f0; font-weight: bold; pointer-events: auto; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>THE GAUNTLET</h1>
+        <p>Rooms Generated via WFC Logic</p>
+    </div>
+    <button class="gen-btn" id="regenBtn">REBOOT SECTOR</button>
+    <div class="controls">
+        <div style="display:flex; gap:10px;">
+            <div class="btn" id="btnLeft">L</div>
+            <div class="btn" id="btnRight">R</div>
+        </div>
+        <div class="btn" id="btnJump" style="width:80px;">JUMP</div>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+// --- SHADERS (Updated for Rotation) ---
+const vsSource = `
+    attribute vec2 aPos;
+    uniform vec2 uRes, uTrans, uScale;
+    uniform float uRot;
+    void main() {
+        float s = sin(uRot), c = cos(uRot);
+        mat2 rot = mat2(c, s, -s, c);
+        vec2 p = (aPos - 0.5) * uScale; // Center for rotation
+        p = rot * p + 0.5 * uScale + uTrans;
+        gl_Position = vec4((p / uRes * 2.0 - 1.0) * vec2(1, -1), 0, 1);
+    }
+`;
+const fsSource = `precision mediump float; uniform vec4 uCol; void main() { gl_FragColor = uCol; }`;
+
+function mkShdr(t, s) { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; }
+const prog = gl.createProgram();
+gl.attachShader(prog, mkShdr(gl.VERTEX_SHADER, vsSource));
+gl.attachShader(prog, mkShdr(gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, 'uRes');
+const uTrans = gl.getUniformLocation(prog, 'uTrans');
+const uScale = gl.getUniformLocation(prog, 'uScale');
+const uRot = gl.getUniformLocation(prog, 'uRot');
+const uCol = gl.getUniformLocation(prog, 'uCol');
+
+// --- GAME OBJECTS ---
+let player = { x: 150, y: 300, w: 25, h: 25, vx: 0, vy: 0, jumps: 0 };
+let world = [], enemies = [], projectiles = [];
+const LVL_WIDTH = 12000;
+
+function spawn(x, y, w, h, type, color) {
+    world.push({ x, y, w, h, type, color, rot: 0, speed: (type === 'conveyer' ? 3 : 0) });
+}
+
+function generate() {
+    world = []; enemies = []; projectiles = [];
+    player.x = 150; player.y = 300;
+    
+    // Ceiling and Floor (Outer Walls)
+    spawn(0, 0, LVL_WIDTH, 40, 'wall', [0.2, 0.2, 0.2, 1]);
+    spawn(0, 800, LVL_WIDTH, 40, 'wall', [0.2, 0.2, 0.2, 1]);
+
+    for (let x = 0; x < LVL_WIDTH; x += 1000) {
+        // Build a "Room" wall
+        spawn(x, 40, 40, 760, 'wall', [0.3, 0.3, 0.3, 1]);
+        
+        // Random room contents
+        for(let i=0; i<3; i++) {
+            let rx = x + 150 + i*250;
+            let ry = 200 + Math.random() * 400;
+            
+            // Conveyer Belt
+            spawn(rx, ry, 200, 25, 'conveyer', [0.8, 0.8, 0.1, 1]);
+            
+            // Rotating Platform
+            world.push({ x: rx+100, y: ry-150, w: 150, h: 20, type: 'rotor', color: [0, 1, 0.5, 1], rot: 0 });
+
+            // Enemy: Fighter (Punch/Kick)
+            enemies.push({ x: rx + 50, y: ry - 40, w: 30, h: 30, type: 'fighter', timer: 0, vx: 0 });
+
+            // Monster: Shooter
+            if(Math.random() > 0.5) {
+                enemies.push({ x: rx + 100, y: ry - 250, w: 40, h: 40, type: 'shooter', timer: 0 });
+            }
+        }
+    }
+}
+
+// --- INPUTS ---
+const keys = {};
+const jump = () => { if(player.jumps < 2) { player.vy = -12; player.jumps++; } };
+window.onkeydown = e => { keys[e.code] = true; if(e.code==='Space') jump(); };
+window.onkeyup = e => keys[e.code] = false;
+document.getElementById('btnJump').ontouchstart = e => { e.preventDefault(); jump(); };
+document.getElementById('regenBtn').onclick = generate;
+
+// --- LOOP ---
+function update() {
+    // Player movement
+    if (keys.KeyA || keys.ArrowLeft) player.vx = -7;
+    else if (keys.KeyD || keys.ArrowRight) player.vx = 7;
+    else player.vx *= 0.8;
+
+    player.vy += 0.6;
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // World Logic & Collision
+    world.forEach(o => {
+        if(o.type === 'rotor') o.rot += 0.04;
+
+        let isColliding = player.x < o.x + o.w && player.x + player.w > o.x && 
+                         player.y < o.y + o.h && player.y + player.h > o.y;
+
+        if(isColliding) {
+            if(o.type === 'conveyer') player.x += o.speed;
+            if(player.vy > 0 && player.y + player.h - player.vy <= o.y) {
+                player.y = o.y - player.h; player.vy = 0; player.jumps = 0;
+            } else if(o.type === 'wall') {
+                player.x -= player.vx; // Basic wall stop
+            }
+        }
+    });
+
+    // Enemies Logic
+    enemies.forEach(e => {
+        e.timer++;
+        if(e.type === 'fighter') {
+            // Kick/Punch Lunge
+            if(e.timer % 120 === 0) e.vx = (player.x < e.x ? -10 : 10);
+            e.x += e.vx; e.vx *= 0.9;
+        } else if(e.type === 'shooter' && e.timer % 90 === 0) {
+            // Shoot Spikes
+            projectiles.push({ x: e.x, y: e.y, vx: (player.x < e.x ? -5 : 5), vy: 0 });
+        }
+        // Collision with player
+        if(Math.abs(player.x - e.x) < 25 && Math.abs(player.y - e.y) < 25) generate();
+    });
+
+    projectiles.forEach((p, i) => {
+        p.x += p.vx;
+        if(Math.abs(player.x - p.x) < 20 && Math.abs(player.y - p.y) < 20) generate();
+    });
+
+    if(player.y > 1000) generate();
+}
+
+function draw() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+    const cx = player.x - canvas.width / 3;
+
+    const render = (x, y, w, h, col, r=0) => {
+        gl.uniform2f(uTrans, x - cx, y); gl.uniform2f(uScale, w, h);
+        gl.uniform1f(uRot, r); gl.uniform4f(uCol, ...col);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    };
+
+    world.forEach(o => render(o.x, o.y, o.w, o.h, o.color, o.rot));
+    enemies.forEach(e => render(e.x, e.y, e.w, e.h, e.type === 'fighter' ? [1,0,0,1] : [0.8,0,1,1]));
+    projectiles.forEach(p => render(p.x, p.y, 10, 10, [1,1,1,1]));
+    render(player.x, player.y, player.w, player.h, [1, 1, 0, 1]); // Player
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+generate();
+draw();
+</script>
+</body>
+</html>
