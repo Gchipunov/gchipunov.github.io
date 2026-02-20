@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>intmain return 0 - Int Main Game Studio</title>
+    <meta data="User Agent raspberry pi back ping"></meta>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Remove default margins and scrollbars */
+            background-color: #000; /* Fallback background for non-JS or loading */
+        }
+        #main-webgl-canvas { /* Renamed for clarity - this will be your ONE canvas */
+            position: fixed; /* Position fixed relative to the viewport */
+            top: 0;
+            left: 0;
+            width: 100vw; /* Take full viewport width */
+            height: 100vh; /* Take full viewport height */
+            z-index: -1; /* Place it behind other content */
+            pointer-events: none; /* Allow clicks to pass through to content below */
+            display: block; /* Ensure it takes up space */
+        }
+        /* General styles for your content divs */
+        .content, .content1, .content2, .content3 {
+            position: relative;
+            z-index: 1; /* Ensure content is above the background */
+            color: white;
+            padding: 20px;
+            font-family: sans-serif;
+            background-color: rgba(0, 0, 0, 0.6); /* Slightly more opaque for readability */
+            border-radius: 8px; /* Slightly rounded corners */
+            box-sizing: border-box; /* Include padding in width calculation */
+            max-width: 800px; /* Constrain width for better readability */
+            margin-bottom: 20px; /* Space between content blocks */
+        }
+
+        /* Specific positioning for content blocks */
+        .content1 {
+            text-align: left; /* Align text within the block to the left */
+            margin-top: 20px; /* Top margin for the first block */
+            margin-left: 2vw; /* Smaller left margin for "far left" effect (2% of viewport width) */
+            margin-right: auto; /* Push content to the left */
+            max-width: 500px; /* Can be narrower for content1 if desired */
+        }
+
+        .content2 {
+            text-align: left; /* Align text within the block to the left */
+            margin-left: 5vw; /* Slightly larger left margin for "kinda left" (5% of viewport width) */
+            margin-right: auto; /* Push content to the left */
+            max-width: 600px; /* Can be adjusted */
+        }
+
+        .content3 {
+            text-align: left; /* Align text within the block to the left */
+            margin-left: 5vw; /* Same as content2 for "kinda left" */
+            margin-right: auto; /* Push content to the left */
+            max-width: 600px; /* Can be adjusted */
+        }
+
+        /* The original 'content' div, if still used, can also be left-aligned */
+        .content {
+            text-align: left;
+            margin-left: 2vw; /* Example: align with content1 or adjust as needed */
+            margin-right: auto;
+        }
+
+        p {
+            margin: 10px 0; /* Add some vertical spacing to paragraphs */
+        }
+        a {
+            color: #87CEEB; /* A nice link color that stands out from the dark background */
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <canvas id="main-webgl-canvas"></canvas>
+
+    <div class="content1">
+        <h1>CrimeWars: Source Characters </h1>
+    </div>
+  <div class="character1">
+        <p>Apocolypse_Villian</p>
+        <p><b>[Avatar <a href="/Characters/Apocolypse_Villian/">Apocolypse_Villian</a> ]</b> - Choas and Destruction</p>
+        <p><b>[Propoganda]</b> Magic</p>
+    </div>
+    <div class="content2">
+        <p>[CrimeWars: Source] - PC Fps</p>
+        <p><b>[Colo Duo Bagabundoes <a href="/ColoGame/">Colo Game</a> ]</b> - Android - and PC</p>
+        <p><b>[Alliance and Allegiance]</b> - Engine</p>
+    </div>
+    <div class="content3">
+        <p>Indie Game Libraries.</p>
+        <p>Pirate Colab Play Testing <a href="https://intmain.in/gametesters.php">gametesters.php Test your game</a></p>
+        <p>Twitch AI Bot <a href="twitchbot.html">untested</a></p>
+        <p>Tensor Flow NPC Bot:</p>
+        <p>ollama.hpp : (in dev>)</p>
+        <p>Discord: <a href="https://discord.gg/9pVfxZ4rXx">https://discord.gg/9pVfxZ4rXx</a></p>
+    </div>
+
+    <div class="content">
+        <h1>Welcome to My Website</h1>
+        <p>This is some overlay content.</p>
+        <p>The 3D model is visible as the background.</p>
+    </div>
+
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        // import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // Commented out for background
+
+        let scene, camera, renderer, model, skyMesh; // No controls if not using them
+        let startTime = Date.now(); // Store the start time for the uniform
+
+        function getRandomInRange(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // GLSL Vertex Shader (for sky)
+        const skyVertexShader = `
+            varying vec3 vWorldPosition;
+            varying vec3 vCameraPosition;
+
+            void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                vCameraPosition = cameraPosition;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        // GLSL Fragment Shader (for sky)
+        const skyFragmentShader = `
+            uniform vec3 u_horizonColor;
+            uniform vec3 u_zenithColor;
+            uniform float u_time; // <--- NEW: Time uniform
+
+            varying vec3 vWorldPosition;
+            varying vec3 vCameraPosition;
+
+            void main() {
+                vec3 viewDirection = normalize(vWorldPosition - vCameraPosition);
+                vec3 upDirection = vec3(0.0, 1.0, 0.0);
+
+                float t = dot(viewDirection, upDirection);
+                t = clamp(t * 0.5 + 0.5, 0.0, 1.0);
+                t = pow(t, 2.0);
+
+                // --- NEW: Use u_time to subtly shift colors ---
+                // Example 1: Oscillate a color component
+                 float colorShift = sin(u_time * 0.1) * 0.1; // Shift by +/- 0.1
+                 vec3 dynamicZenithColor = u_zenithColor + vec3(0.0, colorShift, 0.0); // Shift green component
+
+                // Example 2: More complex time-based mixing
+                // Creates a subtle pulsation or shift between the original colors
+                float blendFactor = sin(u_time * 0.05) * 0.5 + 0.5; // Oscillates between 0 and 1
+                vec3 interpolatedHorizon = mix(u_horizonColor, u_zenithColor * 0.7, blendFactor * 0.5); // Subtle blend
+                vec3 interpolatedZenith = mix(u_zenithColor, u_horizonColor * 0.7, blendFactor * 0.5);
+                      
+                // Use the interpolated colors for the final mix
+//                vec3 skyColor = mix(interpolatedHorizon, interpolatedZenith, t);
+ vec3 skyColor = mix(interpolatedHorizon, interpolatedZenith, sin(u_time));
+vec3 greyColor = vec3(0.5, 0.5, 0.5);
+skyColor = mix(skyColor,greyColor, sin(u_time * 2.5) ) ;
+
+               // vec3 skyColor = mix(skyColor, dynamicZenithColor, sin(u_time) );                
+// --- END NEW ---
+
+                gl_FragColor = vec4(skyColor, 1.0);
+            }
+        `;
+
+
+        function init() {
+            const canvas = document.getElementById('main-webgl-canvas');
+
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(0, 5, 15);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setClearColor(0x000000, 0);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(0, 10, 5);
+            scene.add(directionalLight);
+
+            const skyGeometry = new THREE.SphereGeometry(1500, 32, 15);
+            const skyMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    u_horizonColor: { value: new THREE.Color(0x87CEEB) }, // Light blue (sky blue)
+                    u_zenithColor:  { value: new THREE.Color(0x4682B4) },  // Steel blue (deeper blue)
+                    u_time:         { value: 0.0 } // <--- NEW: Initialize time uniform
+                },
+                vertexShader: skyVertexShader,
+                fragmentShader: skyFragmentShader,
+                side: THREE.BackSide
+            });
+            skyMesh = new THREE.Mesh(skyGeometry, skyMaterial);
+            scene.add(skyMesh);
+
+            const loader = new GLTFLoader();
+            loader.load('Game_Scene8.glb', function (gltf) {
+                model = gltf.scene;
+
+                const range = 10;
+                model.position.x = getRandomInRange(-range, range) - 40  ;
+                model.position.y = getRandomInRange(-range, range) + 7 ;
+                model.position.z = getRandomInRange(-range, range) - 5 ;
+
+                model.scale.set(1, 1, 1);
+model.rotation.y += getRandomInRange(0,360);
+
+                scene.add(model);
+            }, undefined, function (error) {
+                console.error('Error loading GLTF model:', error);
+            });
+
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // --- NEW: Update the time uniform ---
+            const elapsedTime = (Date.now() - startTime) * 0.001; // Time in seconds
+            if (skyMesh) {
+                skyMesh.material.uniforms.u_time.value = elapsedTime;
+            }
+            // --- END NEW ---
+
+            if (model) {
+                model.rotation.x += 0.0005;
+                model.rotation.y += 0.0015;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
