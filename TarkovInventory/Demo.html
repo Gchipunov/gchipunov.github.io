@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Spatial Inventory</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1b; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #info { position: absolute; top: 10px; left: 10px; color: #aaa; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="info">WebGL Inventory: Drag items to Grid or Loadout slots.</div>
+    <canvas id="glCanvas"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/regl/2.1.0/regl.min.js"></script>
+<script>
+const canvas = document.getElementById('glCanvas');
+const regl = createREGL(canvas);
+
+// --- Configuration & State ---
+const GRID_SIZE = 50;
+const PADDING = 2;
+const INVENTORY_COLS = 10;
+const INVENTORY_ROWS = 8;
+
+let state = {
+    mouse: [0, 0],
+    draggingItem: null,
+    dragOffset: [0, 0],
+    // Inventory Grid (null = empty)
+    grid: Array(INVENTORY_COLS * INVENTORY_ROWS).fill(null),
+    // Loadout Slots
+    slots: {
+        head: { x: 600, y: 100, w: 2, h: 2, item: null, type: 'hat' },
+        body: { x: 600, y: 220, w: 2, h: 3, item: null, type: 'armor' },
+        primary: { x: 750, y: 150, w: 5, h: 2, item: null, type: 'weapon' }
+    },
+    items: [
+        { id: 1, name: 'AK-74', type: 'weapon', w: 5, h: 2, x: 0, y: 0, color: [0.4, 0.3, 0.2, 1] },
+        { id: 2, name: 'Helmet', type: 'hat', w: 2, h: 2, x: 5, y: 0, color: [0.2, 0.4, 0.2, 1] },
+        { id: 3, name: 'Vest', type: 'armor', w: 2, h: 3, x: 0, y: 3, color: [0.3, 0.3, 0.4, 1] },
+        { id: 4, name: 'Ammo', type: 'stackable', w: 1, h: 1, x: 3, y: 3, count: 60, color: [0.5, 0.5, 0.1, 1] }
+    ]
+};
+
+// --- Rendering Logic ---
+
+// Draw Rectangles (The foundation of the UI)
+const drawRect = regl({
+    frag: `
+    precision mediump float;
+    uniform vec4 color;
+    void main() { gl_FragColor = color; }`,
+    vert: `
+    attribute vec2 position;
+    uniform vec2 offset;
+    uniform vec2 scale;
+    uniform vec2 resolution;
+    void main() {
+        vec2 pos = (position * scale + offset) / resolution * 2.0 - 1.0;
+        gl_Position = vec4(pos.x, -pos.y, 0, 1);
+    }`,
+    attributes: { position: [[0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [1, 1]] },
+    uniforms: {
+        color: regl.prop('color'),
+        offset: regl.prop('offset'),
+        scale: regl.prop('scale'),
+        resolution: () => [canvas.width, canvas.height]
+    },
+    count: 6
+});
+
+function render() {
+    regl.clear({ color: [0.1, 0.1, 0.1, 1], depth: 1 });
+
+    // 1. Draw Background Grid
+    for (let i = 0; i < INVENTORY_COLS; i++) {
+        for (let j = 0; j < INVENTORY_ROWS; j++) {
+            drawRect({
+                offset: [50 + i * GRID_SIZE, 100 + j * GRID_SIZE],
+                scale: [GRID_SIZE - PADDING, GRID_SIZE - PADDING],
+                color: [0.2, 0.2, 0.2, 1]
+            });
+        }
+    }
+
+    // 2. Draw Loadout Slots
+    Object.values(state.slots).forEach(slot => {
+        drawRect({
+            offset: [slot.x, slot.y],
+            scale: [slot.w * GRID_SIZE, slot.h * GRID_SIZE],
+            color: [0.15, 0.15, 0.15, 1]
+        });
+    });
+
+    // 3. Draw Items
+    state.items.forEach(item => {
+        if (item === state.draggingItem) return; // Draw dragging item last
+        drawItem(item);
+    });
+
+    if (state.draggingItem) {
+        drawItem(state.draggingItem, state.mouse[0] - state.dragOffset[0], state.mouse[1] - state.dragOffset[1]);
+    }
+}
+
+function drawItem(item, overrideX, overrideY) {
+    const x = overrideX !== undefined ? overrideX : (item.inSlot ? item.slotRef.x : 50 + item.x * GRID_SIZE);
+    const y = overrideY !== undefined ? overrideY : (item.inSlot ? item.slotRef.y : 100 + item.y * GRID_SIZE);
+    
+    drawRect({
+        offset: [x, y],
+        scale: [item.w * GRID_SIZE - PADDING, item.h * GRID_SIZE - PADDING],
+        color: item.color
+    });
+}
+
+// --- Interaction Logic ---
+
+canvas.addEventListener('mousedown', (e) => {
+    const mx = e.clientX, my = e.clientY;
+    state.items.forEach(item => {
+        const ix = item.inSlot ? item.slotRef.x : 50 + item.x * GRID_SIZE;
+        const iy = item.inSlot ? item.slotRef.y : 100 + item.y * GRID_SIZE;
+        
+        if (mx > ix && mx < ix + item.w * GRID_SIZE && my > iy && my < iy + item.h * GRID_SIZE) {
+            state.draggingItem = item;
+            state.dragOffset = [mx - ix, my - iy];
+            if (item.inSlot) {
+                item.slotRef.item = null;
+                item.inSlot = false;
+            }
+        }
+    });
+});
+
+window.addEventListener('mousemove', (e) => {
+    state.mouse = [e.clientX, e.clientY];
+    if (state.draggingItem) render();
+});
+
+window.addEventListener('mouseup', () => {
+    if (!state.draggingItem) return;
+    const item = state.draggingItem;
+    const mx = state.mouse[0] - state.dragOffset[0];
+    const my = state.mouse[1] - state.dragOffset[1];
+
+    // Check Loadout Collision
+    let placed = false;
+    Object.keys(state.slots).forEach(key => {
+        const s = state.slots[key];
+        if (mx > s.x - 20 && mx < s.x + 20 && my > s.y - 20 && my < s.y + 20) {
+            if (s.type === item.type && !s.item) {
+                item.inSlot = true;
+                item.slotRef = s;
+                s.item = item;
+                placed = true;
+            }
+        }
+    });
+
+    // Check Grid Collision
+    if (!placed) {
+        const gridX = Math.round((mx - 50) / GRID_SIZE);
+        const gridY = Math.round((my - 100) / GRID_SIZE);
+        
+        if (gridX >= 0 && gridX + item.w <= INVENTORY_COLS && gridY >= 0 && gridY + item.h <= INVENTORY_ROWS) {
+            item.x = gridX;
+            item.y = gridY;
+            item.inSlot = false;
+        }
+    }
+
+    state.draggingItem = null;
+    render();
+});
+
+// Initial Render & Resize
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    render();
+});
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+render();
+
+</script>
+</body>
+</html>
