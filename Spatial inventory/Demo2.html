@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL FPS + Mobile Controls</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* UI & Inventory */
+        #inventory {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid #555;
+            display: none; grid-template-columns: repeat(10, 40px);
+            grid-template-rows: repeat(5, 40px); gap: 2px; padding: 5px;
+            z-index: 100;
+        }
+        .slot { width: 40px; height: 40px; background: #222; border: 1px solid #444; }
+        .item { 
+            position: absolute; background: #66a; border: 1px solid #aaf; 
+            display: flex; align-items: center; justify-content: center; font-size: 10px; color: white;
+        }
+
+        /* Mobile Controls */
+        .mobile-ui { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; pointer-events: none; }
+        .dpad { display: grid; grid-template-columns: repeat(3, 60px); gap: 5px; pointer-events: auto; }
+        .btn { 
+            width: 60px; height: 60px; background: rgba(255,255,255,0.2); 
+            border: 2px solid #fff; border-radius: 10px; display: flex; 
+            align-items: center; justify-content: center; color: white; font-weight: bold;
+            user-select: none; -webkit-user-select: none;
+        }
+        .btn:active { background: rgba(255,255,255,0.5); }
+        #invBtn { pointer-events: auto; background: rgba(200, 100, 0, 0.4); }
+        
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 1px solid white; border-radius: 50%; transform: translate(-50%, -50%); }
+        .hint { position: absolute; top: 10px; width: 100%; text-align: center; color: #aaa; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <div class="hint">WASD/D-Pad to Move | Swipe Right-Half to Look | 'I'/BTN for Inv</div>
+    <div id="crosshair"></div>
+    
+    <div id="inventory"></div>
+
+    <div class="mobile-ui">
+        <div class="dpad">
+            <div></div><div class="btn" id="btn-w">W</div><div></div>
+            <div class="btn" id="btn-a">A</div><div class="btn" id="btn-s">S</div><div class="btn" id="btn-d">D</div>
+        </div>
+        <div class="btn" id="invBtn">INV</div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const invElement = document.getElementById('inventory');
+
+// Game State
+const world = [
+    [1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,1,1,0,1,1,1,0,1],
+    [1,0,0,0,0,0,0,0,0,1],
+    [1,0,1,0,0,0,0,1,0,1],
+    [1,1,1,1,1,1,1,1,1,1],
+];
+
+const player = { x: 2, y: 2, rot: 0, speed: 0.05 };
+const keys = {};
+let inventoryOpen = false;
+
+// --- INVENTORY LOGIC ---
+function initInventory() {
+    invElement.innerHTML = '';
+    for(let i=0; i < 50; i++) {
+        const slot = document.createElement('div');
+        slot.className = 'slot';
+        invElement.appendChild(slot);
+    }
+    addItem(1, 1, 2, 1, "MED");
+    addItem(5, 2, 1, 2, "AMMO");
+}
+
+function addItem(x, y, w, h, label) {
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.innerText = label;
+    item.style.width = (w * 42 - 2) + 'px';
+    item.style.height = (h * 42 - 2) + 'px';
+    item.style.left = (x * 42 + 5) + 'px';
+    item.style.top = (y * 42 + 5) + 'px';
+    invElement.appendChild(item);
+}
+
+function toggleInventory() {
+    inventoryOpen = !inventoryOpen;
+    invElement.style.display = inventoryOpen ? 'grid' : 'none';
+}
+
+// --- TOUCH HANDLING ---
+let lastTouchX = null;
+
+canvas.addEventListener('touchstart', e => {
+    // Only track touch for looking if it's on the right half of the screen
+    const touch = e.touches[0];
+    if (touch.clientX > window.innerWidth / 2) {
+        lastTouchX = touch.clientX;
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+    if (inventoryOpen) return;
+    const touch = e.touches[0];
+    if (lastTouchX !== null) {
+        const deltaX = touch.clientX - lastTouchX;
+        player.rot += deltaX * 0.008;
+        lastTouchX = touch.clientX;
+    }
+    e.preventDefault(); // Prevent scrolling
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => { lastTouchX = null; });
+
+// Mobile Button Logic
+const setupBtn = (id, key) => {
+    const btn = document.getElementById(id);
+    btn.addEventListener('touchstart', (e) => { keys[key] = true; e.preventDefault(); });
+    btn.addEventListener('touchend', (e) => { keys[key] = false; e.preventDefault(); });
+};
+
+setupBtn('btn-w', 'w');
+setupBtn('btn-a', 'a');
+setupBtn('btn-s', 's');
+setupBtn('btn-d', 'd');
+document.getElementById('invBtn').addEventListener('touchstart', (e) => { 
+    toggleInventory(); 
+    e.preventDefault(); 
+});
+
+// --- KEYBOARD HANDLING ---
+window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    keys[k] = true;
+    if (k === 'i') toggleInventory();
+});
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+// --- RENDER & UPDATE ---
+function render() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    ctx.fillStyle = "#333"; ctx.fillRect(0, canvas.height/2, canvas.width, canvas.height/2);
+    ctx.fillStyle = "#111"; ctx.fillRect(0, 0, canvas.width, canvas.height/2);
+
+    const numRays = canvas.width / 2;
+    const fov = Math.PI / 3;
+
+    for (let i = 0; i < numRays; i++) {
+        const rayAngle = (player.rot - fov / 2) + (i / numRays) * fov;
+        let dist = 0;
+        let hit = false;
+        const eyeX = Math.cos(rayAngle), eyeY = Math.sin(rayAngle);
+
+        while (!hit && dist < 15) {
+            dist += 0.1;
+            let tx = Math.floor(player.x + eyeX * dist);
+            let ty = Math.floor(player.y + eyeY * dist);
+            if (world[ty] && world[ty][tx] === 1) hit = true;
+        }
+
+        const h = canvas.height / dist;
+        const color = Math.max(0, 255 - (dist * 20));
+        ctx.fillStyle = `rgb(${color}, ${color}, ${color})`;
+        ctx.fillRect(i * 2, (canvas.height - h) / 2, 2, h);
+    }
+}
+
+function update() {
+    if (!inventoryOpen) {
+        let nx = player.x, ny = player.y;
+        if (keys['w']) { nx += Math.cos(player.rot) * player.speed; ny += Math.sin(player.rot) * player.speed; }
+        if (keys['s']) { nx -= Math.cos(player.rot) * player.speed; ny -= Math.sin(player.rot) * player.speed; }
+        if (keys['a']) { nx += Math.sin(player.rot) * player.speed; ny -= Math.cos(player.rot) * player.speed; }
+        if (keys['d']) { nx -= Math.sin(player.rot) * player.speed; ny += Math.cos(player.rot) * player.speed; }
+        
+        if (world[Math.floor(ny)] && world[Math.floor(ny)][Math.floor(nx)] !== 1) {
+            player.x = nx; player.y = ny;
+        }
+    }
+    render();
+    requestAnimationFrame(update);
+}
+
+initInventory();
+update();
+</script>
+</body>
+</html>
