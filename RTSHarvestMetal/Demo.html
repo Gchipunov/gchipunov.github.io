@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Scrap RTS</title>
+    <style>
+        body { margin: 0; background: #222; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; background: #111; cursor: crosshair; }
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+        .panel { background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; pointer-events: auto; }
+        button { cursor: pointer; padding: 8px 12px; background: #44a; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #66c; }
+        .stats { margin-bottom: 10px; font-size: 18px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="panel">
+        <div class="stats">Metal: <span id="metalCount">0</span></div>
+        <button onclick="buildUnit('tank')">Build Tank (50 Metal)</button>
+        <p style="font-size: 12px; color: #aaa;">L-Click: Select | R-Click: Move</p>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+/** SHADERS **/
+const vsSource = `
+    attribute vec2 aPosition;
+    attribute vec3 aColor;
+    uniform vec2 uResolution;
+    varying vec3 vColor;
+    void main() {
+        vec2 zeroToOne = aPosition / uResolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        gl_PointSize = 10.0;
+        vColor = aColor;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 vColor;
+    void main() {
+        gl_FragColor = vec4(vColor, 1.0);
+    }
+`;
+
+/** GAME STATE **/
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl');
+let metal = 100;
+let units = [];
+let scrap = [];
+let selectedUnit = null;
+
+const UNIT_TYPES = {
+    HQ: { color: [0.8, 0.2, 0.2], size: 30 },
+    HARVESTER: { color: [0.2, 0.8, 0.2], size: 10, speed: 2, cost: 30 },
+    TANK: { color: [0.3, 0.3, 1.0], size: 12, speed: 1.5, cost: 50 }
+};
+
+function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Initial Buildings & Units
+    units.push({ x: 100, y: 100, type: 'HQ', targetX: 100, targetY: 100 });
+    units.push({ x: 150, y: 150, type: 'HARVESTER', targetX: 150, targetY: 150, cargo: 0 });
+    
+    // Generate random scrap
+    for(let i=0; i<20; i++) spawnScrap();
+
+    // Controls
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function spawnScrap() {
+    scrap.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, amount: 10 });
+}
+
+function handleMouseDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (e.button === 0) { // Left Click: Select
+        selectedUnit = units.find(u => Math.hypot(u.x - mx, u.y - my) < 20) || null;
+    } else if (e.button === 2) { // Right Click: Command
+        if (selectedUnit && selectedUnit.type !== 'HQ') {
+            selectedUnit.targetX = mx;
+            selectedUnit.targetY = my;
+            selectedUnit.state = 'MOVE';
+        }
+    }
+}
+
+function buildUnit(type) {
+    const cost = UNIT_TYPES[type.toUpperCase()].cost;
+    if (metal >= cost) {
+        metal -= cost;
+        units.push({ x: 120, y: 120, type: type.toUpperCase(), targetX: 150, targetY: 150 });
+    }
+}
+
+/** ENGINE **/
+function update() {
+    document.getElementById('metalCount').innerText = Math.floor(metal);
+
+    units.forEach(u => {
+        const config = UNIT_TYPES[u.type];
+        
+        // Harvester Logic
+        if (u.type === 'HARVESTER') {
+            if (u.cargo >= 10) { // Return to HQ
+                u.targetX = units[0].x;
+                u.targetY = units[0].y;
+                if (Math.hypot(u.x - u.targetX, u.y - u.targetY) < 10) {
+                    metal += u.cargo;
+                    u.cargo = 0;
+                }
+            } else { // Find scrap
+                let nearest = scrap[0];
+                if (nearest) {
+                    u.targetX = nearest.x;
+                    u.targetY = nearest.y;
+                    if (Math.hypot(u.x - u.targetX, u.y - u.targetY) < 5) {
+                        u.cargo += 10;
+                        scrap.splice(0, 1);
+                        setTimeout(spawnScrap, 3000);
+                    }
+                }
+            }
+        }
+
+        // Movement
+        const dx = u.targetX - u.x;
+        const dy = u.targetY - u.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 2 && config.speed) {
+            u.x += (dx / dist) * config.speed;
+            u.y += (dy / dist) * config.speed;
+        }
+    });
+}
+
+function render() {
+    gl.clearColor(0.08, 0.08, 0.08, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const program = createProgram(gl, vsSource, fsSource);
+    gl.useProgram(program);
+
+    const posAttrib = gl.getAttribLocation(program, "aPosition");
+    const colAttrib = gl.getAttribLocation(program, "aColor");
+    const resUniform = gl.getUniformLocation(program, "uResolution");
+
+    gl.uniform2f(resUniform, canvas.width, canvas.height);
+
+    let vertices = [];
+
+    // Draw Scrap
+    scrap.forEach(s => {
+        vertices.push(s.x, s.y, 0.5, 0.5, 0.5);
+    });
+
+    // Draw Units
+    units.forEach(u => {
+        let color = [...UNIT_TYPES[u.type].color];
+        if (u === selectedUnit) color = [1, 1, 1]; // Highlight selection
+        vertices.push(u.x, u.y, ...color);
+    });
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(posAttrib);
+    gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 20, 0);
+    gl.enableVertexAttribArray(colAttrib);
+    gl.vertexAttribPointer(colAttrib, 3, gl.FLOAT, false, 20, 8);
+
+    gl.drawArrays(gl.POINTS, 0, vertices.length / 5);
+}
+
+function createProgram(gl, vs, fs) {
+    const vShader = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vShader, vs);
+    gl.compileShader(vShader);
+    const fShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fShader, fs);
+    gl.compileShader(fShader);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vShader);
+    gl.attachShader(prog, fShader);
+    gl.linkProgram(prog);
+    return prog;
+}
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+init();
+</script>
+</body>
+</html>
