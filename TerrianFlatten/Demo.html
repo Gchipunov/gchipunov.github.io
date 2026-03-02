@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Terrain Flattener</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; color: white;
+            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px;
+            pointer-events: none;
+        }
+        .key { color: #ffeb3b; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h2>Terrain Flattener Sim</h2>
+    <p><span class="key">WASD / Arrows</span>: Move Vehicle</p>
+    <p><span class="key">TAB</span>: Switch Vehicle</p>
+    <p><span class="key">SPACE</span>: Active Tool (Flatten / Dump)</p>
+    <hr>
+    <p id="active-txt">Active: <span style="color:yellow">Bulldozer (Flatten)</span></p>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script>
+/** * SHADERS
+ */
+const vsSource = `
+    attribute vec4 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec4 aColor;
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uNormalMatrix;
+    varying lowp vec4 vColor;
+    varying lowp vec3 vLighting;
+    void main(void) {
+        gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+        vColor = aColor;
+        vec3 ambientLight = vec3(0.3, 0.3, 0.3);
+        vec3 directionalLightColor = vec3(1, 1, 1);
+        vec3 directionalVector = normalize(vec3(0.85, 0.8, 0.75));
+        vec4 transformedNormal = uNormalMatrix * vec4(aVertexNormal, 1.0);
+        float directional = max(dot(transformedNormal.xyz, directionalVector), 0.0);
+        vLighting = ambientLight + (directionalLightColor * directional);
+    }
+`;
+
+const fsSource = `
+    varying lowp vec4 vColor;
+    varying lowp vec3 vLighting;
+    void main(void) {
+        gl_FragColor = vec4(vColor.rgb * vLighting, vColor.a);
+    }
+`;
+
+/**
+ * MATH HELPERS
+ */
+const m4 = {
+    identity: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+    perspective: (fovy, aspect, near, far) => {
+        let f = 1.0 / Math.tan(fovy / 2), nf = 1 / (near - far);
+        return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]);
+    },
+    translate: (m, v) => {
+        let res = new Float32Array(m);
+        res[12] = m[0]*v[0] + m[4]*v[1] + m[8]*v[2] + m[12];
+        res[13] = m[1]*v[0] + m[5]*v[1] + m[9]*v[2] + m[13];
+        res[14] = m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14];
+        res[15] = m[3]*v[0] + m[7]*v[1] + m[11]*v[2] + m[15];
+        return res;
+    },
+    rotateY: (m, rad) => {
+        let res = new Float32Array(m), s = Math.sin(rad), c = Math.cos(rad);
+        res[0] = m[0]*c - m[8]*s; res[2] = m[0]*s + m[8]*c;
+        res[4] = m[4]*c - m[12]*s; res[6] = m[4]*s + m[12]*c;
+        return res;
+    },
+    inverse: (m) => {
+        let res = new Float32Array(16); // Simplified for this specific use case
+        res[0]=m[0]; res[1]=m[4]; res[2]=m[8];
+        res[4]=m[1]; res[5]=m[5]; res[6]=m[9];
+        res[8]=m[2]; res[9]=m[6]; res[10]=m[10];
+        res[15]=1; return res;
+    }
+};
+
+/**
+ * GAME ENGINE
+ */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) alert("WebGL not supported");
+
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+
+const programInfo = {
+    program,
+    attribLocations: {
+        vertexPosition: gl.getAttribLocation(program, 'aVertexPosition'),
+        vertexNormal: gl.getAttribLocation(program, 'aVertexNormal'),
+        color: gl.getAttribLocation(program, 'aColor'),
+    },
+    uniformLocations: {
+        projectionMatrix: gl.getUniformLocation(program, 'uProjectionMatrix'),
+        modelViewMatrix: gl.getUniformLocation(program, 'uModelViewMatrix'),
+        normalMatrix: gl.getUniformLocation(program, 'uNormalMatrix'),
+    },
+};
+
+// --- Terrain Setup ---
+const GRID_SIZE = 64;
+const WORLD_SCALE = 40;
+let heights = new Float32Array(GRID_SIZE * GRID_SIZE);
+for(let i=0; i<heights.length; i++) heights[i] = Math.random() * 0.5;
+
+function getTerrainData() {
+    const pos = [], norm = [], col = [], idx = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+            let px = (x / GRID_SIZE - 0.5) * WORLD_SCALE;
+            let pz = (y / GRID_SIZE - 0.5) * WORLD_SCALE;
+            let h = heights[y * GRID_SIZE + x];
+            pos.push(px, h, pz);
+            norm.push(0, 1, 0); 
+            // Color based on height
+            if (h > 1.5) col.push(0.5, 0.4, 0.3, 1); // Mountain/Dirt
+            else col.push(0.2, 0.6, 0.2, 1); // Grass
+            
+            if (x < GRID_SIZE - 1 && y < GRID_SIZE - 1) {
+                let i = y * GRID_SIZE + x;
+                idx.push(i, i + 1, i + GRID_SIZE);
+                idx.push(i + 1, i + GRID_SIZE + 1, i + GRID_SIZE);
+            }
+        }
+    }
+    return { pos: new Float32Array(pos), norm: new Float32Array(norm), col: new Float32Array(col), idx: new Uint16Array(idx) };
+}
+
+// --- Vehicles ---
+let activeVehicle = 0; // 0: Dozer, 1: Truck
+const vehicles = [
+    { x: -5, z: -5, rot: 0, color: [1, 0.9, 0, 1], type: 'bulldozer' },
+    { x: 5, z: 5, rot: 0, color: [0.8, 0.2, 0.2, 1], type: 'truck' }
+];
+
+const keys = {};
+window.onkeydown = (e) => { 
+    keys[e.key.toLowerCase()] = true; 
+    if(e.key === 'Tab') { 
+        e.preventDefault(); 
+        activeVehicle = 1 - activeVehicle; 
+        document.getElementById('active-txt').innerHTML = activeVehicle === 0 ? 
+            'Active: <span style="color:yellow">Bulldozer (Flatten)</span>' : 
+            'Active: <span style="color:#ff4444">Dirt Truck (Add Slope)</span>';
+    }
+};
+window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+function update() {
+    const v = vehicles[activeVehicle];
+    if (keys['w'] || keys['arrowup']) { v.x += Math.sin(v.rot) * 0.15; v.z += Math.cos(v.rot) * 0.15; }
+    if (keys['s'] || keys['arrowdown']) { v.x -= Math.sin(v.rot) * 0.1; v.z -= Math.cos(v.rot) * 0.1; }
+    if (keys['a'] || keys['arrowleft']) v.rot += 0.05;
+    if (keys['d'] || keys['arrowright']) v.rot -= 0.05;
+
+    // Terrain Modification
+    if (keys[' ']) {
+        let gx = Math.floor(((v.x / WORLD_SCALE) + 0.5) * GRID_SIZE);
+        let gy = Math.floor(((v.z / WORLD_SCALE) + 0.5) * GRID_SIZE);
+        let radius = 3;
+        
+        for(let i = -radius; i <= radius; i++) {
+            for(let j = -radius; j <= radius; j++) {
+                let nx = gx + i, ny = gy + j;
+                if(nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                    let index = ny * GRID_SIZE + nx;
+                    if(v.type === 'bulldozer') {
+                        // Flatten to current vehicle ground level
+                        heights[index] = Math.max(0, heights[index] * 0.9 + 0.1 * 0.1);
+                    } else {
+                        // Add dirt
+                        heights[index] += 0.05;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- Drawing ---
+const boxBuffer = gl.createBuffer();
+const boxData = new Float32Array([
+    -0.5,-0.5,0.8, 0.5,-0.5,0.8, 0.5,0.5,0.8, -0.5,0.5,0.8, // Front
+    -0.5,-0.5,-0.8, 0.5,-0.5,-0.8, 0.5,0.5,-0.8, -0.5,0.5,-0.8 // Back
+]);
+
+function draw(time) {
+    update();
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    const aspect = canvas.clientWidth / canvas.clientHeight;
+    const projectionMatrix = m4.perspective(45 * Math.PI / 180, aspect, 0.1, 100.0);
+    
+    // Camera follows active vehicle
+    const camV = vehicles[activeVehicle];
+    let viewMatrix = m4.identity();
+    viewMatrix = m4.translate(viewMatrix, [0, -15, -30]);
+    viewMatrix = m4.rotateY(viewMatrix, 0); // Static high angle
+
+    // Draw Terrain
+    const terrain = getTerrainData();
+    drawObject(terrain.pos, terrain.norm, terrain.col, terrain.idx, m4.identity(), projectionMatrix, viewMatrix);
+
+    // Draw Vehicles
+    vehicles.forEach(veh => {
+        let m = m4.translate(m4.identity(), [veh.x, 0.5, veh.z]);
+        m = m4.rotateY(m, veh.rot);
+        const vCol = new Float32Array(24 * 4).fill(0).map((_,i) => veh.color[i%4]);
+        const vPos = new Float32Array([
+            -0.5,0,1, 0.5,0,1, 0.5,0.8,1, -0.5,0.8,1, // Cube-ish
+            -0.5,0,-1, 0.5,0,-1, 0.5,0.8,-1, -0.5,0.8,-1,
+            -0.5,0,1, -0.5,0.8,1, -0.5,0.8,-1, -0.5,0,-1,
+            0.5,0,1, 0.5,0.8,1, 0.5,0.8,-1, 0.5,0,-1
+        ]);
+        const vNorm = new Float32Array(vPos.length).fill(1);
+        const vIdx = new Uint16Array([0,1,2, 0,2,3, 4,5,6, 4,6,7, 8,9,10, 8,10,11, 12,13,14, 12,14,15]);
+        drawObject(vPos, vNorm, vCol, vIdx, m, projectionMatrix, viewMatrix);
+    });
+
+    requestAnimationFrame(draw);
+}
+
+function drawObject(pos, norm, col, idx, modelMat, projMat, viewMat) {
+    const mvMatrix = m4.identity(); // Simplified combination
+    // Combine matrices
+    const finalMV = m4.translate(viewMat, [modelMat[12], modelMat[13], modelMat[14]]);
+    const rotMV = m4.rotateY(finalMV, Math.atan2(modelMat[2], modelMat[0]));
+
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+    const normBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, norm, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(programInfo.attribLocations.vertexNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
+
+    const colBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, col, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(programInfo.attribLocations.color, 4, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.color);
+
+    const idxBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+
+    gl.useProgram(programInfo.program);
+    gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projMat);
+    gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, rotMV);
+    gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, m4.inverse(rotMV));
+
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+}
+
+// Handle resizing
+window.onresize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+};
+window.onresize();
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
