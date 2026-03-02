@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Infinite RTS</title>
+    <style>
+        body { margin: 0; background: #111; color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; }
+        
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; width: calc(100% - 20px); display: flex; flex-direction: column; gap: 10px; }
+        .panel { background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; pointer-events: auto; border: 1px solid #444; width: fit-content; }
+        
+        .resources { display: flex; gap: 15px; margin-bottom: 8px; font-size: 14px; }
+        .metal { color: #aaa; } .wood { color: #4f4; } .gold { color: #fd0; }
+        
+        .coords { font-family: monospace; color: #0f0; font-size: 12px; margin-bottom: 5px; }
+        
+        button { cursor: pointer; padding: 10px; background: #44a; color: white; border: none; border-radius: 4px; font-weight: bold; width: 100%; }
+        button:disabled { background: #222; color: #555; }
+
+        /* Mobile specific controls */
+        #radar { position: absolute; bottom: 20px; right: 20px; width: 120px; height: 120px; background: rgba(0,40,0,0.6); border: 2px solid #0f0; border-radius: 50%; pointer-events: none; overflow: hidden; }
+        #radar-ping { position: absolute; width: 4px; height: 4px; background: white; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+        
+        #joystick-container { position: absolute; bottom: 20px; left: 20px; width: 100px; height: 100px; background: rgba(255,255,255,0.1); border-radius: 50%; pointer-events: auto; }
+        #joystick-knob { position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; background: #66c; border-radius: 50%; transform: translate(-50%, -50%); }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="panel">
+        <div class="coords">Cam X: <span id="camX">0</span> | Cam Y: <span id="camY">0</span></div>
+        <div class="resources">
+            <span class="metal">M: <span id="metalCount">0</span></span>
+            <span class="wood">W: <span id="woodCount">0</span></span>
+            <span class="gold">G: <span id="goldCount">0</span></span>
+        </div>
+        <button id="btnTank" onclick="buildUnit('TANK')">Build Tank (50M, 20G)</button>
+    </div>
+</div>
+
+<div id="joystick-container">
+    <div id="joystick-knob"></div>
+</div>
+
+<div id="radar">
+    <div id="radar-ping"></div>
+    <canvas id="radarCanvas" width="120" height="120"></canvas>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+/** SHADERS **/
+const vsSource = `
+    attribute vec2 aPosition;
+    attribute vec3 aColor;
+    attribute float aSize;
+    uniform vec2 uResolution;
+    uniform vec2 uCamera;
+    varying vec3 vColor;
+    void main() {
+        vec2 worldPos = aPosition - uCamera;
+        vec2 zeroToOne = worldPos / uResolution;
+        vec2 clipSpace = (zeroToOne * 2.0) - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        gl_PointSize = aSize;
+        vColor = aColor;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 vColor;
+    void main() {
+        if (distance(gl_PointCoord, vec2(0.5)) > 0.5) discard;
+        gl_FragColor = vec4(vColor, 1.0);
+    }
+`;
+
+/** GAME STATE **/
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl');
+const radarCanvas = document.getElementById('radarCanvas');
+const ctxR = radarCanvas.getContext('2d');
+
+let camera = { x: 0, y: 0 };
+let resources = { metal: 100, wood: 50, gold: 0 };
+let units = [];
+let mapObjects = [];
+let chunks = new Set();
+let selectedUnit = null;
+
+const TYPES = {
+    HQ: { color: [0.8, 0.2, 0.2], size: 40 },
+    HARVESTER: { color: [0.2, 0.8, 0.2], size: 14, speed: 2.5, cost: { metal: 30 } },
+    TANK: { color: [0.3, 0.3, 1.0], size: 18, speed: 1.8, cost: { metal: 50, gold: 20 } },
+    SCRAP: { color: [0.6, 0.6, 0.6], size: 8, resType: 'metal' },
+    TREE: { color: [0.1, 0.6, 0.1], size: 12, resType: 'wood' },
+    GOLD_MINE: { color: [1.0, 0.8, 0.0], size: 16, resType: 'gold' }
+};
+
+/** STREAMING LOGIC **/
+const CHUNK_SIZE = 800;
+function updateWorldStreaming() {
+    let curChunkX = Math.floor((camera.x + canvas.width/2) / CHUNK_SIZE);
+    let curChunkY = Math.floor((camera.y + canvas.height/2) / CHUNK_SIZE);
+
+    for(let x = -1; x <= 1; x++) {
+        for(let y = -1; y <= 1; y++) {
+            let key = `${curChunkX + x},${curChunkY + y}`;
+            if(!chunks.has(key)) {
+                generateChunk(curChunkX + x, curChunkY + y);
+                chunks.add(key);
+            }
+        }
+    }
+}
+
+function generateChunk(cx, cy) {
+    const baseDir = { SCRAP: 5, TREE: 8, GOLD_MINE: 2 };
+    for (let type in baseDir) {
+        for (let i = 0; i < baseDir[type]; i++) {
+            mapObjects.push({
+                x: cx * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
+                y: cy * CHUNK_SIZE + Math.random() * CHUNK_SIZE,
+                type: type
+            });
+        }
+    }
+}
+
+/** INITIALIZATION **/
+let program;
+function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    program = createProgram(gl, vsSource, fsSource);
+    
+    // Start at center of first chunk
+    units.push({ x: 200, y: 200, type: 'HQ', targetX: 200, targetY: 200 });
+    units.push({ x: 300, y: 300, type: 'HARVESTER', targetX: 300, targetY: 300, cargo: 0 });
+
+    setupInput();
+    requestAnimationFrame(gameLoop);
+}
+
+/** MOBILE & MOUSE INPUT **/
+let moveDelta = { x: 0, y: 0 };
+function setupInput() {
+    // Mouse 
+    canvas.addEventListener('mousedown', (e) => handleInteraction(e.clientX, e.clientY, e.button === 0));
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Joystick for Camera
+    const joy = document.getElementById('joystick-container');
+    const knob = document.getElementById('joystick-knob');
+    joy.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        const rect = joy.getBoundingClientRect();
+        const handleTouch = (evt) => {
+            const t = evt.touches[0];
+            let dx = t.clientX - (rect.left + rect.width/2);
+            let dy = t.clientY - (rect.top + rect.height/2);
+            const dist = Math.min(40, Math.hypot(dx, dy));
+            const angle = Math.atan2(dy, dx);
+            moveDelta.x = Math.cos(angle) * (dist/10);
+            moveDelta.y = Math.sin(angle) * (dist/10);
+            knob.style.left = `calc(50% + ${Math.cos(angle)*dist}px)`;
+            knob.style.top = `calc(50% + ${Math.sin(angle)*dist}px)`;
+        };
+        const endTouch = () => {
+            moveDelta = {x:0, y:0};
+            knob.style.left = '50%'; knob.style.top = '50%';
+            window.removeEventListener('touchmove', handleTouch);
+            window.removeEventListener('touchend', endTouch);
+        };
+        window.addEventListener('touchmove', handleTouch);
+        window.addEventListener('touchend', endTouch);
+    });
+
+    // Tap to select/move
+    canvas.addEventListener('touchstart', (e) => {
+        if(e.target === canvas) {
+            const t = e.touches[0];
+            handleInteraction(t.clientX, t.clientY, !selectedUnit);
+        }
+    });
+}
+
+function handleInteraction(screenX, screenY, isSelection) {
+    const worldX = screenX + camera.x;
+    const worldY = screenY + camera.y;
+
+    if (isSelection) {
+        selectedUnit = units.find(u => Math.hypot(u.x - worldX, u.y - worldY) < 30) || null;
+    } else if (selectedUnit && selectedUnit.type !== 'HQ') {
+        selectedUnit.targetX = worldX;
+        selectedUnit.targetY = worldY;
+        selectedUnit.manualOrder = true;
+        setTimeout(() => selectedUnit.manualOrder = false, 6000);
+    }
+}
+
+function buildUnit(type) {
+    const cost = TYPES[type].cost;
+    if (resources.metal >= cost.metal && resources.gold >= (cost.gold || 0)) {
+        resources.metal -= cost.metal;
+        resources.gold -= (cost.gold || 0);
+        units.push({ x: units[0].x+50, y: units[0].y+50, type: type, targetX: units[0].x+100, targetY: units[0].y+100 });
+    }
+}
+
+/** LOOP **/
+function update() {
+    camera.x += moveDelta.x * 5;
+    camera.y += moveDelta.y * 5;
+    
+    document.getElementById('camX').innerText = Math.round(camera.x);
+    document.getElementById('camY').innerText = Math.round(camera.y);
+    document.getElementById('metalCount').innerText = Math.floor(resources.metal);
+    document.getElementById('woodCount').innerText = Math.floor(resources.wood);
+    document.getElementById('goldCount').innerText = Math.floor(resources.gold);
+    
+    updateWorldStreaming();
+
+    units.forEach(u => {
+        const conf = TYPES[u.type];
+        if (u.type === 'HARVESTER' && !u.manualOrder) {
+            if (u.cargo >= 10) {
+                u.targetX = units[0].x; u.targetY = units[0].y;
+                if (Math.hypot(u.x-u.targetX, u.y-u.targetY) < 20) {
+                    resources[u.cargoType] += u.cargo; u.cargo = 0;
+                }
+            } else {
+                let closest = null, minD = 500;
+                mapObjects.forEach(obj => {
+                    let d = Math.hypot(u.x-obj.x, u.y-obj.y);
+                    if(d < minD) { minD = d; closest = obj; }
+                });
+                if(closest) {
+                    u.targetX = closest.x; u.targetY = closest.y;
+                    if(minD < 5) {
+                        u.cargo = 10; u.cargoType = TYPES[closest.type].resType;
+                        mapObjects.splice(mapObjects.indexOf(closest), 1);
+                    }
+                }
+            }
+        }
+        let dx = u.targetX - u.x, dy = u.targetY - u.y, dist = Math.hypot(dx, dy);
+        if(dist > 2 && conf.speed) { u.x += (dx/dist)*conf.speed; u.y += (dy/dist)*conf.speed; }
+    });
+}
+
+function render() {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.05, 0.1, 0.05, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+
+    let vertices = [];
+    const pushObj = (o, color, size) => vertices.push(o.x, o.y, ...color, size);
+
+    mapObjects.forEach(o => {
+        if(o.x > camera.x - 100 && o.x < camera.x + canvas.width + 100 &&
+           o.y > camera.y - 100 && o.y < camera.y + canvas.height + 100) {
+            pushObj(o, TYPES[o.type].color, TYPES[o.type].size);
+        }
+    });
+    units.forEach(u => pushObj(u, u === selectedUnit ? [1,1,1] : TYPES[u.type].color, TYPES[u.type].size));
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    const pos = gl.getAttribLocation(program, "aPosition");
+    const col = gl.getAttribLocation(program, "aColor");
+    const siz = gl.getAttribLocation(program, "aSize");
+    
+    gl.enableVertexAttribArray(pos);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(col);
+    gl.vertexAttribPointer(col, 3, gl.FLOAT, false, 24, 8);
+    gl.enableVertexAttribArray(siz);
+    gl.vertexAttribPointer(siz, 1, gl.FLOAT, false, 24, 20);
+
+    gl.uniform2f(gl.getUniformLocation(program, "uResolution"), canvas.width, canvas.height);
+    gl.uniform2f(gl.getUniformLocation(program, "uCamera"), camera.x, camera.y);
+
+    gl.drawArrays(gl.POINTS, 0, vertices.length / 6);
+
+    drawRadar();
+}
+
+function drawRadar() {
+    ctxR.clearRect(0, 0, 120, 120);
+    const scale = 0.05;
+    units.forEach(u => {
+        ctxR.fillStyle = u.type === 'HQ' ? 'red' : 'blue';
+        ctxR.fillRect(60 + (u.x - (camera.x + canvas.width/2)) * scale, 
+                     60 + (u.y - (camera.y + canvas.height/2)) * scale, 4, 4);
+    });
+}
+
+function createProgram(gl, vs, fs) {
+    const s = (t, src) => { const sh = gl.createShader(t); gl.shaderSource(sh, src); gl.compileShader(sh); return sh; };
+    const p = gl.createProgram();
+    gl.attachShader(p, s(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, s(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p); return p;
+}
+
+function gameLoop() { update(); render(); requestAnimationFrame(gameLoop); }
+init();
+</script>
+</body>
+</html>
