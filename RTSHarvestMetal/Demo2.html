@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS: Wood, Gold & Metal</title>
+    <style>
+        body { margin: 0; background: #222; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
+        canvas { display: block; background: #111; cursor: crosshair; }
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; width: 100%; }
+        .panel { background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; pointer-events: auto; width: fit-content; border: 1px solid #444; }
+        .resources { display: flex; gap: 20px; margin-bottom: 10px; font-size: 16px; }
+        .res-item { font-weight: bold; }
+        .metal { color: #aaa; } .wood { color: #4f4; } .gold { color: #fd0; }
+        button { cursor: pointer; padding: 8px 12px; background: #44a; color: white; border: none; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #66c; }
+        button:disabled { background: #333; color: #777; cursor: not-allowed; }
+        .controls-hint { font-size: 11px; color: #888; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="panel">
+        <div class="resources">
+            <div class="res-item metal">Metal: <span id="metalCount">0</span></div>
+            <div class="res-item wood">Wood: <span id="woodCount">0</span></div>
+            <div class="res-item gold">Gold: <span id="goldCount">0</span></div>
+        </div>
+        <button id="btnTank" onclick="buildUnit('tank')">Build Tank (50 Metal, 20 Gold)</button>
+        <div class="controls-hint">L-Click: Select | R-Click: Move | Harvesters auto-mine nearby resources</div>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+/** SHADERS **/
+const vsSource = `
+    attribute vec2 aPosition;
+    attribute vec3 aColor;
+    attribute float aSize;
+    uniform vec2 uResolution;
+    varying vec3 vColor;
+    void main() {
+        vec2 zeroToOne = aPosition / uResolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        gl_PointSize = aSize;
+        vColor = aColor;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 vColor;
+    void main() {
+        // Simple circle mask for points
+        float dist = distance(gl_PointCoord, vec2(0.5));
+        if (dist > 0.5) discard;
+        gl_FragColor = vec4(vColor, 1.0);
+    }
+`;
+
+/** GAME STATE **/
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl');
+let resources = { metal: 100, wood: 50, gold: 0 };
+let units = [];
+let mapObjects = []; // Trees, Gold Mines, Scrap
+let selectedUnit = null;
+
+const TYPES = {
+    HQ: { color: [0.8, 0.2, 0.2], size: 35 },
+    HARVESTER: { color: [0.2, 0.8, 0.2], size: 12, speed: 2, cost: { metal: 30 } },
+    TANK: { color: [0.3, 0.3, 1.0], size: 16, speed: 1.5, cost: { metal: 50, gold: 20 } },
+    // Map Objects
+    SCRAP: { color: [0.6, 0.6, 0.6], size: 8, resType: 'metal' },
+    TREE: { color: [0.1, 0.6, 0.1], size: 10, resType: 'wood' },
+    GOLD_MINE: { color: [1.0, 0.8, 0.0], size: 14, resType: 'gold' }
+};
+
+function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Starting Base
+    units.push({ x: 200, y: 200, type: 'HQ', targetX: 200, targetY: 200 });
+    units.push({ x: 250, y: 250, type: 'HARVESTER', targetX: 250, targetY: 250, cargo: 0, cargoType: null });
+    
+    // Initial Map Generation
+    for(let i=0; i<15; i++) spawnResource('SCRAP');
+    for(let i=0; i<20; i++) spawnResource('TREE');
+    for(let i=0; i<8; i++) spawnResource('GOLD_MINE');
+
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('resize', () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    });
+    
+    requestAnimationFrame(gameLoop);
+}
+
+function spawnResource(type) {
+    mapObjects.push({ 
+        x: Math.random() * canvas.width, 
+        y: Math.random() * canvas.height, 
+        type: type,
+        amount: 10 
+    });
+}
+
+function handleMouseDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (e.button === 0) {
+        selectedUnit = units.find(u => Math.hypot(u.x - mx, u.y - my) < 20) || null;
+    } else if (e.button === 2) {
+        if (selectedUnit && selectedUnit.type !== 'HQ') {
+            selectedUnit.targetX = mx;
+            selectedUnit.targetY = my;
+            selectedUnit.manualOrder = true; // Prevents AI from overriding move
+            setTimeout(() => selectedUnit.manualOrder = false, 5000);
+        }
+    }
+}
+
+function buildUnit(type) {
+    const cost = TYPES[type.toUpperCase()].cost;
+    if (resources.metal >= (cost.metal || 0) && resources.gold >= (cost.gold || 0)) {
+        resources.metal -= (cost.metal || 0);
+        resources.gold -= (cost.gold || 0);
+        units.push({ 
+            x: units[0].x + 40, 
+            y: units[0].y + 40, 
+            type: type.toUpperCase(), 
+            targetX: units[0].x + 100, 
+            targetY: units[0].y + 100 
+        });
+    }
+}
+
+/** ENGINE **/
+function update() {
+    document.getElementById('metalCount').innerText = Math.floor(resources.metal);
+    document.getElementById('woodCount').innerText = Math.floor(resources.wood);
+    document.getElementById('goldCount').innerText = Math.floor(resources.gold);
+    
+    // Update Button State
+    const tankCost = TYPES.TANK.cost;
+    document.getElementById('btnTank').disabled = (resources.metal < tankCost.metal || resources.gold < tankCost.gold);
+
+    units.forEach(u => {
+        const config = TYPES[u.type];
+        
+        if (u.type === 'HARVESTER' && !u.manualOrder) {
+            if (u.cargo >= 10) {
+                // Return to HQ
+                u.targetX = units[0].x;
+                u.targetY = units[0].y;
+                if (Math.hypot(u.x - u.targetX, u.y - u.targetY) < 15) {
+                    resources[u.cargoType] += u.cargo;
+                    u.cargo = 0;
+                    u.cargoType = null;
+                }
+            } else {
+                // Find closest resource
+                let closest = null;
+                let minDist = Infinity;
+                mapObjects.forEach(obj => {
+                    const d = Math.hypot(u.x - obj.x, u.y - obj.y);
+                    if (d < minDist) {
+                        minDist = d;
+                        closest = obj;
+                    }
+                });
+
+                if (closest) {
+                    u.targetX = closest.x;
+                    u.targetY = closest.y;
+                    if (minDist < 5) {
+                        u.cargo += 10;
+                        u.cargoType = TYPES[closest.type].resType;
+                        const idx = mapObjects.indexOf(closest);
+                        mapObjects.splice(idx, 1);
+                        setTimeout(() => spawnResource(closest.type), 5000);
+                    }
+                }
+            }
+        }
+
+        // Move logic
+        const dx = u.targetX - u.x;
+        const dy = u.targetY - u.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 2 && config.speed) {
+            u.x += (dx / dist) * config.speed;
+            u.y += (dy / dist) * config.speed;
+        }
+    });
+}
+
+function render() {
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    const program = createProgram(gl, vsSource, fsSource);
+    gl.useProgram(program);
+
+    const posAttrib = gl.getAttribLocation(program, "aPosition");
+    const colAttrib = gl.getAttribLocation(program, "aColor");
+    const sizAttrib = gl.getAttribLocation(program, "aSize");
+    const resUniform = gl.getUniformLocation(program, "uResolution");
+
+    gl.uniform2f(resUniform, canvas.width, canvas.height);
+
+    let vertices = [];
+
+    // Draw Map Objects (Trees, Gold, Scrap)
+    mapObjects.forEach(obj => {
+        const conf = TYPES[obj.type];
+        vertices.push(obj.x, obj.y, ...conf.color, conf.size);
+    });
+
+    // Draw Units
+    units.forEach(u => {
+        let color = [...TYPES[u.type].color];
+        let size = TYPES[u.type].size;
+        if (u === selectedUnit) color = [1, 1, 1]; 
+        vertices.push(u.x, u.y, ...color, size);
+    });
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+    // Attribute Pointers (Stride is now 6 floats: x, y, r, g, b, size)
+    gl.enableVertexAttribArray(posAttrib);
+    gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(colAttrib);
+    gl.vertexAttribPointer(colAttrib, 3, gl.FLOAT, false, 24, 8);
+    gl.enableVertexAttribArray(sizAttrib);
+    gl.vertexAttribPointer(sizAttrib, 1, gl.FLOAT, false, 24, 20);
+
+    gl.drawArrays(gl.POINTS, 0, vertices.length / 6);
+}
+
+function createProgram(gl, vs, fs) {
+    const vShader = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vShader, vs);
+    gl.compileShader(vShader);
+    const fShader = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fShader, fs);
+    gl.compileShader(fShader);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vShader);
+    gl.attachShader(prog, fShader);
+    gl.linkProgram(prog);
+    return prog;
+}
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+init();
+</script>
+</body>
+</html>
