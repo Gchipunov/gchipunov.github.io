@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>P2P + WebTransport Shooter</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; text-shadow: 1px 1px 2px black; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 12px; height: 12px; 
+                     border: 2px solid #0f0; border-radius: 50%; transform: translate(-50%, -50%); }
+        #menu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                background: rgba(0,0,0,0.85); padding: 30px; color: white; text-align: center; border-radius: 10px; border: 1px solid #444; }
+        button { padding: 10px 20px; cursor: pointer; background: #222; color: white; border: 1px solid #555; }
+        button:hover { background: #444; }
+        input { padding: 10px; border-radius: 5px; border: none; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="status">P2P: Offline | WT: Connecting...</div>
+    <div id="peer-id"></div>
+    <div id="players-count">Players: 1</div>
+</div>
+<div id="crosshair"></div>
+
+<div id="menu">
+    <h1>3D HYBRID SHOOTER</h1>
+    <p>Local Peer ID: <span id="my-id-display">...</span></p>
+    <input type="text" id="remoteId" placeholder="Friend's Peer ID">
+    <button id="connectBtn">Connect P2P</button>
+    <hr>
+    <button id="startBtn">START GAME</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.158.0/three.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+<script>
+/** * GLOBALS & CONFIG */
+let scene, camera, renderer, clock, peer, transport, datagramWriter;
+let players = {};
+let connections = [];
+let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+let velocity = new THREE.Vector3();
+let direction = new THREE.Vector3();
+
+// Initialization
+init();
+setupP2P();
+setupWebTransport(); // New WebTransport Logic
+animate();
+
+async function setupWebTransport() {
+    const url = 'https://localhost:4433/webtransport'; // Point to your C++ Server
+    try {
+        transport = new WebTransport(url);
+        await transport.ready;
+        console.log("WebTransport Connection Ready!");
+        document.getElementById('status').innerText = "P2P: Online | WT: Connected";
+        
+        datagramWriter = transport.datagrams.writable.getWriter();
+        readDatagrams();
+    } catch (e) {
+        console.warn("WebTransport failed (Server probably not running). Falling back to P2P only.");
+    }
+}
+
+async function readDatagrams() {
+    const reader = transport.datagrams.readable.getReader();
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        // Logic to parse UDP binary data from server and update player positions
+        const data = JSON.parse(new TextDecoder().decode(value));
+        updateRemotePlayer(data.id, data);
+    }
+}
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111122);
+    scene.fog = new THREE.Fog(0x111122, 0, 50);
+
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const light = new THREE.HemisphereLight(0xeeeeff, 0x444477, 1);
+    scene.add(light);
+
+    // Floor with Grid
+    const grid = new THREE.GridHelper(100, 50, 0x444444, 0x222222);
+    scene.add(grid);
+
+    clock = new THREE.Clock();
+
+    // Input Listeners
+    document.getElementById('startBtn').addEventListener('click', () => {
+        document.body.requestPointerLock();
+        document.getElementById('menu').style.display = 'none';
+    });
+
+    setupInputHandlers();
+}
+
+function setupInputHandlers() {
+    const onKey = (val) => (e) => {
+        if(e.code === 'KeyW') moveForward = val;
+        if(e.code === 'KeyS') moveBackward = val;
+        if(e.code === 'KeyA') moveLeft = val;
+        if(e.code === 'KeyD') moveRight = val;
+        if(val && e.code === 'Space') shoot();
+    };
+    document.addEventListener('keydown', onKey(true));
+    document.addEventListener('keyup', onKey(false));
+    document.addEventListener('mousemove', (e) => {
+        if (document.pointerLockElement === document.body) {
+            camera.rotation.y -= e.movementX * 0.002;
+            camera.rotation.x -= e.movementY * 0.002;
+            camera.rotation.x = Math.max(-1.5, Math.min(1.5, camera.rotation.x));
+        }
+    });
+}
+
+function setupP2P() {
+    peer = new Peer();
+    peer.on('open', (id) => {
+        document.getElementById('my-id-display').innerText = id;
+    });
+    peer.on('connection', (conn) => setupConnHandlers(conn));
+    document.getElementById('connectBtn').addEventListener('click', () => {
+        const remoteId = document.getElementById('remoteId').value;
+        if(remoteId) setupConnHandlers(peer.connect(remoteId));
+    });
+}
+
+function setupConnHandlers(conn) {
+    conn.on('open', () => {
+        connections.push(conn);
+        createPlayerAvatar(conn.peer);
+    });
+    conn.on('data', (data) => updateRemotePlayer(conn.peer, data));
+}
+
+function updateRemotePlayer(id, data) {
+    if (!players[id]) createPlayerAvatar(id);
+    if (data.type === 'move') {
+        players[id].position.lerp(new THREE.Vector3(data.pos.x, data.pos.y, data.pos.z), 0.2);
+        players[id].rotation.y = data.rotY;
+    } else if (data.type === 'shoot') {
+        spawnBullet(data.pos, data.dir, 0xffff00);
+    }
+}
+
+function createPlayerAvatar(id) {
+    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1), new THREE.MeshPhongMaterial({ color: 0x00ff88 }));
+    scene.add(mesh);
+    players[id] = mesh;
+}
+
+function shoot() {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const pos = camera.position.clone();
+    spawnBullet(pos, dir, 0xff0000);
+    broadcast({ type: 'shoot', pos, dir });
+}
+
+function spawnBullet(pos, dir, color) {
+    const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({ color }));
+    bullet.position.copy(pos);
+    scene.add(bullet);
+    let life = 0;
+    const intv = setInterval(() => {
+        bullet.position.addScaledVector(dir, 0.6);
+        if(++life > 100) { scene.remove(bullet); clearInterval(intv); }
+    }, 16);
+}
+
+function broadcast(msg) {
+    // 1. Send via P2P (Reliable)
+    connections.forEach(c => c.send(msg));
+    
+    // 2. Send via WebTransport (Unreliable/Fast UDP-like)
+    if (datagramWriter) {
+        msg.id = peer.id; // Include ID for server broadcast
+        const encoder = new TextEncoder();
+        datagramWriter.write(encoder.encode(JSON.stringify(msg)));
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+    if (document.pointerLockElement === document.body) {
+        velocity.x -= velocity.x * 10.0 * delta;
+        velocity.z -= velocity.z * 10.0 * delta;
+        direction.z = Number(moveForward) - Number(moveBackward);
+        direction.x = Number(moveRight) - Number(moveLeft);
+        direction.normalize();
+
+        if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+        if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+        camera.translateX(-velocity.x * delta);
+        camera.translateZ(velocity.z * delta);
+        camera.position.y = 1.6;
+
+        broadcast({ type: 'move', pos: camera.position, rotY: camera.rotation.y });
+    }
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
