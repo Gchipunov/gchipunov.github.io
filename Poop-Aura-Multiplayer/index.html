@@ -115,64 +115,7 @@
 
 <script>
 
-  /* MULTIPLAYER Lobby exchange */
-  let lobbyId = null;
-
-async function refreshLobbies() {
-    const res = await fetch('lobby.php?action=list');
-    const rooms = await res.json();
-    const container = document.getElementById('rooms');
-    container.innerHTML = '';
-    
-    rooms.forEach(room => {
-        const b = document.createElement('button');
-        b.className = 'btn';
-        b.style.fontSize = '12px';
-        b.innerText = `Join: ${room.room_name}`;
-        b.onclick = () => autoJoinGame(room.id);
-        container.appendChild(b);
-    });
-}
-
-// HOST SIDE: Auto-upload SDP
-net.finalizeGathering = async function() {
-    const sdp = JSON.stringify(this.pc.localDescription);
-    if (this.isHost) {
-        const formData = new FormData();
-        formData.append('name', "Pro Player's Room");
-        formData.append('sdp', sdp);
-        const res = await fetch('https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=create', { method: 'POST', body: formData });
-        lobbyId = await res.text();
-        setStatus("Waiting for player to join...");
-        pollForClient();
-    } else {
-        this.clientSdpReady = sdp; // Store until join button clicked
-    }
-};
-
-async function pollForClient() {
-    const res = await fetch(`https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=check_answer&id=${lobbyId}`);
-    const data = await res.json();
-    if (data && data.client_sdp) {
-        net.pc.setRemoteDescription(JSON.parse(data.client_sdp));
-        setStatus("Client found! Connecting...");
-    } else {
-        setTimeout(pollForClient, 2000); // Check every 2s
-    }
-}
-
-// CLIENT SIDE: Auto-join
-async function autoJoinGame(id) {
-    net.isClient = true;
-    net.setup();
-    // 1. Get Host SDP first
-    const listRes = await fetch('https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=list'); // Simplification: get host sdp via join action
-    // Real flow: set remote, create answer, send answer
-    // To keep it simple for your prototype:
-    setStatus("Joining room...");
-    // ... logic to fetch host sdp, set it, create answer, then:
-    // fetch('lobby.php?action=join', {method: 'POST', body: ...})
-}
+ 
   
 /* =========================================
    UI HELPERS
@@ -461,6 +404,67 @@ function loop() {
 
     requestAnimationFrame(loop);
 }
+
+ /* MULTIPLAYER Lobby exchange */
+  let lobbyId = null;
+
+async function refreshLobbies() {
+    const res = await fetch('lobby.php?action=list');
+    const rooms = await res.json();
+    const container = document.getElementById('rooms');
+    container.innerHTML = '';
+    
+    rooms.forEach(room => {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.style.fontSize = '12px';
+        b.innerText = `Join: ${room.room_name}`;
+        b.onclick = () => autoJoinGame(room.id);
+        container.appendChild(b);
+    });
+}
+
+// HOST SIDE: Auto-upload SDP
+net.finalizeGathering = async function() {
+    const sdp = JSON.stringify(this.pc.localDescription);
+    if (this.isHost) {
+        const formData = new FormData();
+        formData.append('name', "Pro Player's Room");
+        formData.append('sdp', sdp);
+        const res = await fetch('https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=create', { method: 'POST', body: formData });
+        lobbyId = await res.text();
+        setStatus("Waiting for player to join...");
+        pollForClient();
+    } else {
+        this.clientSdpReady = sdp; // Store until join button clicked
+    }
+};
+
+async function pollForClient() {
+    const res = await fetch(`https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=check_answer&id=${lobbyId}`);
+    const data = await res.json();
+    if (data && data.client_sdp) {
+        net.pc.setRemoteDescription(JSON.parse(data.client_sdp));
+        setStatus("Client found! Connecting...");
+    } else {
+        setTimeout(pollForClient, 2000); // Check every 2s
+    }
+}
+
+// CLIENT SIDE: Auto-join
+async function autoJoinGame(id) {
+    net.isClient = true;
+    net.setup();
+    // 1. Get Host SDP first
+    const listRes = await fetch('https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=list'); // Simplification: get host sdp via join action
+    // Real flow: set remote, create answer, send answer
+    // To keep it simple for your prototype:
+    setStatus("Joining room...");
+    // ... logic to fetch host sdp, set it, create answer, then:
+    // fetch('lobby.php?action=join', {method: 'POST', body: ...})
+}
+
+    
 loop();
 </script>
 </body>
