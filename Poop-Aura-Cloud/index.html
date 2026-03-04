@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   
+	
+	<title>Poop Aura - WASD - PC, and Mobile Touch Left Side Move, Right Side Jump, Down to Spin Dash</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+
+
+    <style>
+	:root {
+            --panel-bg: #c0c0c0; /* Light gray for a "computer" look */
+            --border-color: #808080; /* Darker gray for borders */
+            --highlight-color: #00ff00; /* Neon green for highlights */
+            --text-color: #000000;
+            --font-family: 'VT323', monospace;
+            --button-bg: #a0a0a0;
+            --button-shadow: #606060;
+            --panel-shadow: #4a4a4a;
+        }
+        /* Basic reset and body styling to center the canvas */
+        body, html {
+		font-family: var(--font-family);
+            margin: 4px ;
+            padding: 4px;
+			
+			
+    padding-left: unset;
+    border-right-width: 4px;
+    margin-right: 8px;
+    padding-right: 8px;
+
+
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Prevents scrollbars */
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            
+			font-family: var(--font-family);
+        }
+
+        /* * This container div is crucial for responsive scaling.
+         * It will hold the canvas and its aspect ratio will be set via JavaScript
+         * to match the canvas's internal resolution.
+         * It shrinks to fit the viewport while maintaining the aspect ratio.
+        */
+        #canvas-container {
+            max-width: 100vw;
+            max-height: 100vh;
+            display: flex; /* Helps contain the canvas */
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            border-radius: 12px 12px;
+            overflow: hidden; /* Ensures canvas corners are rounded */
+        }
+
+        /*
+         * The canvas itself will fill the container.
+         * Its actual pixel dimensions (drawing buffer) are set in JS,
+         * but its display size is controlled by the container.
+        */
+        #gl-canvas {
+            width: 100%;
+            height: 100%;
+            display: block; /* Removes any extra space below the canvas */
+        }
+		
+		#controls-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 12px;
+            font-size: 20px;
+            text-align: center;
+        }
+        #touch-controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: none; /* Hidden by default */
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+        }
+        .control-group {
+            display: flex;
+            gap: 10px;
+        }
+        .touch-button {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .touch-button:active {
+            background-color: rgba(255, 255, 255, 0.4);
+        }
+        @media (pointer: coarse) {
+            #controls-overlay {
+                display: none;
+            }
+            #touch-controls {
+                display: flex;
+            }
+        }
+        #end-screen, #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 30px;
+            text-align: center;
+            gap: 20px;
+        }
+        #end-screen h2, #game-over-screen h2 {
+            font-size: 50px;
+            margin-bottom: 10px;
+        }
+        #end-screen p, #game-over-screen p {
+            margin: 5px 0;
+        }
+        #restart-button, #game-over-button {
+            padding: 10px 20px;
+            font-size: 27px;
+            border: none;
+            border-radius: 8px;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        #restart-button:hover, #game-over-button:hover {
+            background-color: #45a049;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 30px;
+            display: flex;
+            gap: 15px; /* Increased gap to separate elements */
+            align-items: center;
+        }
+		 #hud2 {
+            position: absolute;
+            top: 100px;
+            left: 20px;
+            color: white;
+            font-size: 30px;
+            display: flex;
+            gap: 15px; /* Increased gap to separate elements */
+            align-items: center;
+			display: none;
+        }
+		 #hud3 {
+            position: absolute;
+            top: 180px;
+            left: 20px;
+            color: white;
+            font-size: 30px;
+            display: flex;
+            gap: 15px; /* Increased gap to separate elements */
+            align-items: center;
+			display: none;
+        }
+		 #hud4 {
+            position: absolute;
+            top: 260px;
+            left: 20px;
+            color: white;
+            font-size: 30px;
+            display: flex;
+            gap: 15px; /* Increased gap to separate elements */
+            align-items: center;
+			display: none;
+        }
+        .heart {
+            color: red;
+            font-size: 36px;
+            text-shadow: 1px 1px 2px black;
+        }
+        .blocks-counter {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		.game_info {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		.debug-display-class {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		.debug-display-class2 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class3 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		.debug-display-class4 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class5 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class6 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		.debug-display-class7 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class8 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class9 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class10 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		
+		.debug-display-class11 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+		.debug-display-class12 {
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 26px;
+        }
+    </style>
+    <!-- Using Google Fonts for a clean look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- The container that will manage the canvas's size and aspect ratio -->
+    <div id="canvas-container">
+        <canvas id="gl-canvas"></canvas>
+    </div>
+	<div id="controls-overlay">
+        Use Arrow Keys to Move, Spacebar to Jump, & Down Arrow to Spin Dash
+    </div>
+    <div id="touch-controls">
+        <div class="control-group">
+            <div class="touch-button" id="left-button">&lt;</div>
+            <div class="touch-button" id="right-button">&gt;</div>
+        </div>
+        <div class="control-group">
+            <div class="touch-button" id="dash-button">↓</div>
+            <div class="touch-button" id="jump-button">↑</div>
+        </div>
+    </div>
+    <div id="hud">
+        <span id="heart1" class="heart">❤</span>
+        <span id="heart2" class="heart">❤</span>
+        <span id="heart3" class="heart">❤</span>
+        <span id="blocks-jumped-hud" class="blocks-counter">Blocks: 0</span>
+		<span id="game_info-hud" class="game_info">Under Construction 🏗️🚧</span>
+		<span id="debug-display" class="debug-display-class">Blocks: 0</span> 
+		
+		
+		
+    </div>
+	 <div id="hud2">
+	 <span id="debug-display2" class="debug-display-class2">Blocks: 0</span>
+	 <span id="debug-display3" class="debug-display-class3">Blocks: 0</span>
+	 <span id="debug-display4" class="debug-display-class4">Blocks: 0</span>
+	 <span id="debug-display5" class="debug-display-class5">Blocks: 0</span>
+	
+	 </div>
+	 </div>
+	 <div id="hud3">
+	
+	 <span id="debug-display6" class="debug-display-class6">Blocks: 0</span>
+	 <span id="debug-display7" class="debug-display-class7">Blocks: 0</span>
+	 </div>
+	  <div id="hud4">
+	
+	 <span id="debug-display8" class="debug-display-class8">Blocks: 0</span>
+	 <span id="debug-display9" class="debug-display-class9">Blocks: 0</span>
+	 <span id="debug-display10" class="debug-display-class10">Blocks: 0</span>
+	 <span id="debug-display11" class="debug-display-class11">Blocks: 0</span>
+	 <span id="debug-display12" class="debug-display-class12">Blocks: 0</span>
+	 
+	 </div>
+	 
+	 
+    <div id="end-screen">
+        <h2>Level Complete!</h2>
+        <p>Time: <span id="time-stat">0s</span></p>
+        <p>Max Jump Height: <span id="height-stat">0</span></p>
+        <p>Platforms Landed On: <span id="blocks-stat">0</span></p>
+        <button id="restart-button">Restart</button>
+    </div>
+    <div id="game-over-screen">
+        <h2>Game Over!</h2>
+        <p>Time: <span id="game-over-time-stat">0s</span></p>
+        <p>Platforms Landed On: <span id="game-over-blocks-stat">0</span></p>
+        <button id="game-over-button">Try Again</button>
+    </div>
+	<script src="poop-aura30.js">
+		 </script>
+
+</body>
+</html>
