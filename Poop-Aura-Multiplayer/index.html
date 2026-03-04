@@ -151,7 +151,7 @@ net.finalizeGathering = async function() {
 };
 
 async function pollForClient() {
-    const res = await fetch(`lobby.php?action=check_answer&id=${lobbyId}`);
+    const res = await fetch(`https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=check_answer&id=${lobbyId}`);
     const data = await res.json();
     if (data && data.client_sdp) {
         net.pc.setRemoteDescription(JSON.parse(data.client_sdp));
@@ -166,7 +166,7 @@ async function autoJoinGame(id) {
     net.isClient = true;
     net.setup();
     // 1. Get Host SDP first
-    const listRes = await fetch('lobby.php?action=list'); // Simplification: get host sdp via join action
+    const listRes = await fetch('https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=list'); // Simplification: get host sdp via join action
     // Real flow: set remote, create answer, send answer
     // To keep it simple for your prototype:
     setStatus("Joining room...");
