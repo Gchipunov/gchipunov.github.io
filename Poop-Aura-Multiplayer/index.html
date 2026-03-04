@@ -141,7 +141,7 @@ net.finalizeGathering = async function() {
         const formData = new FormData();
         formData.append('name', "Pro Player's Room");
         formData.append('sdp', sdp);
-        const res = await fetch('lobby.php?action=create', { method: 'POST', body: formData });
+        const res = await fetch('https://34.102.104.147/2d-platformer_webrtc_backend/lobby.php?action=create', { method: 'POST', body: formData });
         lobbyId = await res.text();
         setStatus("Waiting for player to join...");
         pollForClient();
