@@ -1,0 +1,10 @@
+https://github.com/DataDrivenEngineer/metal-videos
+https://github.com/DataDrivenEngineer/metal-cpp-projects/tree/main/metal-cpp-projects
+https://github.com/amyollomani1/GameEngineIOS/blob/main/xcodeMakeWindow/renderer.hpp
+
+https://github.com/MadLadSquad/UImGuiRendererExamples
+
+https://github.com/search?q=%23include+%22Metal%2FMetal.hpp%22&type=code
+
+https://github.com/arcanum-project/game
+https://www.youtube.com/watch?v=qmdx32MjVnY
