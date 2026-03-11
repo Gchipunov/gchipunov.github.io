@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS - Mobile Ready</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; }
+        #selection-box {
+            border: 1px solid #00ff00;
+            background-color: rgba(0, 255, 0, 0.1);
+            position: fixed;
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #0f0;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            pointer-events: none;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <b>PC:</b> Click-Drag to Select | Right-Click to Move<br>
+    <b>Mobile:</b> Tap-Drag to Select | Long-Press to Move
+</div>
+<div id="selection-box"></div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- Configuration & State ---
+    const units = [];
+    const selectedUnits = new Set();
+    const mouse = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    let isDragging = false;
+    const dragStart = new THREE.Vector2();
+    
+    // Mobile-specific logic
+    let touchStartTime = 0;
+    const LONG_PRESS_THRESHOLD = 500; // ms
+
+    // --- Scene Setup ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x111111);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 50, 50);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.body.appendChild(renderer.domElement);
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(10, 50, 10);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0x404040));
+
+    // --- Ground ---
+    const groundGeo = new THREE.PlaneGeometry(200, 200);
+    const groundMat = new THREE.MeshPhongMaterial({ color: 0x1a1a1a });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    const grid = new THREE.GridHelper(200, 40, 0x333333, 0x222222);
+    scene.add(grid);
+
+    // --- Unit Class ---
+    class Unit {
+        constructor(x, z, color) {
+            this.mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(2, 2, 2),
+                new THREE.MeshPhongMaterial({ color: color })
+            );
+            this.mesh.position.set(x, 1, z);
+            
+            const ringGeo = new THREE.RingGeometry(1.5, 1.8, 32);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+            this.selectionRing = new THREE.Mesh(ringGeo, ringMat);
+            this.selectionRing.rotation.x = -Math.PI / 2;
+            this.selectionRing.position.y = -0.9;
+            this.selectionRing.visible = false;
+            this.mesh.add(this.selectionRing);
+
+            this.target = null;
+            this.speed = 0.3;
+            scene.add(this.mesh);
+            units.push(this);
+        }
+
+        update() {
+            if (this.target) {
+                const dir = new THREE.Vector3().subVectors(this.target, this.mesh.position);
+                dir.y = 0;
+                if (dir.length() > 0.5) {
+                    dir.normalize();
+                    this.mesh.position.addScaledVector(dir, this.speed);
+                    const lookTarget = new THREE.Vector3().copy(this.mesh.position).add(dir);
+                    this.mesh.lookAt(lookTarget);
+                } else {
+                    this.target = null;
+                }
+            }
+        }
+
+        select() { this.selectionRing.visible = true; selectedUnits.add(this); }
+        deselect() { this.selectionRing.visible = false; selectedUnits.delete(this); }
+    }
+
+    // Spawn Units
+    for(let i = 0; i < 4; i++) {
+        new Unit(-15 + i * 10, -5, 0x0077ff);
+        new Unit(-15 + i * 10, 5, 0xff3300);
+    }
+
+    // --- Unified Input Handling ---
+    const selectionBox = document.getElementById('selection-box');
+
+    function onStart(x, y, isRightClick = false) {
+        if (isRightClick) return; // Right click handled by contextmenu listener
+
+        touchStartTime = Date.now();
+        isDragging = true;
+        dragStart.set(x, y);
+        updateMousePos(x, y);
+
+        selectionBox.style.display = 'block';
+        selectionBox.style.left = `${x}px`;
+        selectionBox.style.top = `${y}px`;
+        selectionBox.style.width = '0px';
+        selectionBox.style.height = '0px';
+    }
+
+    function onMove(x, y) {
+        updateMousePos(x, y);
+        if (isDragging) {
+            const width = x - dragStart.x;
+            const height = y - dragStart.y;
+            selectionBox.style.width = `${Math.abs(width)}px`;
+            selectionBox.style.height = `${Math.abs(height)}px`;
+            selectionBox.style.left = `${width > 0 ? dragStart.x : x}px`;
+            selectionBox.style.top = `${height > 0 ? dragStart.y : y}px`;
+        }
+    }
+
+    function onEnd(x, y) {
+        if (!isDragging) return;
+        
+        const duration = Date.now() - touchStartTime;
+        const rect = selectionBox.getBoundingClientRect();
+        const isSmallMovement = rect.width < 10 && rect.height < 10;
+
+        // If it was a long press on mobile with little movement, treat as move command
+        if (duration > LONG_PRESS_THRESHOLD && isSmallMovement) {
+            issueMoveCommand();
+        } else {
+            performSelection();
+        }
+
+        isDragging = false;
+        selectionBox.style.display = 'none';
+    }
+
+    function updateMousePos(x, y) {
+        mouse.x = (x / window.innerWidth) * 2 - 1;
+        mouse.y = -(y / window.innerHeight) * 2 + 1;
+    }
+
+    function issueMoveCommand() {
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObject(ground);
+        if (intersects.length > 0 && selectedUnits.size > 0) {
+            const targetPos = intersects[0].point;
+            selectedUnits.forEach(unit => {
+                unit.target = targetPos.clone().add(new THREE.Vector3(
+                    (Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6
+                ));
+            });
+        }
+    }
+
+    function performSelection() {
+        const rect = selectionBox.getBoundingClientRect();
+        const isClick = rect.width < 10 && rect.height < 10;
+
+        if (isClick) {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(units.map(u => u.mesh));
+            units.forEach(u => u.deselect());
+            if (intersects.length > 0) {
+                const unit = units.find(u => u.mesh === intersects[0].object);
+                unit.select();
+            }
+        } else {
+            units.forEach(unit => {
+                const vector = unit.mesh.position.clone().project(camera);
+                const x = (vector.x + 1) * window.innerWidth / 2;
+                const y = (-vector.y + 1) * window.innerHeight / 2;
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    unit.select();
+                } else {
+                    unit.deselect();
+                }
+            });
+        }
+    }
+
+    // Event Listeners (Mouse)
+    window.addEventListener('mousedown', e => onStart(e.clientX, e.clientY, e.button === 2));
+    window.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+    window.addEventListener('mouseup', e => onEnd(e.clientX, e.clientY));
+    window.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        updateMousePos(e.clientX, e.clientY);
+        issueMoveCommand();
+    });
+
+    // Event Listeners (Touch)
+    window.addEventListener('touchstart', e => {
+        const t = e.touches[0];
+        onStart(t.clientX, t.clientY);
+    }, { passive: false });
+
+    window.addEventListener('touchmove', e => {
+        const t = e.touches[0];
+        onMove(t.clientX, t.clientY);
+    }, { passive: false });
+
+    window.addEventListener('touchend', e => {
+        // For touchend, use the last known mouse/touch position
+        onEnd(0, 0); 
+    }, { passive: false });
+
+    // --- Main Loop ---
+    function animate() {
+        requestAnimationFrame(animate);
+        units.forEach(u => u.update());
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    animate();
+</script>
+</body>
+</html>
