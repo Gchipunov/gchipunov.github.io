@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS - Fog of War Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        #selection-box {
+            border: 1px solid #00ff00;
+            background-color: rgba(0, 255, 0, 0.1);
+            position: fixed;
+            pointer-events: none;
+            display: none;
+            z-index: 10;
+        }
+        #ui {
+            position: absolute;
+            top: 10px; left: 10px;
+            color: #0f0; background: rgba(0,0,0,0.8);
+            padding: 12px; border-radius: 8px; font-size: 13px;
+            border-left: 4px solid #0f0; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <b>STRATEGIC COMMAND</b><br>
+    Units reveal the Fog of War as they move.
+</div>
+<div id="selection-box"></div>
+
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- FOG OF WAR SYSTEM ---
+    class FogOfWar {
+        constructor(size) {
+            this.size = size;
+            this.canvas = document.createElement('canvas');
+            this.canvas.width = this.canvas.height = 512;
+            this.ctx = this.canvas.getContext('2d');
+            
+            // Initial state: pitch black
+            this.ctx.fillStyle = 'black';
+            this.ctx.fillRect(0, 0, 512, 512);
+
+            this.texture = new THREE.CanvasTexture(this.canvas);
+        }
+
+        update(units) {
+            // Fade existing visibility slightly (creates a "shroud" effect)
+            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'; 
+            this.ctx.fillRect(0, 0, 512, 512);
+
+            this.ctx.globalCompositeOperation = 'screen';
+            this.ctx.fillStyle = 'white';
+
+            units.forEach(u => {
+                // Map 3D world coords to 2D canvas coords
+                const x = ((u.mesh.position.x + 100) / 200) * 512;
+                const z = ((u.mesh.position.z + 100) / 200) * 512;
+                const radius = 40; // Vision range
+
+                const grad = this.ctx.createRadialGradient(x, z, 0, x, z, radius);
+                grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+                grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                
+                this.ctx.fillStyle = grad;
+                this.ctx.beginPath();
+                this.ctx.arc(x, z, radius, 0, Math.PI * 2);
+                this.ctx.fill();
+            });
+
+            this.ctx.globalCompositeOperation = 'source-over';
+            this.texture.needsUpdate = true;
+        }
+    }
+
+    // --- SCENE SETUP ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 80, 80);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const fow = new FogOfWar(200);
+
+    // Ground with Fog Shader
+    const groundGeo = new THREE.PlaneGeometry(200, 200);
+    const groundMat = new THREE.MeshPhongMaterial({ 
+        color: 0x222222,
+        map: new THREE.TextureLoader().load('https://threejs.org/examples/textures/grid.png') 
+    });
+    
+    // Inject Fog Logic into the material
+    groundMat.onBeforeCompile = (shader) => {
+        shader.uniforms.fowTexture = { value: fow.texture };
+        shader.fragmentShader = `
+            uniform sampler2D fowTexture;
+            ${shader.fragmentShader}
+        `.replace(
+            `#include <collmap_fragment>`,
+            `#include <collmap_fragment>
+             vec4 fowColor = texture2D(fowTexture, vUv);
+             gl_FragColor.rgb *= fowColor.r;
+            `
+        );
+    };
+
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+    scene.add(new THREE.AmbientLight(0x444444));
+    const sun = new THREE.DirectionalLight(0xffffff, 1);
+    sun.position.set(50, 50, 50);
+    scene.add(sun);
+
+    // --- UNIT LOGIC ---
+    const units = [];
+    const selectedUnits = new Set();
+
+    class Unit {
+        constructor(x, z, color) {
+            this.mesh = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 3), new THREE.MeshPhongMaterial({ color }));
+            this.mesh.position.set(x, 1.5, z);
+            this.target = null;
+            scene.add(this.mesh);
+            units.push(this);
+        }
+        update() {
+            if (this.target) {
+                const dir = new THREE.Vector3().subVectors(this.target, this.mesh.position);
+                dir.y = 0;
+                if (dir.length() > 0.5) {
+                    dir.normalize();
+                    this.mesh.position.addScaledVector(dir, 0.5);
+                } else { this.target = null; }
+            }
+        }
+    }
+
+    // Spawn 5 units
+    for(let i=0; i<5; i++) new Unit(-40 + i*20, 0, 0x00ff00);
+
+    // --- INPUT HANDLING ---
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    window.addEventListener('mousedown', (e) => {
+        if (e.button === 0) { // Select all (simulated for brevity)
+            units.forEach(u => selectedUnits.add(u));
+        }
+    });
+
+    window.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.intersectObject(ground);
+        if (hit.length > 0) {
+            selectedUnits.forEach(u => u.target = hit[0].point.clone());
+        }
+    });
+
+    // --- MAIN LOOP ---
+    function animate() {
+        requestAnimationFrame(animate);
+        units.forEach(u => u.update());
+        fow.update(units); // Update Fog of War based on new positions
+        renderer.render(scene, camera);
+    }
+    animate();
+
+</script>
+</body>
+</html>
