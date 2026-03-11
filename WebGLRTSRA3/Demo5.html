@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS - Combat & Fog</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        #selection-box {
+            border: 1px solid #00ff00;
+            background-color: rgba(0, 255, 0, 0.1);
+            position: fixed; pointer-events: none; display: none; z-index: 10;
+        }
+        #ui {
+            position: absolute; top: 10px; left: 10px;
+            color: #0f0; background: rgba(0,0,0,0.8);
+            padding: 12px; border-radius: 8px; font-size: 13px;
+            border-left: 4px solid #0f0; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <b>BATTLE COMMAND</b><br>
+    Drag to Select | Right-Click to Move<br>
+    Enemies in Fog are hidden until they shoot or you get close.
+</div>
+<div id="selection-box"></div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    // --- FOG OF WAR SYSTEM ---
+    class FogOfWar {
+        constructor() {
+            this.canvas = document.createElement('canvas');
+            this.canvas.width = this.canvas.height = 512;
+            this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+            this.texture = new THREE.CanvasTexture(this.canvas);
+            this.revealRequests = []; // For temporary "muzzle flash" reveals
+        }
+
+        update(playerUnits) {
+            this.ctx.fillStyle = 'black';
+            this.ctx.fillRect(0, 0, 512, 512);
+            this.ctx.globalCompositeOperation = 'screen';
+
+            const drawReveal = (pos, radius, opacity = 1) => {
+                const x = ((pos.x + 100) / 200) * 512;
+                const z = ((pos.z + 100) / 200) * 512;
+                const grad = this.ctx.createRadialGradient(x, z, 0, x, z, radius);
+                grad.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+                grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                this.ctx.fillStyle = grad;
+                this.ctx.beginPath(); this.ctx.arc(x, z, radius, 0, Math.PI * 2); this.ctx.fill();
+            };
+
+            // Permanent Vision from Units
+            playerUnits.forEach(u => drawReveal(u.mesh.position, 50));
+
+            // Temporary Vision from Combat
+            this.revealRequests = this.revealRequests.filter(r => {
+                drawReveal(r.pos, 30, r.life / 10);
+                r.life--;
+                return r.life > 0;
+            });
+
+            this.ctx.globalCompositeOperation = 'source-over';
+            this.texture.needsUpdate = true;
+        }
+
+        isVisible(worldPos) {
+            const x = Math.floor(((worldPos.x + 100) / 200) * 512);
+            const z = Math.floor(((worldPos.z + 100) / 200) * 512);
+            const pixel = this.ctx.getImageData(x, z, 1, 1).data;
+            return pixel[0] > 50; // Visible if red channel > 50
+        }
+    }
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 100, 100); camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const fow = new FogOfWar();
+
+    // Ground Shader
+    const groundMat = new THREE.MeshPhongMaterial({ color: 0x112211 });
+    groundMat.onBeforeCompile = (shader) => {
+        shader.uniforms.fowTex = { value: fow.texture };
+        shader.fragmentShader = `uniform sampler2D fowTex;\n` + shader.fragmentShader.replace(
+            `#include <dithering_fragment>`,
+            `#include <dithering_fragment>\nvec4 fColor = texture2D(fowTex, vUv);\ngl_FragColor.rgb *= fColor.r;`
+        );
+    };
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), groundMat);
+    ground.rotation.x = -Math.PI/2; scene.add(ground);
+    scene.add(new THREE.AmbientLight(0x444444), new THREE.DirectionalLight(0xffffff, 1));
+
+    // --- UNIT CLASSES ---
+    const playerUnits = [];
+    const enemies = [];
+    const selectedUnits = new Set();
+
+    class Unit {
+        constructor(x, z, team) {
+            this.team = team;
+            this.mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(3, 3, 3), 
+                new THREE.MeshPhongMaterial({ color: team === 'player' ? 0x00aaff : 0xff4400 })
+            );
+            this.mesh.position.set(x, 1.5, z);
+            this.target = null;
+            this.shootTimer = 0;
+            scene.add(this.mesh);
+            (team === 'player' ? playerUnits : enemies).push(this);
+        }
+
+        update() {
+            // Visibility Check (only for enemies)
+            if (this.team === 'enemy') {
+                this.mesh.visible = fow.isVisible(this.mesh.position);
+            }
+
+            // Movement Logic
+            if (this.target) {
+                const dir = new THREE.Vector3().subVectors(this.target, this.mesh.position);
+                dir.y = 0;
+                if (dir.length() > 1) {
+                    dir.normalize();
+                    this.mesh.position.addScaledVector(dir, 0.6);
+                    this.mesh.lookAt(this.mesh.position.clone().add(dir));
+                } else this.target = null;
+            }
+
+            // Simple Shooting Reveal
+            this.shootTimer++;
+            if (this.team === 'enemy' && this.shootTimer > 120) {
+                this.shootTimer = 0;
+                // Reveal enemy location briefly when "shooting"
+                fow.revealRequests.push({ pos: this.mesh.position.clone(), life: 30 });
+            }
+        }
+    }
+
+    // Spawn Units
+    for(let i=0; i<3; i++) new Unit(-30 + i*20, 20, 'player');
+    for(let i=0; i<3; i++) new Unit(-30 + i*20, -50, 'enemy');
+
+    // --- SELECTION & CONTROLS ---
+    let isDragging = false;
+    const dragStart = new THREE.Vector2();
+    const selectionBox = document.getElementById('selection-box');
+    const mouse = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+
+    window.addEventListener('mousedown', e => {
+        if (e.button === 0) {
+            isDragging = true;
+            dragStart.set(e.clientX, e.clientY);
+            selectionBox.style.display = 'block';
+            selectionBox.style.width = '0px'; selectionBox.style.height = '0px';
+        }
+    });
+
+    window.addEventListener('mousemove', e => {
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        if (!isDragging) return;
+        const w = e.clientX - dragStart.x; const h = e.clientY - dragStart.y;
+        selectionBox.style.width = Math.abs(w) + 'px'; selectionBox.style.height = Math.abs(h) + 'px';
+        selectionBox.style.left = (w > 0 ? dragStart.x : e.clientX) + 'px';
+        selectionBox.style.top = (h > 0 ? dragStart.y : e.clientY) + 'px';
+    });
+
+    window.addEventListener('mouseup', e => {
+        if (e.button !== 0) return;
+        isDragging = false;
+        const rect = selectionBox.getBoundingClientRect();
+        selectionBox.style.display = 'none';
+
+        if (rect.width < 10 && rect.height < 10) {
+            // Click Selection
+            raycaster.setFromCamera(mouse, camera);
+            const hits = raycaster.intersectObjects(playerUnits.map(u => u.mesh));
+            selectedUnits.forEach(u => u.mesh.material.emissive.set(0x000000));
+            selectedUnits.clear();
+            if (hits.length > 0) {
+                const unit = playerUnits.find(u => u.mesh === hits[0].object);
+                selectedUnits.add(unit);
+                unit.mesh.material.emissive.set(0x003300);
+            }
+        } else {
+            // Box Selection
+            selectedUnits.forEach(u => u.mesh.material.emissive.set(0x000000));
+            selectedUnits.clear();
+            playerUnits.forEach(u => {
+                const v = u.mesh.position.clone().project(camera);
+                const x = (v.x + 1) * window.innerWidth / 2;
+                const y = (-v.y + 1) * window.innerHeight / 2;
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    selectedUnits.add(u);
+                    u.mesh.material.emissive.set(0x003300);
+                }
+            });
+        }
+    });
+
+    window.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.intersectObject(ground);
+        if (hit.length > 0) {
+            selectedUnits.forEach(u => u.target = hit[0].point.clone());
+        }
+    });
+
+    function animate() {
+        requestAnimationFrame(animate);
+        fow.update(playerUnits);
+        playerUnits.forEach(u => u.update());
+        enemies.forEach(u => u.update());
+        renderer.render(scene, camera);
+    }
+    animate();
+</script>
+</body>
+</html>
