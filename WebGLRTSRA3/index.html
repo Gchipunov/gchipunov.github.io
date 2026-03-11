@@ -1,0 +1,39 @@
+<script type="module">
+    import * as THREE from 'three';
+    import { FogOfWar } from './FogOfWar.js';
+    import { SelectionManager } from './SelectionManager.js';
+
+    // 1. Setup Three.js Scene, Camera, Renderer
+    const scene = new THREE.Scene();
+    // ... setup ground, light, etc ...
+
+    // 2. Initialize Modules
+    const fow = new FogOfWar();
+    const playerUnits = []; 
+    const enemies = [];
+    
+    // Pass references to the manager
+    const selection = new SelectionManager(camera, scene, playerUnits, ground);
+
+    // 3. Movement Command (Right Click)
+    window.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        selection.raycaster.setFromCamera(selection.mouse, camera);
+        const hit = selection.raycaster.intersectObject(ground);
+        if (hit.length > 0) {
+            selection.selectedUnits.forEach(u => u.target = hit[0].point.clone());
+        }
+    });
+
+    // 4. Game Loop
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        fow.update(playerUnits);
+        playerUnits.forEach(u => u.update());
+        enemies.forEach(u => u.update(fow)); // Pass fow for visibility check
+        
+        renderer.render(scene, camera);
+    }
+    animate();
+</script>
