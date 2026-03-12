@@ -1,3 +1,39 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS - Combat & Fog</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        #selection-box {
+            border: 1px solid #00ff00;
+            background-color: rgba(0, 255, 0, 0.1);
+            position: fixed; pointer-events: none; display: none; z-index: 10;
+        }
+        #ui {
+            position: absolute; top: 10px; left: 10px;
+            color: #0f0; background: rgba(0,0,0,0.8);
+            padding: 12px; border-radius: 8px; font-size: 13px;
+            border-left: 4px solid #0f0; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <b>BATTLE COMMAND</b><br>
+    Drag to Select | Right-Click to Move<br>
+    Enemies in Fog are hidden until they shoot or you get close.
+</div>
+<div id="selection-box"></div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+
 <script type="module">
     import * as THREE from 'three';
     import { FogOfWar } from './FogOfWar.js';
@@ -37,3 +73,6 @@
     }
     animate();
 </script>
+</body>
+</html>
+
