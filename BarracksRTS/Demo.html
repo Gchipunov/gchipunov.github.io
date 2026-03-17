@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS Deathmatch</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #222; font-family: sans-serif; user-select: none; -webkit-user-select: none; }
+        canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+        
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+        .panel { background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; margin-bottom: 10px; pointer-events: auto; }
+        h2 { margin: 0 0 5px 0; font-size: 18px; }
+        button { background: #3498db; color: white; border: none; padding: 10px; margin: 5px 0; width: 100%; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        button:active { background: #2980b9; }
+
+        #joystick-zone { position: absolute; bottom: 20px; right: 20px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 2px solid rgba(255,255,255,0.3); touch-action: none; }
+        #joystick-knob { position: absolute; top: 35px; left: 35px; width: 50px; height: 50px; background: rgba(255,255,255,0.5); border-radius: 50%; pointer-events: none; }
+        
+        #leaderboard { position: absolute; top: 10px; right: 10px; text-align: right; }
+        .team-score { font-weight: bold; margin-bottom: 4px; text-shadow: 1px 1px 2px black; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="ui">
+    <div class="panel">
+        <h2>Cash: $<span id="cashDisplay">200</span></h2>
+        <button id="btnSoldier" onclick="buyUnit(0)">Train Soldier ($50)</button>
+        <button id="btnGrenadier" onclick="buyUnit(1)">Train Grenadier ($100)</button>
+    </div>
+</div>
+
+<div id="leaderboard" class="panel"></div>
+
+<div id="joystick-zone">
+    <div id="joystick-knob"></div>
+</div>
+
+<script>
+// --- WebGL Setup & Engine ---
+const canvas = document.getElementById('gameCanvas');
+const gl = canvas.getContext('webgl');
+
+// Shaders
+const vsSource = `
+    attribute vec2 a_position;
+    attribute vec4 a_color;
+    uniform vec2 u_resolution;
+    varying vec4 v_color;
+    void main() {
+        vec2 zeroToOne = a_position / u_resolution;
+        vec2 clipSpace = (zeroToOne * 2.0) - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        v_color = a_color;
+    }
+`;
+const fsSource = `
+    precision mediump float;
+    varying vec4 v_color;
+    void main() { gl_FragColor = v_color; }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const posLoc = gl.getAttribLocation(program, "a_position");
+const colorLoc = gl.getAttribLocation(program, "a_color");
+const resLoc = gl.getUniformLocation(program, "u_resolution");
+
+// Batch Renderer
+const MAX_QUADS = 10000;
+const vertexData = new Float32Array(MAX_QUADS * 6 * 6); // 6 verts per quad, 6 floats per vert (x,y, r,g,b,a)
+let vertexCount = 0;
+
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+gl.bufferData(gl.ARRAY_BUFFER, vertexData.byteLength, gl.DYNAMIC_DRAW);
+
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 24, 0);
+gl.enableVertexAttribArray(colorLoc);
+gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, 24, 8);
+
+gl.enable(gl.BLEND);
+gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function pushQuad(x, y, w, h, r, g, b, a=1.0) {
+    if (vertexCount >= MAX_QUADS * 6) return; // Prevent overflow
+    const idx = vertexCount * 6;
+    const x2 = x + w, y2 = y + h;
+    
+    // Triangle 1
+    vertexData[idx] = x;     vertexData[idx+1] = y;     vertexData[idx+2] = r; vertexData[idx+3] = g; vertexData[idx+4] = b; vertexData[idx+5] = a;
+    vertexData[idx+6] = x2;  vertexData[idx+7] = y;     vertexData[idx+8] = r; vertexData[idx+9] = g; vertexData[idx+10] = b; vertexData[idx+11] = a;
+    vertexData[idx+12] = x;  vertexData[idx+13] = y2;   vertexData[idx+14] = r; vertexData[idx+15] = g; vertexData[idx+16] = b; vertexData[idx+17] = a;
+    
+    // Triangle 2
+    vertexData[idx+18] = x;  vertexData[idx+19] = y2;   vertexData[idx+20] = r; vertexData[idx+21] = g; vertexData[idx+22] = b; vertexData[idx+23] = a;
+    vertexData[idx+24] = x2; vertexData[idx+25] = y;    vertexData[idx+26] = r; vertexData[idx+27] = g; vertexData[idx+28] = b; vertexData[idx+29] = a;
+    vertexData[idx+30] = x2; vertexData[idx+31] = y2;   vertexData[idx+32] = r; vertexData[idx+33] = g; vertexData[idx+34] = b; vertexData[idx+35] = a;
+    
+    vertexCount += 6;
+}
+
+function flush() {
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertexData.subarray(0, vertexCount * 6));
+    gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+    vertexCount = 0;
+}
+
+// --- Game Logic ---
+const TEAM_COLORS = [
+    [0.2, 0.6, 1.0], // Player (Blue)
+    [1.0, 0.2, 0.2], // AI 1 (Red)
+    [0.2, 1.0, 0.4], // AI 2 (Green)
+    [1.0, 0.8, 0.1]  // AI 3 (Yellow)
+];
+const TEAM_NAMES = ["Player", "Red AI", "Green AI", "Yellow AI"];
+let cash = [200, 200, 200, 200];
+let units = [];
+let buildings = [];
+let projectiles = [];
+let particles = [];
+
+const STATS = {
+    0: { name: 'Soldier', cost: 50, hp: 40, speed: 1.5, range: 40, dmg: 5, cd: 30, size: 6 },
+    1: { name: 'Grenadier', cost: 100, hp: 60, speed: 0.8, range: 150, dmg: 15, cd: 90, size: 8 }
+};
+
+class Building {
+    constructor(x, y, team) {
+        this.x = x; this.y = y; this.team = team;
+        this.size = 30; this.hp = 500; this.maxHp = 500;
+    }
+    draw() {
+        const c = TEAM_COLORS[this.team];
+        pushQuad(this.x - this.size, this.y - this.size, this.size*2, this.size*2, c[0], c[1], c[2]);
+        pushQuad(this.x - this.size, this.y - this.size - 10, this.size*2, 4, 0.3, 0.3, 0.3);
+        pushQuad(this.x - this.size, this.y - this.size - 10, (this.size*2) * (this.hp/this.maxHp), 4, 0.2, 1.0, 0.2);
+    }
+}
+
+class Unit {
+    constructor(x, y, team, type) {
+        this.x = x; this.y = y; this.team = team; this.type = type;
+        const s = STATS[type];
+        this.hp = s.hp; this.maxHp = s.hp; this.speed = s.speed;
+        this.size = s.size; this.cooldown = 0;
+        this.targetX = null; this.targetY = null;
+        this.targetUnit = null;
+        this.selected = false;
+    }
+    draw() {
+        if (this.selected) {
+            pushQuad(this.x - this.size - 2, this.y - this.size - 2, (this.size+2)*2, (this.size+2)*2, 1, 1, 1);
+        }
+        const c = TEAM_COLORS[this.team];
+        // Distinguish types: Soldier is square, Grenadier is taller rectangle
+        if(this.type === 0) pushQuad(this.x - this.size, this.y - this.size, this.size*2, this.size*2, c[0], c[1], c[2]);
+        else pushQuad(this.x - this.size, this.y - this.size*1.5, this.size*2, this.size*3, c[0]*0.7, c[1]*0.7, c[2]*0.7);
+        
+        // HP bar
+        pushQuad(this.x - this.size, this.y - this.size - 6, this.size*2, 3, 0.3, 0.3, 0.3);
+        pushQuad(this.x - this.size, this.y - this.size - 6, (this.size*2) * (Math.max(0, this.hp)/this.maxHp), 3, 0.2, 1.0, 0.2);
+    }
+}
+
+class Projectile {
+    constructor(x, y, tx, ty, team, isGrenade, dmg) {
+        this.x = x; this.y = y; this.tx = tx; this.ty = ty;
+        this.team = team; this.isGrenade = isGrenade; this.dmg = dmg;
+        this.speed = isGrenade ? 3 : 6;
+    }
+    draw() {
+        const c = TEAM_COLORS[this.team];
+        pushQuad(this.x - 3, this.y - 3, 6, 6, c[0], c[1], c[2]);
+    }
+}
+
+class Particle {
+    constructor(x, y, r, g, b, life) {
+        this.x = x; this.y = y; this.r = r; this.g = g; this.b = b;
+        this.life = life; this.maxLife = life;
+        this.vx = (Math.random() - 0.5) * 4;
+        this.vy = (Math.random() - 0.5) * 4;
+    }
+    draw() {
+        pushQuad(this.x - 2, this.y - 2, 4, 4, this.r, this.g, this.b, this.life / this.maxLife);
+    }
+}
+
+// Map generation
+function initMap() {
+    const w = canvas.width; const h = canvas.height;
+    buildings.push(new Building(50, 50, 0));
+    buildings.push(new Building(w - 50, 50, 1));
+    buildings.push(new Building(50, h - 50, 2));
+    buildings.push(new Building(w - 50, h - 50, 3));
+    
+    // Starting units
+    for(let i=0; i<4; i++) {
+        for(let j=0; j<3; j++) {
+            units.push(new Unit(buildings[i].x + (Math.random()*40-20), buildings[i].y + (Math.random()*40-20), i, 0));
+        }
+    }
+}
+
+// Player Actions
+function buyUnit(type) {
+    if (cash[0] >= STATS[type].cost && buildings[0].hp > 0) {
+        cash[0] -= STATS[type].cost;
+        units.push(new Unit(buildings[0].x + 40, buildings[0].y + 40, 0, type));
+        updateUI();
+    }
+}
+
+function updateUI() {
+    document.getElementById('cashDisplay').innerText = cash[0];
+    document.getElementById('btnSoldier').disabled = cash[0] < 50 || buildings[0].hp <= 0;
+    document.getElementById('btnGrenadier').disabled = cash[0] < 100 || buildings[0].hp <= 0;
+    
+    let lbHTML = "<h2>Bounty</h2>";
+    for(let i=0; i<4; i++) {
+        let c = TEAM_COLORS[i];
+        let rgb = `rgb(${c[0]*255},${c[1]*255},${c[2]*255})`;
+        lbHTML += `<div class="team-score" style="color: ${rgb}">${TEAM_NAMES[i]}: $${cash[i]}</div>`;
+    }
+    document.getElementById('leaderboard').innerHTML = lbHTML;
+}
+
+// --- Controls (Joystick + RTS Click/Select) ---
+let joyActive = false;
+let joyDX = 0, joyDY = 0;
+const joyZone = document.getElementById('joystick-zone');
+const joyKnob = document.getElementById('joystick-knob');
+
+joyZone.addEventListener('pointerdown', (e) => {
+    joyActive = true;
+    e.stopPropagation(); // Don't trigger canvas selection
+    updateJoystick(e);
+});
+window.addEventListener('pointermove', (e) => {
+    if (joyActive) updateJoystick(e);
+});
+window.addEventListener('pointerup', () => {
+    if (joyActive) {
+        joyActive = false;
+        joyDX = 0; joyDY = 0;
+        joyKnob.style.transform = `translate(0px, 0px)`;
+    }
+});
+
+function updateJoystick(e) {
+    const rect = joyZone.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    let dx = e.clientX - cx;
+    let dy = e.clientY - cy;
+    const dist = Math.hypot(dx, dy);
+    const maxDist = 35;
+    
+    if (dist > maxDist) {
+        dx = (dx / dist) * maxDist;
+        dy = (dy / dist) * maxDist;
+    }
+    
+    joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+    joyDX = dx / maxDist;
+    joyDY = dy / maxDist;
+}
+
+let isSelecting = false;
+let selStartX = 0, selStartY = 0;
+let mouseX = 0, mouseY = 0;
+
+canvas.addEventListener('pointerdown', (e) => {
+    isSelecting = true;
+    selStartX = e.clientX; selStartY = e.clientY;
+    mouseX = e.clientX; mouseY = e.clientY;
+});
+
+canvas.addEventListener('pointermove', (e) => {
+    if (isSelecting) {
+        mouseX = e.clientX; mouseY = e.clientY;
+    }
+});
+
+canvas.addEventListener('pointerup', (e) => {
+    if (!isSelecting) return;
+    isSelecting = false;
+    
+    const dist = Math.hypot(e.clientX - selStartX, e.clientY - selStartY);
+    
+    if (dist < 10) {
+        // Tap: Issue Move/Attack Command
+        let selected = units.filter(u => u.team === 0 && u.selected);
+        selected.forEach(u => {
+            u.targetX = e.clientX; u.targetY = e.clientY;
+            u.targetUnit = null; // Reset unit target on manual move
+        });
+    } else {
+        // Drag: Select Box
+        const xMin = Math.min(selStartX, mouseX);
+        const xMax = Math.max(selStartX, mouseX);
+        const yMin = Math.min(selStartY, mouseY);
+        const yMax = Math.max(selStartY, mouseY);
+        
+        units.forEach(u => {
+            if (u.team === 0) {
+                u.selected = (u.x >= xMin && u.x <= xMax && u.y >= yMin && u.y <= yMax);
+            }
+        });
+    }
+});
+
+
+// --- Main Game Loop ---
+let lastTime = performance.now();
+
+function updateAndDraw() {
+    const now = performance.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+    
+    // AI Logic (1 tick per second roughly)
+    if (Math.random() < 0.05) {
+        for(let i=1; i<4; i++) {
+            if (buildings[i] && buildings[i].hp > 0) {
+                // Try to buy grenadier first, then soldier
+                let type = cash[i] >= 100 && Math.random() > 0.5 ? 1 : 0;
+                if (cash[i] >= STATS[type].cost) {
+                    cash[i] -= STATS[type].cost;
+                    units.push(new Unit(buildings[i].x + (Math.random()*40-20), buildings[i].y + (Math.random()*40-20), i, type));
+                }
+            }
+        }
+    }
+
+    // Process Units
+    for (let i = units.length - 1; i >= 0; i--) {
+        let u = units[i];
+        
+        // Find nearest enemy
+        let nearestEnemy = null; let minDist = Infinity;
+        for (let e of units) {
+            if (e.team !== u.team && e.hp > 0) {
+                let d = Math.hypot(u.x - e.x, u.y - e.y);
+                if (d < minDist) { minDist = d; nearestEnemy = e; }
+            }
+        }
+        for (let b of buildings) {
+            if (b.team !== u.team && b.hp > 0) {
+                let d = Math.hypot(u.x - b.x, u.y - b.y);
+                if (d < minDist) { minDist = d; nearestEnemy = b; }
+            }
+        }
+
+        u.targetUnit = nearestEnemy;
+        const stats = STATS[u.type];
+        
+        // Manual Joystick Control Override
+        if (u.team === 0 && u.selected && (joyDX !== 0 || joyDY !== 0)) {
+            u.x += joyDX * u.speed;
+            u.y += joyDY * u.speed;
+            u.targetX = null; u.targetY = null; // Cancel RTS pathing
+        } 
+        // RTS Movement
+        else {
+            let tx = u.targetX, ty = u.targetY;
+            
+            // If AI or no manual target, move to enemy
+            if ((u.team !== 0 || (!u.targetX && !u.targetY)) && u.targetUnit) {
+                if (minDist > stats.range * 0.8) {
+                    tx = u.targetUnit.x; ty = u.targetUnit.y;
+                } else {
+                    tx = null; ty = null; // In range, stop moving
+                }
+            }
+            
+            if (tx !== null && ty !== null) {
+                let dx = tx - u.x; let dy = ty - u.y;
+                let d = Math.hypot(dx, dy);
+                if (d > u.speed) {
+                    u.x += (dx / d) * u.speed;
+                    u.y += (dy / d) * u.speed;
+                } else {
+                    u.targetX = null; u.targetY = null; // Reached target
+                }
+            }
+        }
+
+        // Combat
+        if (u.cooldown > 0) u.cooldown--;
+        if (u.targetUnit && u.cooldown <= 0) {
+            let dx = u.targetUnit.x - u.x; let dy = u.targetUnit.y - u.y;
+            let d = Math.hypot(dx, dy);
+            if (d <= stats.range) {
+                if (u.type === 0) {
+                    // Soldier: Instant hit
+                    u.targetUnit.hp -= stats.dmg;
+                    checkDeath(u.targetUnit, u.team);
+                } else {
+                    // Grenadier: Projectile
+                    projectiles.push(new Projectile(u.x, u.y, u.targetUnit.x, u.targetUnit.y, u.team, true, stats.dmg));
+                }
+                u.cooldown = stats.cd;
+            }
+        }
+        
+        // Keep in bounds
+        u.x = Math.max(u.size, Math.min(canvas.width - u.size, u.x));
+        u.y = Math.max(u.size, Math.min(canvas.height - u.size, u.y));
+    }
+    
+    // Separation (Prevent Stacking)
+    for (let i = 0; i < units.length; i++) {
+        for (let j = i + 1; j < units.length; j++) {
+            let u1 = units[i], u2 = units[j];
+            let dx = u2.x - u1.x, dy = u2.y - u1.y;
+            let d = Math.hypot(dx, dy);
+            let rad = u1.size + u2.size;
+            if (d < rad && d > 0) {
+                let overlap = rad - d;
+                let nx = (dx / d) * overlap * 0.5;
+                let ny = (dy / d) * overlap * 0.5;
+                u1.x -= nx; u1.y -= ny;
+                u2.x += nx; u2.y += ny;
+            }
+        }
+    }
+
+    // Process Projectiles
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        let p = projectiles[i];
+        let dx = p.tx - p.x; let dy = p.ty - p.y;
+        let d = Math.hypot(dx, dy);
+        
+        if (d <= p.speed) {
+            // Impact
+            if (p.isGrenade) {
+                // AoE Explosion
+                for(let k=0; k<20; k++) particles.push(new Particle(p.x, p.y, 1, 0.5, 0, 30));
+                
+                [...units, ...buildings].forEach(target => {
+                    if (target.team !== p.team && target.hp > 0) {
+                        if (Math.hypot(target.x - p.x, target.y - p.y) < 40) { // Splash radius
+                            target.hp -= p.dmg;
+                            checkDeath(target, p.team);
+                        }
+                    }
+                });
+            }
+            projectiles.splice(i, 1);
+        } else {
+            p.x += (dx / d) * p.speed; p.y += (dy / d) * p.speed;
+        }
+    }
+    
+    // Process Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx; p.y += p.vy; p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // Cleanup dead entities
+    units = units.filter(u => u.hp > 0);
+    
+    // Update UI occasionally to prevent DOM lag
+    if (Math.random() < 0.1) updateUI();
+
+    // --- Render ---
+    gl.clearColor(0.1, 0.15, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    
+    buildings.forEach(b => { if (b.hp > 0) b.draw(); });
+    units.forEach(u => u.draw());
+    projectiles.forEach(p => p.draw());
+    particles.forEach(p => p.draw());
+    
+    // Draw Selection Box
+    if (isSelecting) {
+        const w = mouseX - selStartX;
+        const h = mouseY - selStartY;
+        pushQuad(selStartX, selStartY, w, h, 0.5, 0.8, 1.0, 0.3); // Semi-transparent blue
+    }
+    
+    flush();
+    
+    requestAnimationFrame(updateAndDraw);
+}
+
+function checkDeath(target, killerTeam) {
+    if (target.hp <= 0) {
+        cash[killerTeam] += target instanceof Building ? 500 : (target.type === 1 ? 50 : 25);
+        if (target instanceof Building) {
+            for(let k=0; k<50; k++) particles.push(new Particle(target.x, target.y, 1, 0.2, 0.2, 60));
+        }
+    }
+}
+
+// Start Game
+initMap();
+updateUI();
+requestAnimationFrame(updateAndDraw);
+
+</script>
+</body>
+</html>
