@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Web RPG Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; user-select: none; }
+        #game-canvas { width: 100vw; height: 100vh; display: block; }
+        
+        /* UI Overlay */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        
+        /* Health Bars */
+        .health-bar-container { position: absolute; width: 150px; height: 20px; background: rgba(0,0,0,0.5); border: 2px solid #fff; border-radius: 5px; }
+        .health-fill { width: 100%; height: 100%; background: #ff3333; transition: width 0.2s; }
+        #player-health-ui { top: 20px; left: 20px; }
+        #npc-health-ui { top: 20px; right: 20px; display: none; }
+        .ui-label { position: absolute; top: -20px; color: white; font-weight: bold; font-size: 14px; text-shadow: 1px 1px 2px black; }
+
+        /* Action Bar (Spells) */
+        #action-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; pointer-events: auto; }
+        .spell-btn { width: 60px; height: 60px; background: rgba(0, 50, 150, 0.7); border: 2px solid #88ccff; border-radius: 8px; color: white; font-size: 12px; font-weight: bold; display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; box-shadow: 0 0 10px #00aaff; }
+        .spell-btn:active { background: rgba(0, 100, 255, 0.9); transform: scale(0.95); }
+
+        /* System Buttons (Backpack) */
+        #sys-menu { position: absolute; bottom: 20px; right: 20px; pointer-events: auto; }
+        .sys-btn { width: 50px; height: 50px; background: rgba(50, 50, 50, 0.8); border: 2px solid #aaa; border-radius: 50%; color: white; font-size: 10px; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+        /* Virtual Joystick */
+        #joystick-zone { position: absolute; bottom: 20px; left: 20px; width: 120px; height: 120px; background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%; pointer-events: auto; }
+        #joystick-knob { position: absolute; top: 35px; left: 35px; width: 50px; height: 50px; background: rgba(255, 255, 255, 0.5); border-radius: 50%; pointer-events: none; }
+        
+        /* Graveyard Overlay */
+        #death-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: red; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 30px; pointer-events: none; opacity: 0; transition: opacity 1s; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="player-health-ui" class="health-bar-container">
+            <div class="ui-label">Player</div>
+            <div id="player-hp-fill" class="health-fill"></div>
+        </div>
+        
+        <div id="npc-health-ui" class="health-bar-container">
+            <div class="ui-label">Angry Orc</div>
+            <div id="npc-hp-fill" class="health-fill"></div>
+        </div>
+
+        <div id="action-bar">
+            <div class="spell-btn" id="btn-blizzard">Blizzard<br>Sphere</div>
+        </div>
+
+        <div id="sys-menu">
+            <div class="sys-btn" onclick="alert('Backpack opened! (Inventory System Pending)')">Bag</div>
+        </div>
+
+        <div id="joystick-zone">
+            <div id="joystick-knob"></div>
+        </div>
+        
+        <div id="death-screen">
+            <h1>YOU DIED</h1>
+            <p style="font-size: 18px; color: white;">Releasing spirit to Graveyard...</p>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222233);
+        scene.fog = new THREE.Fog(0x222233, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 20, 10);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        // Ground
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshStandardMaterial({ color: 0x335533 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // Graveyard Marker
+        const graveMarker = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 0.5), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+        const graveyardPos = new THREE.Vector3(15, 1, 15);
+        graveMarker.position.copy(graveyardPos);
+        scene.add(graveMarker);
+
+        // --- 2. GAME ENTITIES ---
+        // Player
+        const player = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshStandardMaterial({ color: 0x4488ff }));
+        player.position.y = 1;
+        scene.add(player);
+        
+        let playerStats = { hp: 100, maxHp: 100, dead: false };
+
+        // NPC (Enemy)
+        const npcSpawnPos = new THREE.Vector3(0, 1, -15);
+        const npc = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 1.2), new THREE.MeshStandardMaterial({ color: 0xff3333 }));
+        npc.position.copy(npcSpawnPos);
+        scene.add(npc);
+
+        let npcStats = { hp: 100, maxHp: 100, state: 'idle', speed: 0.05, attackTimer: 0 };
+
+        // Spells (Projectiles)
+        const projectiles = [];
+
+        // --- 3. CONTROLS (Virtual Joystick) ---
+        let moveVector = new THREE.Vector2(0, 0);
+        const joystickZone = document.getElementById('joystick-zone');
+        const joystickKnob = document.getElementById('joystick-knob');
+        const rect = joystickZone.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        function handleTouch(e) {
+            e.preventDefault();
+            if (playerStats.dead) return;
+            const touch = e.targetTouches[0];
+            if (touch) {
+                let dx = touch.clientX - centerX;
+                let dy = touch.clientY - centerY;
+                const distance = Math.min(Math.sqrt(dx*dx + dy*dy), 35);
+                const angle = Math.atan2(dy, dx);
+                
+                joystickKnob.style.transform = `translate(${Math.cos(angle) * distance}px, ${Math.sin(angle) * distance}px)`;
+                
+                // Map joystick to 3D movement (X and Z axis)
+                moveVector.set(Math.cos(angle), Math.sin(angle));
+            } else {
+                joystickKnob.style.transform = `translate(0px, 0px)`;
+                moveVector.set(0, 0);
+            }
+        }
+        joystickZone.addEventListener('touchstart', handleTouch);
+        joystickZone.addEventListener('touchmove', handleTouch);
+        joystickZone.addEventListener('touchend', handleTouch);
+        
+        // --- 4. SPELLCASTING ---
+        document.getElementById('btn-blizzard').addEventListener('click', () => {
+            if (playerStats.dead) return;
+            
+            // Create Blizzard Sphere
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.8, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true })
+            );
+            sphere.position.copy(player.position);
+            
+            // Figure out direction based on joystick, or default forward
+            let dir = new THREE.Vector3(moveVector.x, 0, moveVector.y).normalize();
+            if (dir.length() === 0) dir.set(0, 0, -1); // Default shoot forward
+            
+            scene.add(sphere);
+            projectiles.push({ mesh: sphere, direction: dir, life: 100 });
+        });
+
+        // --- 5. GAME LOGIC ---
+        function updateUI() {
+            document.getElementById('player-hp-fill').style.width = (playerStats.hp / playerStats.maxHp * 100) + '%';
+            document.getElementById('npc-hp-fill').style.width = (npcStats.hp / npcStats.maxHp * 100) + '%';
+            
+            if (npcStats.hp < npcStats.maxHp && npcStats.hp > 0) {
+                document.getElementById('npc-health-ui').style.display = 'block';
+            } else {
+                document.getElementById('npc-health-ui').style.display = 'none';
+            }
+        }
+
+        function handleDeath() {
+            if (playerStats.dead) return;
+            playerStats.dead = true;
+            document.getElementById('death-screen').style.opacity = 1;
+            
+            setTimeout(() => {
+                // Respawn at Graveyard
+                player.position.copy(graveyardPos);
+                playerStats.hp = playerStats.maxHp;
+                playerStats.dead = false;
+                document.getElementById('death-screen').style.opacity = 0;
+                
+                // Reset NPC
+                npc.position.copy(npcSpawnPos);
+                npcStats.hp = npcStats.maxHp;
+                npcStats.state = 'idle';
+                updateUI();
+            }, 3000);
+        }
+
+        function gameLoop() {
+            requestAnimationFrame(gameLoop);
+
+            // 1. Move Player
+            if (!playerStats.dead && (moveVector.x !== 0 || moveVector.y !== 0)) {
+                const speed = 0.15;
+                player.position.x += moveVector.x * speed;
+                player.position.z += moveVector.y * speed;
+            }
+
+            // Camera follows player smoothly
+            camera.position.lerp(new THREE.Vector3(player.position.x, player.position.y + 8, player.position.z + 10), 0.1);
+            camera.lookAt(player.position);
+
+            // 2. Projectiles (Blizzard Sphere)
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                let p = projectiles[i];
+                p.mesh.position.addScaledVector(p.direction, 0.3);
+                p.mesh.rotation.x += 0.2;
+                p.mesh.rotation.y += 0.2;
+                p.life--;
+
+                // Hit Detection on NPC
+                if (p.mesh.position.distanceTo(npc.position) < 1.5 && npcStats.hp > 0) {
+                    npcStats.hp -= 25;
+                    p.life = 0; // Destroy projectile
+                    npcStats.state = 'chase'; // Aggro
+                    npc.material.color.setHex(0xffffff); // Flash white
+                    setTimeout(() => npc.material.color.setHex(0xff3333), 100);
+                }
+
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    projectiles.splice(i, 1);
+                }
+            }
+
+            // 3. NPC AI Logic
+            if (npcStats.hp > 0 && !playerStats.dead) {
+                const distToPlayer = npc.position.distanceTo(player.position);
+
+                if (distToPlayer < 8 && npcStats.state === 'idle') {
+                    npcStats.state = 'chase';
+                }
+
+                if (npcStats.state === 'chase') {
+                    if (distToPlayer > 1.5) {
+                        // Move toward player
+                        const dir = new THREE.Vector3().subVectors(player.position, npc.position).normalize();
+                        npc.position.addScaledVector(dir, npcStats.speed);
+                    } else {
+                        // Attack
+                        npcStats.attackTimer++;
+                        if (npcStats.attackTimer > 60) { // 1 attack per second roughly
+                            playerStats.hp -= 15;
+                            npcStats.attackTimer = 0;
+                            player.material.color.setHex(0xff0000); // Player flashes red
+                            setTimeout(() => player.material.color.setHex(0x4488ff), 100);
+                            if (playerStats.hp <= 0) handleDeath();
+                        }
+                    }
+                }
+            } else if (npcStats.hp <= 0) {
+                // NPC Dead
+                npc.position.y = -10; // hide underground
+                setTimeout(() => { // Respawn NPC after 5 seconds
+                    npcStats.hp = npcStats.maxHp;
+                    npc.position.copy(npcSpawnPos);
+                    npcStats.state = 'idle';
+                }, 5000);
+            }
+
+            // Graveyard Reset Logic (NPC returns home if player dies)
+            if (playerStats.dead && npc.position.distanceTo(npcSpawnPos) > 1) {
+                const dir = new THREE.Vector3().subVectors(npcSpawnPos, npc.position).normalize();
+                npc.position.addScaledVector(dir, npcStats.speed);
+                npcStats.state = 'return';
+            }
+
+            updateUI();
+            renderer.render(scene, camera);
+        }
+
+        // Start Game
+        gameLoop();
+        
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
