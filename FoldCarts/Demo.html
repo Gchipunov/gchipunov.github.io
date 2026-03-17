@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Cart RTS</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #111; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px; 
+            left: 20px;
+            color: white; 
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 20px; 
+            border-radius: 8px;
+            border: 1px solid #444;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        h2 { margin: 0 0 10px 0; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 1px; color: #4da6ff; }
+        p { margin: 5px 0; font-size: 0.9rem; color: #ccc;}
+        #status { margin-top: 15px; font-weight: bold; font-size: 1.1rem; color: #fff;}
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+</head>
+<body>
+    <div id="ui-layer">
+        <h2>Trailer Loader RTS</h2>
+        <p><strong>Controls:</strong> Left-Click on the floor to direct the employee.</p>
+        <p><strong>Goal:</strong> Push all yellow folding carts into the grey trailer zone.</p>
+        <div id="status">Carts stowed: 0 / 5</div>
+    </div>
+
+    <script>
+        // --- 1. INITIALIZATION ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+
+        // Camera setup (Top-Down isometric-ish view)
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 25, 15);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Physics World setup
+        const world = new CANNON.World();
+        world.gravity.set(0, -9.82, 0); // Standard Earth gravity
+        world.broadphase = new CANNON.NaiveBroadphase();
+        world.solver.iterations = 10;
+
+        // --- 2. LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        scene.add(dirLight);
+
+        // --- 3. ENVIRONMENT (WAREHOUSE & TRAILER) ---
+        // Floor rendering
+        const floorGeo = new THREE.PlaneGeometry(40, 40);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+        floorMesh.rotation.x = -Math.PI / 2;
+        floorMesh.receiveShadow = true;
+        scene.add(floorMesh);
+
+        // Floor physics
+        const floorShape = new CANNON.Plane();
+        const floorBody = new CANNON.Body({ mass: 0, shape: floorShape });
+        floorBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+        world.addBody(floorBody);
+
+        // Trailer Zone (Visual Only)
+        const trailerBounds = { minX: 4, maxX: 14, minZ: -5, maxZ: 5 };
+        const trailerGeo = new THREE.PlaneGeometry(10, 10);
+        const trailerMat = new THREE.MeshStandardMaterial({ color: 0x555566, transparent: true, opacity: 0.8 });
+        const trailerMesh = new THREE.Mesh(trailerGeo, trailerMat);
+        trailerMesh.rotation.x = -Math.PI / 2;
+        trailerMesh.position.set(9, 0.01, 0); // Slightly above floor to prevent z-fighting
+        trailerMesh.receiveShadow = true;
+        scene.add(trailerMesh);
+
+        // Target Indicator (shows where you clicked)
+        const targetGeo = new THREE.RingGeometry(0.3, 0.5, 16);
+        const targetMat = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+        const targetMesh = new THREE.Mesh(targetGeo, targetMat);
+        targetMesh.rotation.x = -Math.PI / 2;
+        targetMesh.position.y = 0.02;
+        targetMesh.visible = false;
+        scene.add(targetMesh);
+
+        // --- 4. ENTITIES (EMPLOYEE & CARTS) ---
+        // Employee (Player)
+        const employeeRadius = 0.6;
+        const employeeMass = 50; // Heavy enough to push carts easily
+        
+        // Employee Physics
+        const employeeShape = new CANNON.Sphere(employeeRadius);
+        const employeeBody = new CANNON.Body({ mass: employeeMass, shape: employeeShape });
+        employeeBody.position.set(-8, employeeRadius, 0);
+        employeeBody.linearDamping = 0.9; // High friction so they don't slide forever
+        world.addBody(employeeBody);
+
+        // Employee Visual
+        const employeeGeo = new THREE.CylinderGeometry(0.4, 0.6, 1.2, 16);
+        const employeeMat = new THREE.MeshStandardMaterial({ color: 0x4da6ff });
+        const employeeMesh = new THREE.Mesh(employeeGeo, employeeMat);
+        employeeMesh.castShadow = true;
+        scene.add(employeeMesh);
+
+        // Carts
+        const carts = [];
+        const numCarts = 5;
+        const cartSize = { w: 1, h: 1.2, d: 1.5 };
+
+        for (let i = 0; i < numCarts; i++) {
+            // Cart Physics
+            const cartShape = new CANNON.Box(new CANNON.Vec3(cartSize.w/2, cartSize.h/2, cartSize.d/2));
+            const cartBody = new CANNON.Body({ mass: 10, shape: cartShape });
+            cartBody.position.set(-2 + (Math.random() * 4 - 2), cartSize.h/2, -4 + (i * 2));
+            cartBody.linearDamping = 0.8; 
+            cartBody.angularDamping = 0.8;
+            world.addBody(cartBody);
+
+            // Cart Visual
+            const cartGeo = new THREE.BoxGeometry(cartSize.w, cartSize.h, cartSize.d);
+            const cartMat = new THREE.MeshStandardMaterial({ color: 0xffcc00 }); // Yellow
+            const cartMesh = new THREE.Mesh(cartGeo, cartMat);
+            cartMesh.castShadow = true;
+            cartMesh.receiveShadow = true;
+            scene.add(cartMesh);
+
+            carts.push({ body: cartBody, mesh: cartMesh, stowed: false });
+        }
+
+        // --- 5. RTS CONTROLS (RAYCASTING) ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let targetPosition = null;
+        const speed = 12;
+
+        window.addEventListener('pointerdown', (event) => {
+            // Convert mouse click to normalized device coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            // Raycast from camera to floor
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(floorMesh);
+
+            if (intersects.length > 0) {
+                targetPosition = intersects[0].point;
+                targetMesh.position.set(targetPosition.x, 0.02, targetPosition.z);
+                targetMesh.visible = true;
+            }
+        });
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- 6. GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Step the physics world
+            world.step(1 / 60);
+
+            // RTS Movement Logic
+            if (targetPosition) {
+                const dx = targetPosition.x - employeeBody.position.x;
+                const dz = targetPosition.z - employeeBody.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+
+                if (distance > 0.5) {
+                    // Move towards target
+                    employeeBody.velocity.x = (dx / distance) * speed;
+                    employeeBody.velocity.z = (dz / distance) * speed;
+                } else {
+                    // Arrived at target
+                    targetPosition = null;
+                    targetMesh.visible = false;
+                }
+            }
+
+            // Sync Employee Visuals with Physics
+            employeeMesh.position.copy(employeeBody.position);
+            // Offset visual cylinder so it sits on the ground properly (sphere physics roll)
+            employeeMesh.position.y -= (employeeRadius - 0.6); 
+
+            // Sync Carts and Check Win Condition
+            let stowedCount = 0;
+            
+            carts.forEach(cart => {
+                cart.mesh.position.copy(cart.body.position);
+                cart.mesh.quaternion.copy(cart.body.quaternion);
+
+                const pos = cart.body.position;
+                // Check if cart is inside trailer bounds
+                if (pos.x > trailerBounds.minX && pos.x < trailerBounds.maxX && 
+                    pos.z > trailerBounds.minZ && pos.z < trailerBounds.maxZ) {
+                    cart.mesh.material.color.setHex(0x22cc22); // Turn Green
+                    stowedCount++;
+                } else {
+                    cart.mesh.material.color.setHex(0xffcc00); // Stay Yellow
+                }
+            });
+
+            // Update UI
+            document.getElementById('status').innerText = `Carts stowed: ${stowedCount} / ${numCarts}`;
+            if (stowedCount === numCarts) {
+                document.getElementById('status').innerText = "All carts stowed! Great job!";
+                document.getElementById('status').style.color = "#22cc22";
+            }
+
+            // Render Scene
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
