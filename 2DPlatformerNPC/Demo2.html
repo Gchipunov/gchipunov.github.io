@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL 2D Platformer - Mobile & Combat</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+            color: white;
+            font-family: sans-serif;
+            flex-direction: column;
+            overflow: hidden; /* Prevent scrolling on mobile */
+            touch-action: none; /* Disable double-tap zoom and pan */
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            max-width: 100vw;
+            aspect-ratio: 4/3; /* Keeps canvas proportions on mobile */
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #87CEEB;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            display: block;
+        }
+        
+        /* --- MOBILE UI CONTROLS --- */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; /* Let clicks pass through empty space */
+        }
+
+        /* Joystick */
+        #joystick-base {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            pointer-events: auto;
+            touch-action: none;
+        }
+        #joystick-stick {
+            position: absolute;
+            top: 35px;
+            left: 35px;
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        /* Action Buttons */
+        .action-btns {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            pointer-events: auto;
+            display: grid;
+            grid-template-areas: 
+                ". jump"
+                "punch kick";
+            gap: 15px;
+        }
+        .btn {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            user-select: none;
+            touch-action: none;
+        }
+        .btn:active { background: rgba(255, 255, 255, 0.6); }
+        
+        #btn-jump { grid-area: jump; }
+        #btn-punch { grid-area: punch; }
+        #btn-kick { grid-area: kick; }
+
+        p { margin-top: 10px; font-size: 14px; text-align: center; padding: 0 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        
+        <div id="ui-layer">
+            <div id="joystick-base">
+                <div id="joystick-stick"></div>
+            </div>
+            <div class="action-btns">
+                <div class="btn" id="btn-jump">JUMP</div>
+                <div class="btn" id="btn-punch">PUNCH</div>
+                <div class="btn" id="btn-kick">KICK</div>
+            </div>
+        </div>
+    </div>
+    
+    <p>Desktop: <b>Arrows</b> to move/jump, <b>Z</b> to punch, <b>X</b> to kick.<br>Mobile: Use on-screen controls.</p>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const gl = canvas.getContext("webgl");
+
+    if (!gl) alert("WebGL not supported in your browser.");
+
+    // --- 1. WEBGL SHADERS ---
+    const vertexShaderSource = `
+        attribute vec2 a_position;
+        uniform vec2 u_resolution;
+        uniform vec2 u_translation;
+        uniform vec2 u_scale;
+
+        void main() {
+            vec2 position = (a_position * u_scale) + u_translation;
+            vec2 zeroToOne = position / u_resolution;
+            vec2 zeroToTwo = zeroToOne * 2.0;
+            vec2 clipSpace = zeroToTwo - 1.0;
+            gl_Position = vec4(clipSpace, 0.0, 1.0);
+        }
+    `;
+
+    const fragmentShaderSource = `
+        precision mediump float;
+        uniform vec4 u_color;
+        void main() {
+            gl_FragColor = u_color;
+        }
+    `;
+
+    // --- 2. WEBGL SETUP ---
+    function compileShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+        }
+        return shader;
+    }
+
+    const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+    const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const positionLocation = gl.getAttribLocation(program, "a_position");
+    const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+    const colorLocation = gl.getUniformLocation(program, "u_color");
+    const translationLocation = gl.getUniformLocation(program, "u_translation");
+    const scaleLocation = gl.getUniformLocation(program, "u_scale");
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0, 0,  1, 0,  0, 1,
+        0, 1,  1, 0,  1, 1,
+    ]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+
+    // --- 3. GAME STATE & ENTITIES ---
+    const gravity = -0.6;
+    const friction = 0.8;
+
+    const baseColor = [0.1, 0.5, 0.9, 1.0];
+    const player = { 
+        x: 100, y: 100, w: 32, h: 32, vx: 0, vy: 0, speed: 5, jumpPower: 12, 
+        grounded: false, color: baseColor, facing: 1, // 1 = right, -1 = left
+        attackTimer: 0, attackType: 0 // 1 = punch, 2 = kick
+    };
+    
+    const npc = { x: 650, y: 100, w: 32, h: 32, vx: 0, vy: 0, speed: 2.5, jumpPower: 11, grounded: false, lastX: 650, color: [0.9, 0.2, 0.2, 1.0] };
+    
+    // Add Enemies (Purple squares)
+    let enemies = [
+        { x: 250, y: 180, w: 32, h: 32, vx: 0, vy: 0, speed: 2, dir: 1, grounded: false, color: [0.6, 0.1, 0.8, 1.0] },
+        { x: 500, y: 280, w: 32, h: 32, vx: 0, vy: 0, speed: 2, dir: -1, grounded: false, color: [0.6, 0.1, 0.8, 1.0] }
+    ];
+
+    const platforms = [
+        { x: 0, y: 0, w: 800, h: 50, color: [0.2, 0.6, 0.2, 1.0] },
+        { x: 200, y: 150, w: 150, h: 20, color: [0.5, 0.3, 0.1, 1.0] },
+        { x: 450, y: 250, w: 150, h: 20, color: [0.5, 0.3, 0.1, 1.0] },
+        { x: 100, y: 350, w: 150, h: 20, color: [0.5, 0.3, 0.1, 1.0] }
+    ];
+
+    let attackBox = null; // Holds the hitbox coordinates for rendering
+
+    // --- 4. INPUT LOGIC (KEYBOARD & TOUCH) ---
+    const keys = {};
+    let joyX = 0; // Joystick X value (-1 to 1)
+    
+    window.addEventListener("keydown", (e) => keys[e.code] = true);
+    window.addEventListener("keyup", (e) => keys[e.code] = false);
+
+    // Joystick Logic
+    const joyBase = document.getElementById("joystick-base");
+    const joyStick = document.getElementById("joystick-stick");
+    let touchId = null;
+
+    joyBase.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        touchId = e.changedTouches[0].identifier;
+        updateJoystick(e.changedTouches[0]);
+    });
+    joyBase.addEventListener("touchmove", (e) => {
+        e.preventDefault();
+        for (let t of e.changedTouches) {
+            if (t.identifier === touchId) updateJoystick(t);
+        }
+    });
+    const resetJoystick = (e) => {
+        e.preventDefault();
+        for (let t of e.changedTouches) {
+            if (t.identifier === touchId) {
+                touchId = null;
+                joyX = 0;
+                joyStick.style.transform = `translate(0px, 0px)`;
+            }
+        }
+    };
+    joyBase.addEventListener("touchend", resetJoystick);
+    joyBase.addEventListener("touchcancel", resetJoystick);
+
+    function updateJoystick(touch) {
+        let rect = joyBase.getBoundingClientRect();
+        let centerX = rect.left + rect.width / 2;
+        let diffX = touch.clientX - centerX;
+        
+        // Clamp stick visually to radius
+        let maxRadius = rect.width / 2 - 25; 
+        let clampedX = Math.max(-maxRadius, Math.min(maxRadius, diffX));
+        
+        joyStick.style.transform = `translate(${clampedX}px, 0px)`;
+        joyX = clampedX / maxRadius; // Normalize to -1.0 to 1.0
+    }
+
+    // Touch Action Buttons
+    const bindBtn = (id, keyCode) => {
+        let btn = document.getElementById(id);
+        btn.addEventListener("touchstart", (e) => { e.preventDefault(); keys[keyCode] = true; });
+        btn.addEventListener("touchend", (e) => { e.preventDefault(); keys[keyCode] = false; });
+    };
+    bindBtn("btn-jump", "ArrowUp");
+    bindBtn("btn-punch", "KeyZ");
+    bindBtn("btn-kick", "KeyX");
+
+    // --- 5. PHYSICS & LOGIC ---
+    function checkAABB(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function updateEntity(ent) {
+        ent.vy += gravity; 
+        let hitWall = false;
+
+        // X-Axis
+        ent.x += ent.vx;
+        for (let p of platforms) {
+            if (checkAABB(ent, p)) {
+                if (ent.vx > 0) ent.x = p.x - ent.w; 
+                else if (ent.vx < 0) ent.x = p.x + p.w; 
+                ent.vx = 0;
+                hitWall = true;
+            }
+        }
+
+        // Y-Axis
+        ent.y += ent.vy;
+        ent.grounded = false;
+        for (let p of platforms) {
+            if (checkAABB(ent, p)) {
+                if (ent.vy > 0) {
+                    ent.y = p.y - ent.h;
+                    ent.vy = 0;
+                } else if (ent.vy < 0) { 
+                    ent.y = p.y + p.h;
+                    ent.vy = 0;
+                    ent.grounded = true;
+                }
+            }
+        }
+
+        // Bounds
+        if (ent.x < 0) { ent.x = 0; ent.vx = 0; hitWall = true;}
+        if (ent.x + ent.w > canvas.width) { ent.x = canvas.width - ent.w; ent.vx = 0; hitWall = true; }
+        if (ent.y < 0) { ent.y = 0; ent.vy = 0; ent.grounded = true; } 
+        
+        return hitWall;
+    }
+
+    function update() {
+        // 1. Player Movement (Keyboard OR Joystick)
+        let movingX = 0;
+        if (keys["ArrowRight"]) movingX = 1;
+        else if (keys["ArrowLeft"]) movingX = -1;
+        else if (Math.abs(joyX) > 0.1) movingX = joyX; // Use joystick if pushed
+
+        if (movingX !== 0) {
+            player.vx = player.speed * movingX;
+            player.facing = movingX > 0 ? 1 : -1;
+        } else {
+            player.vx *= friction; 
+        }
+
+        if (keys["ArrowUp"] && player.grounded) {
+            player.vy = player.jumpPower;
+            player.grounded = false;
+        }
+
+        // 2. Combat Logic (Punch/Kick)
+        attackBox = null;
+        if (player.attackTimer > 0) {
+            player.attackTimer--;
+            
+            // Define Hitbox (appears in front of player)
+            attackBox = {
+                x: player.facing === 1 ? player.x + player.w : player.x - 20,
+                y: player.attackType === 1 ? player.y + 16 : player.y + 4, // Punch high, Kick low
+                w: 20, h: 12,
+                color: player.attackType === 1 ? [1.0, 0.8, 0.0, 1.0] : [1.0, 0.5, 0.0, 1.0] // Yellow vs Orange
+            };
+
+            // Hit Enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                if (checkAABB(attackBox, enemies[i])) {
+                    enemies.splice(i, 1); // Enemy destroyed
+                }
+            }
+        } else {
+            // Initiate attack (Z = Punch, X = Kick)
+            if (keys["KeyZ"]) { player.attackTimer = 15; player.attackType = 1; }
+            else if (keys["KeyX"]) { player.attackTimer = 15; player.attackType = 2; }
+        }
+
+        // 3. NPC AI
+        if (npc.x < player.x - 40) npc.vx = npc.speed;
+        else if (npc.x > player.x + 40) npc.vx = -npc.speed;
+        else npc.vx *= friction;
+
+        if (Math.abs(npc.vx) > 0.5 && Math.abs(npc.x - npc.lastX) < 0.1 && npc.grounded) {
+            npc.vy = npc.jumpPower;
+            npc.grounded = false;
+        }
+        npc.lastX = npc.x;
+
+        // 4. Enemy AI (Patrol)
+        player.color = baseColor; // Reset player color
+        for (let e of enemies) {
+            e.vx = e.speed * e.dir;
+            let hitWall = updateEntity(e);
+            if (hitWall || (e.vx === 0 && !e.grounded)) e.dir *= -1; // Turn around if stuck
+            
+            // Damage player if touched (without attacking)
+            if (checkAABB(player, e) && player.attackTimer === 0) {
+                player.color = [1.0, 0.0, 0.0, 1.0]; // Flash red
+            }
+        }
+
+        updateEntity(player);
+        updateEntity(npc);
+    }
+
+    // --- 6. RENDERING ---
+    function drawRect(x, y, w, h, color) {
+        gl.uniform2f(translationLocation, x, y);
+        gl.uniform2f(scaleLocation, w, h);
+        gl.uniform4fv(colorLocation, color);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    function render() {
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Draw Platforms
+        for (let p of platforms) drawRect(p.x, p.y, p.w, p.h, p.color);
+        
+        // Draw Enemies
+        for (let e of enemies) drawRect(e.x, e.y, e.w, e.h, e.color);
+
+        // Draw NPC and Player
+        drawRect(npc.x, npc.y, npc.w, npc.h, npc.color);
+        drawRect(player.x, player.y, player.w, player.h, player.color);
+
+        // Draw Attack Hitbox
+        if (attackBox) drawRect(attackBox.x, attackBox.y, attackBox.w, attackBox.h, attackBox.color);
+    }
+
+    function loop() {
+        update();
+        render();
+        requestAnimationFrame(loop);
+    }
+
+    loop();
+</script>
+</body>
+</html>
