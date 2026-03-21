@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Bloom Radiosity Platformer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #fff; pointer-events: none; text-shadow: 0 0 10px rgba(0,0,0,1); z-index: 10; }
+        .controls { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; justify-content: space-between; padding: 0 30px; box-sizing: border-box; z-index: 10; }
+        .btn { width: 80px; height: 80px; background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; user-select: none; font-weight: bold; backdrop-filter: blur(5px); -webkit-tap-highlight-color: transparent; }
+        .btn:active { background: rgba(255,255,255,0.4); transform: scale(0.9); }
+        .left-group { display: flex; gap: 20px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <b>Radiosity Engine v3</b><br>
+        Bloom + Dynamic Shadows + Raymarching
+    </div>
+    <div class="controls">
+        <div class="left-group">
+            <div class="btn" id="btnLeft">←</div>
+            <div class="btn" id="btnRight">→</div>
+        </div>
+        <div class="btn" id="btnJump">JUMP</div>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script type="glsl" id="vs">
+    attribute vec2 a_position;
+    varying vec2 v_screenUV;
+    void main() {
+        v_screenUV = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+    }
+</script>
+
+<script type="glsl" id="fs">
+    precision mediump float;
+    varying vec2 v_screenUV;
+
+    struct Light { vec2 pos; vec3 color; float intensity; };
+    struct Platform { vec4 rect; vec3 color; };
+
+    uniform Light u_lights[3];
+    uniform Platform u_platforms[13];
+    uniform vec2 u_player;
+    uniform vec2 u_cam;
+    uniform vec2 u_res;
+
+    float drawRect(vec2 uv, vec4 rect) {
+        vec2 s = step(rect.xy, uv) - step(rect.xy + rect.zw, uv);
+        return s.x * s.y;
+    }
+
+    float getShadow(vec2 p, vec2 lightPos) {
+        vec2 dir = normalize(lightPos - p);
+        float distToLight = distance(p, lightPos);
+        // Raymarch for shadows
+        for(float t = 0.02; t < 0.7; t += 0.04) {
+            if(t > distToLight) break;
+            vec2 checkPos = p + dir * t;
+            for(int i=0; i<13; i++) {
+                if(drawRect(checkPos, u_platforms[i].rect) > 0.5) return 0.0;
+            }
+        }
+        return 1.0;
+    }
+
+    void main() {
+        vec2 aspect = vec2(u_res.x/u_res.y, 1.0);
+        vec2 worldUV = v_screenUV * aspect + u_cam;
+        
+        vec3 platformColor = vec3(0.0);
+        float isObj = 0.0;
+
+        // Render Platforms
+        for(int i=0; i<13; i++) {
+            float hit = drawRect(worldUV, u_platforms[i].rect);
+            if(hit > 0.5) {
+                isObj = 1.0;
+                platformColor = u_platforms[i].color;
+            }
+        }
+        
+        // Render Player
+        if(drawRect(worldUV, vec4(u_player, 0.025, 0.045)) > 0.5) {
+            isObj = 1.0;
+            platformColor = vec3(1.0, 0.9, 0.5); // Player glow
+        }
+
+        vec3 directLighting = vec3(0.02); // Ambient base
+        vec3 bloom = vec3(0.0);
+
+        for(int i=0; i<3; i++) {
+            float d = distance(worldUV, u_lights[i].pos);
+            float shadow = getShadow(worldUV, u_lights[i].pos);
+            
+            // Core light falloff
+            float atten = u_lights[i].intensity / (1.0 + d * 6.0 + d * d * 12.0);
+            
+            // Radiosity Color Bleeding
+            vec3 bounce = vec3(0.0);
+            for(int j=0; j<13; j++) {
+                float bDist = distance(u_lights[i].pos, u_platforms[j].rect.xy + u_platforms[j].rect.zw * 0.5);
+                bounce += u_platforms[j].color * (0.25 / (1.0 + bDist * 4.0));
+            }
+
+            vec3 lightSample = (u_lights[i].color + bounce) * atten * shadow;
+            directLighting += lightSample;
+
+            // Bloom/Glow calculation (ignore shadows for the 'haze')
+            float glow = u_lights[i].intensity * 0.015 / (d + 0.01);
+            bloom += (u_lights[i].color + bounce) * pow(glow, 1.2);
+        }
+
+        // Combine: (Object Color * Lighting) + Bloom overlay
+        vec3 final = (platformColor * directLighting) + (bloom * 0.8);
+        
+        // Basic Tone mapping to prevent extreme blowout
+        final = final / (final + vec3(0.15));
+        final = pow(final, vec3(1.0/1.2)); // Gamma correction
+
+        gl_FragColor = vec4(final, 1.0);
+    }
+</script>
+
+<script>
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, document.getElementById('vs').text));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fs').text));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const player = { x: 0.15, y: 0.3, vx: 0, vy: 0, grounded: false };
+const cam = { x: 0, y: 0 };
+const keys = {};
+
+const platforms = [
+    { rect: [0.0, 0.1, 0.5, 0.05], color: [0.3, 0.3, 0.3] },
+    { rect: [0.6, 0.25, 0.3, 0.05], color: [0.2, 0.8, 0.3] },
+    { rect: [1.0, 0.45, 0.4, 0.05], color: [0.3, 0.4, 0.9] },
+    { rect: [1.6, 0.3, 0.2, 0.05], color: [0.9, 0.2, 0.2] },
+    { rect: [2.0, 0.5, 0.3, 0.05], color: [0.8, 0.8, 0.1] },
+    { rect: [2.5, 0.3, 0.5, 0.05], color: [0.1, 0.8, 0.8] },
+    { rect: [3.2, 0.5, 0.3, 0.05], color: [0.8, 0.1, 0.8] },
+    { rect: [3.7, 0.6, 0.2, 0.05], color: [0.4, 0.9, 0.2] },
+    { rect: [4.2, 0.4, 0.4, 0.05], color: [1.0, 0.5, 0.2] },
+    { rect: [4.8, 0.5, 0.3, 0.05], color: [0.2, 1.0, 0.6] },
+    { rect: [5.3, 0.3, 0.6, 0.05], color: [0.6, 0.2, 1.0] },
+    { rect: [6.1, 0.5, 0.3, 0.05], color: [1.0, 1.0, 1.0] },
+    { rect: [6.6, 0.4, 1.0, 0.05], color: [0.2, 0.2, 0.2] }
+];
+
+const lights = [
+    { pos: [0.2, 0.6], color: [1.0, 0.8, 0.6], intensity: 1.8 },
+    { pos: [2.5, 0.7], color: [0.4, 1.0, 0.6], intensity: 2.2 },
+    { pos: [5.5, 0.8], color: [0.6, 0.6, 1.0], intensity: 2.5 }
+];
+
+// Controls
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+const setupBtn = (id, key) => {
+    const el = document.getElementById(id);
+    const setKey = (val) => (e) => { e.preventDefault(); keys[key] = val; };
+    el.ontouchstart = setKey(true); el.ontouchend = setKey(false);
+    el.onmousedown = setKey(true); el.onmouseup = setKey(false);
+};
+setupBtn('btnLeft', 'KeyA'); setupBtn('btnRight', 'KeyD'); setupBtn('btnJump', 'Space');
+
+const posBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(program, "a_position");
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+function update() {
+    if (keys['KeyA'] || keys['ArrowLeft']) player.vx -= 0.0015;
+    if (keys['KeyD'] || keys['ArrowRight']) player.vx += 0.0015;
+    if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.grounded) { 
+        player.vy = 0.02; player.grounded = false; 
+    }
+    
+    player.vy -= 0.001; 
+    player.x += player.vx; player.y += player.vy;
+    player.vx *= 0.88;
+
+    player.grounded = false;
+    platforms.forEach(p => {
+        if (player.x + 0.02 > p.rect[0] && player.x < p.rect[0] + p.rect[2] &&
+            player.y > p.rect[1] + p.rect[3] - 0.03 && player.y < p.rect[1] + p.rect[3]) {
+            player.y = p.rect[1] + p.rect[3]; player.vy = 0; player.grounded = true;
+        }
+    });
+
+    if (player.y < -1.0) { player.x = 0.15; player.y = 0.5; player.vx = 0; player.vy = 0; }
+
+    cam.x += (player.x - cam.x - 0.4) * 0.08;
+    cam.y += (player.y - cam.y - 0.3) * 0.08;
+
+    gl.viewport(0, 0, canvas.width = window.innerWidth, canvas.height = window.innerHeight);
+    gl.uniform2f(gl.getUniformLocation(program, "u_res"), canvas.width, canvas.height);
+    gl.uniform2f(gl.getUniformLocation(program, "u_player"), player.x, player.y);
+    gl.uniform2f(gl.getUniformLocation(program, "u_cam"), cam.x, cam.y);
+    
+    platforms.forEach((p, i) => {
+        gl.uniform4fv(gl.getUniformLocation(program, `u_platforms[${i}].rect`), p.rect);
+        gl.uniform3fv(gl.getUniformLocation(program, `u_platforms[${i}].color`), p.color);
+    });
+    
+    lights.forEach((l, i) => {
+        gl.uniform2fv(gl.getUniformLocation(program, `u_lights[${i}].pos`), l.pos);
+        gl.uniform3fv(gl.getUniformLocation(program, `u_lights[${i}].color`), l.color);
+        gl.uniform1f(gl.getUniformLocation(program, `u_lights[${i}].intensity`), l.intensity);
+    });
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    requestAnimationFrame(update);
+}
+update();
+</script>
+</body>
+</html>
