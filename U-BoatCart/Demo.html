@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>U-Boat Cart: S5 Parking Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Hide scrollbars */
+            font-family: Arial, sans-serif;
+            background-color: #222;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            z-index: 10;
+            text-shadow: 2px 2px 4px #000000;
+        }
+        h1 { margin: 0; font-size: 24px; }
+        p { margin: 5px 0 0 0; font-size: 16px; color: #ccc;}
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>Park the U-Boat in Location S5</h1>
+        <p>Controls: W (Forward), S (Backward), A (Turn Left), D (Turn Right)</p>
+    </div>
+    
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // 1. SCENE SETUP
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x333333); // Dark warehouse vibe
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // 2. LIGHTING
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        scene.add(dirLight);
+
+        // 3. WAREHOUSE FLOOR
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // 4. S5 LOCATION (THE TARGET)
+        const targetGeo = new THREE.PlaneGeometry(8, 12);
+        const targetMat = new THREE.MeshBasicMaterial({ color: 0x00aa00, side: THREE.DoubleSide });
+        const s5Zone = new THREE.Mesh(targetGeo, targetMat);
+        s5Zone.rotation.x = -Math.PI / 2;
+        s5Zone.position.set(20, 0.05, -20); // Placed slightly above the floor to prevent flickering
+        scene.add(s5Zone);
+
+        // 5. BUILD THE U-BOAT CART
+        const cart = new THREE.Group();
+
+        // Cart Base (The flat deck)
+        const baseGeo = new THREE.BoxGeometry(3, 0.5, 8);
+        const baseMat = new THREE.MeshStandardMaterial({ color: 0x2b5797 }); // Blue base
+        const base = new THREE.Mesh(baseGeo, baseMat);
+        base.position.y = 0.5;
+        cart.add(base);
+
+        // Front Handle
+        const handleGeo = new THREE.BoxGeometry(3, 5, 0.3);
+        const handleMat = new THREE.MeshStandardMaterial({ color: 0xcccccc }); // Silver metal
+        const frontHandle = new THREE.Mesh(handleGeo, handleMat);
+        frontHandle.position.set(0, 3, 3.85);
+        cart.add(frontHandle);
+
+        // Back Handle
+        const backHandle = new THREE.Mesh(handleGeo, handleMat);
+        backHandle.position.set(0, 3, -3.85);
+        cart.add(backHandle);
+
+        // Starting position of the cart
+        cart.position.set(-10, 0, 10);
+        scene.add(cart);
+
+        // 6. CONTROLS SETUP
+        const keys = { w: false, a: false, s: false, d: false };
+
+        window.addEventListener('keydown', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = false;
+        });
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        });
+
+        // 7. GAME LOOP & LOGIC
+        let gameWon = false;
+        const uiText = document.querySelector('#ui h1');
+        const uiSubText = document.querySelector('#ui p');
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!gameWon) {
+                // Cart Movement Physics
+                const speed = 0.15;
+                const turnSpeed = 0.03;
+
+                // Move forward and backward (Local Z axis)
+                if (keys.w) cart.translateZ(-speed);
+                if (keys.s) cart.translateZ(speed);
+                
+                // Steer left and right (Local Y axis)
+                if (keys.a) cart.rotation.y += turnSpeed;
+                if (keys.d) cart.rotation.y -= turnSpeed;
+
+                // Camera smoothly follows behind and above the cart
+                const relativeCameraOffset = new THREE.Vector3(0, 15, 20);
+                const cameraOffset = relativeCameraOffset.applyMatrix4(cart.matrixWorld);
+                camera.position.lerp(cameraOffset, 0.1);
+                camera.lookAt(cart.position);
+
+                // Check Win Condition (Distance between cart and S5 Zone)
+                const distanceToTarget = cart.position.distanceTo(s5Zone.position);
+                if (distanceToTarget < 4.0) {
+                    gameWon = true;
+                    uiText.innerText = "S5 Location Reached!";
+                    uiText.style.color = "#00ff00"; // Turn text green
+                    uiSubText.innerText = "Successfully parked the U-Boat.";
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Start the loop
+        animate();
+    </script>
+</body>
+</html>
