@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Surreal Cloth RTS Prototype</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue */
+            touch-action: none; /* Prevents mobile scrolling */
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-family: sans-serif;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="ui">Tap/Click terrain to move the tank<br>Drag to rotate camera</div>
+    
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // 1. Scene Setup
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 20, 30);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't go below ground
+
+        // 2. Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffdfb0, 1.5);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -30;
+        dirLight.shadow.camera.right = 30;
+        dirLight.shadow.camera.top = 30;
+        dirLight.shadow.camera.bottom = -30;
+        scene.add(dirLight);
+
+        // 3. The "Cloth / Sand" Terrain
+        const terrainSize = 100;
+        const terrainSegments = 64;
+        const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegments, terrainSegments);
+        terrainGeo.rotateX(-Math.PI / 2);
+
+        // Using a stylized material that looks a bit like magical fabric or sand
+        const terrainMat = new THREE.MeshStandardMaterial({ 
+            color: 0xdeb887, // Burlywood / sand color
+            roughness: 0.8,
+            metalness: 0.1,
+            wireframe: false, // Set to true to see the cloth grid!
+            side: THREE.DoubleSide
+        });
+        const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+        terrain.receiveShadow = true;
+        scene.add(terrain);
+
+        // Base height function for the terrain
+        function getTerrainHeight(x, z, time) {
+            // Combine a few sine waves for a rolling, organic "cloth" feel
+            const wave1 = Math.sin(x * 0.1 + time * 0.5) * 1.5;
+            const wave2 = Math.cos(z * 0.08 + time * 0.3) * 1.5;
+            const wave3 = Math.sin((x + z) * 0.05 - time * 0.2) * 1.0;
+            return wave1 + wave2 + wave3;
+        }
+
+        // 4. The Tank Unit
+        const tank = new THREE.Group();
+        
+        // Tank Body
+        const bodyGeo = new THREE.BoxGeometry(3, 1.2, 4);
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4B5320 }); // Army green
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 0.6;
+        body.castShadow = true;
+        tank.add(body);
+
+        // Tank Turret
+        const turretGeo = new THREE.BoxGeometry(2, 0.8, 2);
+        const turret = new THREE.Mesh(turretGeo, bodyMat);
+        turret.position.y = 1.6;
+        turret.castShadow = true;
+        tank.add(turret);
+
+        // Tank Barrel
+        const barrelGeo = new THREE.CylinderGeometry(0.2, 0.2, 3);
+        const barrelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+        const barrel = new THREE.Mesh(barrelGeo, barrelMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 1.6, 2.5);
+        barrel.castShadow = true;
+        tank.add(barrel);
+
+        scene.add(tank);
+
+        // 5. RTS Movement Logic
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let targetPosition = new THREE.Vector3(0, 0, 0);
+        let isMoving = false;
+        const speed = 10; // Units per second
+
+        function onPointerDown(event) {
+            // Handle both touch and mouse
+            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+
+            pointer.x = (clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObject(terrain);
+
+            if (intersects.length > 0) {
+                targetPosition.copy(intersects[0].point);
+                isMoving = true;
+                
+                // Point tank at target (ignoring Y for rotation so it doesn't pitch weirdly yet)
+                const lookAtPos = new THREE.Vector3(targetPosition.x, tank.position.y, targetPosition.z);
+                tank.lookAt(lookAtPos);
+            }
+        }
+
+        window.addEventListener('pointerdown', onPointerDown);
+
+        // Handle resizing for mobile/desktop
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 6. Animation Loop
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            const delta = clock.getDelta();
+
+            // A. Animate the Cloth Terrain
+            const positions = terrainGeo.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                const x = positions.getX(i);
+                const z = positions.getZ(i); // Note: Plane is rotated, so Z is actually Y in local space
+                const height = getTerrainHeight(x, z, time);
+                positions.setY(i, height); // Update local Z (which is world Y due to rotation)
+            }
+            positions.needsUpdate = true;
+            terrainGeo.computeVertexNormals(); // Recalculate lighting dynamically
+
+            // B. Move the Tank
+            if (isMoving) {
+                const distance = tank.position.distanceTo(targetPosition);
+                if (distance > 0.5) {
+                    // Move towards target
+                    const direction = new THREE.Vector3().subVectors(targetPosition, tank.position).normalize();
+                    // We only move in X and Z manually
+                    tank.position.x += direction.x * speed * delta;
+                    tank.position.z += direction.z * speed * delta;
+                } else {
+                    isMoving = false;
+                }
+            }
+
+            // C. Snap Tank to Terrain Height
+            // We sample the terrain height at the tank's current X and Z
+            const currentHeight = getTerrainHeight(tank.position.x, tank.position.z, time);
+            tank.position.y = currentHeight;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
