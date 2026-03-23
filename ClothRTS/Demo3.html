@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Reactive Terrain RTS - Mud & Rocks</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; touch-action: none; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; color: white; 
+            font-family: sans-serif; background: rgba(0,0,0,0.8); 
+            padding: 15px; border-radius: 5px; pointer-events: none;
+            line-height: 1.6;
+        }
+        #status { font-weight: bold; color: #ffeb3b; }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="ui">
+        Tap/Click terrain to move<br>
+        Status: <span id="status">Idle</span><br><br>
+        🟩 Grass: Fast, gets crushed<br>
+        🟨 Sand: Normal, flattens out<br>
+        🟦 Water: Slow, dynamic waves<br>
+        🟫 Mud: Dangerously slow!<br>
+        🪨 Rocks: Solid obstacles
+    </div>
+    
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // 1. Scene Setup
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 30, 40);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1;
+
+        // 2. Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffdfb0, 1.5);
+        dirLight.position.set(20, 50, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.left = -40; dirLight.shadow.camera.right = 40;
+        dirLight.shadow.camera.top = 40; dirLight.shadow.camera.bottom = -40;
+        scene.add(dirLight);
+
+        // 3. Terrain Data & Biomes
+        const terrainSize = 100;
+        const segments = 100;
+        const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, segments, segments);
+        terrainGeo.rotateX(-Math.PI / 2);
+
+        const vertexData = []; 
+        const colors = [];
+        const colorObj = new THREE.Color();
+        const positions = terrainGeo.attributes.position;
+
+        const TYPE_WATER = 0, TYPE_MUD = 1, TYPE_SAND = 2, TYPE_GRASS = 3;
+
+        for (let i = 0; i < positions.count; i++) {
+            const x = positions.getX(i);
+            const z = positions.getZ(i);
+            
+            // Generate noise
+            const noise = Math.sin(x * 0.1) + Math.cos(z * 0.08) + Math.sin((x+z) * 0.05);
+            
+            let type, height, colorHex;
+
+            if (noise < -0.4) {
+                // WATER
+                type = TYPE_WATER; height = -0.6; colorHex = 0x1CA3EC;
+            } else if (noise < -0.1) {
+                // MUD (The new transition zone between water and sand)
+                type = TYPE_MUD; height = -0.2; colorHex = 0x3d2817; // Dark brown
+            } else if (noise < 0.8) {
+                // SAND
+                type = TYPE_SAND; height = Math.sin(x * 0.5) * 0.5 + 0.5; colorHex = 0xEDC9AF;
+            } else {
+                // GRASS
+                type = TYPE_GRASS; height = 1.0 + Math.random() * 0.5; colorHex = 0x4CBB17;
+            }
+
+            positions.setY(i, height);
+            vertexData.push({ type, originalHeight: height, currentHeight: height, flattened: false });
+            colorObj.setHex(colorHex);
+            colors.push(colorObj.r, colorObj.g, colorObj.b);
+        }
+
+        terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        terrainGeo.computeVertexNormals();
+
+        const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.1 });
+        const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+        terrain.receiveShadow = true;
+        scene.add(terrain);
+
+        // 4. Procedural Rocks (Obstacles)
+        const rocks = [];
+        const rockMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 });
+        for (let i = 0; i < 25; i++) {
+            const rockRadius = 1 + Math.random() * 1.5;
+            const rockGeo = new THREE.DodecahedronGeometry(rockRadius, 0); // Low-poly rocks
+            const rock = new THREE.Mesh(rockGeo, rockMat);
+            
+            // Random placement within bounds
+            const rx = (Math.random() - 0.5) * 80;
+            const rz = (Math.random() - 0.5) * 80;
+            
+            rock.position.set(rx, 1, rz);
+            rock.castShadow = true;
+            rock.receiveShadow = true;
+            
+            scene.add(rock);
+            // Store physical data for collision checking
+            rocks.push({ mesh: rock, radius: rockRadius, x: rx, z: rz });
+        }
+
+        // 5. Tank Construction
+        const tank = new THREE.Group();
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 4), bodyMat);
+        body.position.y = 0.6; body.castShadow = true; tank.add(body);
+        const turret = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 2), bodyMat);
+        turret.position.y = 1.6; turret.castShadow = true; tank.add(turret);
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 3), new THREE.MeshStandardMaterial({color: 0x111}));
+        barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 1.6, 2.5); barrel.castShadow = true; tank.add(barrel);
+        scene.add(tank);
+
+        // 6. Interaction & RTS Logic
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let targetPos = new THREE.Vector3(0, 0, 0);
+        let isMoving = false;
+        
+        const baseSpeed = 12; 
+        const statusUI = document.getElementById('status');
+
+        window.addEventListener('pointerdown', (e) => {
+            pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(pointer, camera);
+            
+            // Only intersect terrain so we can't click "on top" of a rock
+            const intersects = raycaster.intersectObject(terrain);
+            if (intersects.length > 0) {
+                targetPos.copy(intersects[0].point);
+                isMoving = true;
+            }
+        });
+
+        // 7. Animation Loop & Physics
+        const clock = new THREE.Clock();
+        const crushRadius = 2.5; 
+        const tankCollisionRadius = 1.5; // Used to bump against rocks
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            const delta = clock.getDelta();
+            const posAttr = terrainGeo.attributes.position;
+            const colorAttr = terrainGeo.attributes.color;
+
+            let currentTerrainUnderTank = TYPE_GRASS;
+            let tankGroundHeight = 0.5; // Default fallback
+            let geometryNeedsUpdate = false;
+
+            // --- A. Terrain Animation & Deformation ---
+            for (let i = 0; i < posAttr.count; i++) {
+                const x = posAttr.getX(i);
+                const z = posAttr.getZ(i);
+                const vData = vertexData[i];
+
+                if (vData.type === TYPE_WATER) {
+                    const wave = Math.sin(x * 0.5 + time * 2) * 0.2 + Math.cos(z * 0.5 + time) * 0.2;
+                    posAttr.setY(i, vData.originalHeight + wave);
+                    geometryNeedsUpdate = true;
+                }
+
+                const dx = x - tank.position.x;
+                const dz = z - tank.position.z;
+                const distToTank = Math.sqrt(dx*dx + dz*dz);
+
+                // Sample exact ground height under tank
+                if (distToTank < 1.0) {
+                    currentTerrainUnderTank = vData.type;
+                    tankGroundHeight = posAttr.getY(i); // Fixes the floating/clipping bug!
+                }
+
+                // Crush/Flatten
+                if (distToTank < crushRadius && !vData.flattened) {
+                    if (vData.type === TYPE_GRASS) {
+                        vData.currentHeight = 0.1; vData.flattened = true;
+                        colorAttr.setXYZ(i, 0.2, 0.5, 0.1); 
+                        geometryNeedsUpdate = true;
+                    } 
+                    else if (vData.type === TYPE_SAND || vData.type === TYPE_MUD) {
+                        vData.currentHeight -= 0.3; // Sink into mud/sand
+                        vData.flattened = true;
+                        if(vData.type === TYPE_SAND) colorAttr.setXYZ(i, 0.8, 0.7, 0.6); 
+                        else colorAttr.setXYZ(i, 0.15, 0.1, 0.05); // Deeper mud track
+                        geometryNeedsUpdate = true;
+                    }
+                }
+
+                // Smooth deformation
+                if (vData.flattened && posAttr.getY(i) > vData.currentHeight + 0.01) {
+                    posAttr.setY(i, THREE.MathUtils.lerp(posAttr.getY(i), vData.currentHeight, 0.1));
+                    geometryNeedsUpdate = true;
+                }
+            }
+
+            if (geometryNeedsUpdate) {
+                posAttr.needsUpdate = true;
+                colorAttr.needsUpdate = true;
+                terrainGeo.computeVertexNormals(); 
+            }
+
+            // --- B. Movement, Speed Modifiers & Collisions ---
+            if (isMoving) {
+                let currentSpeed = baseSpeed;
+                
+                // Speed Logic
+                if (currentTerrainUnderTank === TYPE_WATER) {
+                    currentSpeed = baseSpeed * 0.35;
+                    statusUI.innerText = "Fording Water (Slow)"; statusUI.style.color = "#1CA3EC";
+                } else if (currentTerrainUnderTank === TYPE_MUD) {
+                    currentSpeed = baseSpeed * 0.1; // BOGGED DOWN!
+                    statusUI.innerText = "Bogged in Mud! (Very Slow)"; statusUI.style.color = "#8B4513";
+                } else if (currentTerrainUnderTank === TYPE_SAND) {
+                    currentSpeed = baseSpeed * 0.8;
+                    statusUI.innerText = "Driving on Sand"; statusUI.style.color = "#EDC9AF";
+                } else {
+                    statusUI.innerText = "Cruising on Grass"; statusUI.style.color = "#4CBB17";
+                }
+
+                const distance = tank.position.distanceTo(new THREE.Vector3(targetPos.x, tank.position.y, targetPos.z));
+                if (distance > 0.5) {
+                    tank.rotation.y = Math.atan2(targetPos.x - tank.position.x, targetPos.z - tank.position.z); 
+                    const direction = new THREE.Vector3().subVectors(targetPos, tank.position).normalize();
+                    
+                    // Calculate next intended position
+                    const nextX = tank.position.x + direction.x * currentSpeed * delta;
+                    const nextZ = tank.position.z + direction.z * currentSpeed * delta;
+
+                    // Rock Collision Detection
+                    let hitRock = false;
+                    for (let rock of rocks) {
+                        const distToRock = Math.sqrt(Math.pow(nextX - rock.x, 2) + Math.pow(nextZ - rock.z, 2));
+                        if (distToRock < (rock.radius + tankCollisionRadius)) {
+                            hitRock = true;
+                            break;
+                        }
+                    }
+
+                    if (!hitRock) {
+                        tank.position.x = nextX;
+                        tank.position.z = nextZ;
+                    } else {
+                        isMoving = false; // Stop moving if we hit a rock
+                        statusUI.innerText = "Blocked by Rock!"; statusUI.style.color = "red";
+                    }
+                } else {
+                    isMoving = false;
+                    statusUI.innerText = "Idle"; statusUI.style.color = "white";
+                }
+            }
+
+            // --- C. Physics: Snap to Ground ---
+            // Tank now accurately rides the height of the crushed terrain beneath it
+            tank.position.y = THREE.MathUtils.lerp(tank.position.y, tankGroundHeight + 0.2, 0.2); 
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
