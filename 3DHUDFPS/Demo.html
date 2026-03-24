@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrimeWars 3D WebGL HUD Prototype</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505; /* Dark gritty background for CrimeWars */
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.5);
+            pointer-events: none;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">CrimeWars Prototype: Move mouse to see 3D helmet perspective</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- 1. SETUP SCENE, CAMERA, AND RENDERER ---
+        const scene = new THREE.Scene();
+        // Add a subtle fog to simulate helmet glare/depth
+        scene.fog = new THREE.FogExp2(0x050505, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // Create a group to hold the HUD so it moves together
+        const hudGroup = new THREE.Group(); 
+        scene.add(hudGroup);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. HELPER TO CREATE 3D CANVAS PANELS ---
+        function createHudPanel(width, height, drawCallback) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            drawCallback(ctx, width, height);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            // Use basic material so it ignores lighting and glows like a screen
+            const material = new THREE.MeshBasicMaterial({ 
+                map: texture, 
+                transparent: true,
+                side: THREE.DoubleSide
+            });
+            const geometry = new THREE.PlaneGeometry(width / 100, height / 100);
+            return new THREE.Mesh(geometry, material);
+        }
+
+        // --- 3. BUILD THE LEFT PANEL (HEALTH & ARMOR) ---
+        const leftPanel = createHudPanel(512, 256, (ctx, w, h) => {
+            // Background panel styling
+            ctx.fillStyle = 'rgba(20, 5, 5, 0.6)';
+            ctx.strokeStyle = '#ff3333';
+            ctx.lineWidth = 4;
+            ctx.fillRect(0, 0, w, h);
+            ctx.strokeRect(0, 0, w, h);
+
+            // CrimeWars Branding
+            ctx.fillStyle = '#555555';
+            ctx.font = '16px Courier';
+            ctx.fillText('CRIME_WARS_OS // TACTICAL_LINK_ACTIVE', 20, 30);
+
+            // Health (Cross Icon + Bar)
+            ctx.fillStyle = '#ff3333';
+            ctx.font = 'bold 36px Arial';
+            ctx.fillText('✚ HP  85', 20, 90);
+            ctx.fillRect(20, 110, 200, 15); // Health bar
+            ctx.fillStyle = 'rgba(255, 51, 51, 0.3)';
+            ctx.fillRect(220, 110, 100, 15); // Missing health
+
+            // Armor (Shield Icon + Bar)
+            ctx.fillStyle = '#33aaff';
+            ctx.fillText('🛡 AP  50', 20, 180);
+            ctx.fillRect(20, 200, 150, 15); // Armor bar
+            ctx.fillStyle = 'rgba(51, 170, 255, 0.3)';
+            ctx.fillRect(170, 200, 150, 15); // Missing armor
+        });
+        
+        // Position and angle inward like the left side of a visor
+        leftPanel.position.set(-6, -2.5, -8);
+        leftPanel.rotation.y = Math.PI / 6; // Angle towards player
+        hudGroup.add(leftPanel);
+
+        // --- 4. BUILD THE RIGHT PANEL (AMMO & WEAPON) ---
+        const rightPanel = createHudPanel(512, 256, (ctx, w, h) => {
+            ctx.fillStyle = 'rgba(20, 20, 5, 0.6)';
+            ctx.strokeStyle = '#ffcc00';
+            ctx.lineWidth = 4;
+            ctx.fillRect(0, 0, w, h);
+            ctx.strokeRect(0, 0, w, h);
+
+            // Ammo Counter
+            ctx.fillStyle = '#ffcc00';
+            ctx.textAlign = 'right';
+            ctx.font = 'bold 48px Arial';
+            ctx.fillText('AMMO 30/90', w - 20, 70);
+
+            // Clips Icons (Bullets/Mags)
+            ctx.font = '24px Arial';
+            ctx.fillText('MAGS: ▮▮▮ ▯', w - 20, 110); // 3 full, 1 empty
+
+            // Weapon Attributes (3 Stats)
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#cccccc';
+            ctx.font = '18px Courier';
+            ctx.fillText('WEAPON: ASSAULT RIFLE', 20, 150);
+            
+            ctx.fillStyle = '#00ffcc';
+            ctx.fillText('FIRE RATE [████████  ]', 20, 180);
+            ctx.fillStyle = '#ff6600';
+            ctx.fillText('DAMAGE    [█████     ]', 20, 210);
+            ctx.fillStyle = '#cc00ff';
+            ctx.fillText('STABILITY [███████   ]', 20, 240);
+        });
+
+        // Position and angle inward like the right side of a visor
+        rightPanel.position.set(6, -2.5, -8);
+        rightPanel.rotation.y = -Math.PI / 6; // Angle towards player
+        hudGroup.add(rightPanel);
+
+        // --- 5. BUILD THE CROSSHAIR ---
+        const centerPanel = createHudPanel(128, 128, (ctx, w, h) => {
+            ctx.strokeStyle = 'rgba(0, 255, 150, 0.8)';
+            ctx.lineWidth = 2;
+            const cx = w/2, cy = h/2;
+            
+            // Draw a tactical reticle
+            ctx.beginPath();
+            ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+            ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 10, cy); // Left
+            ctx.moveTo(cx + 25, cy); ctx.lineTo(cx + 10, cy); // Right
+            ctx.moveTo(cx, cy - 25); ctx.lineTo(cx, cy - 10); // Top
+            ctx.moveTo(cx, cy + 25); ctx.lineTo(cx, cy + 10); // Bottom
+            ctx.stroke();
+            
+            // Center dot
+            ctx.fillStyle = 'red';
+            ctx.fillRect(cx - 1, cy - 1, 2, 2);
+        });
+        centerPanel.position.set(0, 0, -8);
+        hudGroup.add(centerPanel);
+
+        // --- 6. PARALLAX/HELMET INTERACTION ---
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+
+        document.addEventListener('mousemove', (event) => {
+            // Normalize mouse coordinates from -1 to 1
+            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            // Limit the rotation so it feels like a heavy helmet
+            targetRotationY = -mouseX * 0.15;
+            targetRotationX = mouseY * 0.15;
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- 7. ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Smoothly interpolate the camera rotation toward the mouse target
+            // This creates the "delayed helmet" effect from Titanfall
+            camera.rotation.y += (targetRotationY - camera.rotation.y) * 0.05;
+            camera.rotation.x += (targetRotationX - camera.rotation.x) * 0.05;
+
+            // Optional: add a slight breathing/bobbing effect to the HUD group
+            const time = Date.now() * 0.001;
+            hudGroup.position.y = Math.sin(time) * 0.05;
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
