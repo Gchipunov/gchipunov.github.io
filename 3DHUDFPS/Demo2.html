@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>CrimeWars 3D WebGL HUD - Interactive</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Courier New', Courier, monospace;
+            touch-action: none; /* Prevents mobile scrolling when aiming */
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.7);
+            pointer-events: none;
+            z-index: 100;
+            text-shadow: 1px 1px 2px black;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(0, 255, 150, 0.8);
+            pointer-events: none;
+            z-index: 100;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">CrimeWars Prototype: Tactical Visor Active</div>
+    <div id="controls">Desktop: Click to Fire | Mobile: Tap to Fire, Drag to Look</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- 1. GAME STATE ---
+        const gameState = {
+            health: 20, // Starts low to show off the blinking effect!
+            maxHealth: 100,
+            armor: 50,
+            ammo: 4,
+            maxAmmo: 4,
+            totalAmmo: 12,
+            isReloading: false
+        };
+
+        // --- 2. SETUP SCENE, CAMERA, RENDERER ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const hudGroup = new THREE.Group(); 
+        scene.add(hudGroup);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio); // Sharper on mobile
+        document.body.appendChild(renderer.domElement);
+
+        // Grid floor to help visualize rocket movement
+        const grid = new THREE.GridHelper(100, 50, 0x222222, 0x111111);
+        grid.position.y = -3;
+        scene.add(grid);
+
+        // --- 3. DYNAMIC CANVAS HELPER ---
+        function createDynamicPanel(width, height) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshBasicMaterial({ 
+                map: texture, 
+                transparent: true,
+                side: THREE.DoubleSide,
+                depthTest: false // Renders over scene objects
+            });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width / 100, height / 100), material);
+            mesh.renderOrder = 999; // Force HUD to render last (on top)
+            
+            return { mesh, ctx, texture, width, height };
+        }
+
+        // --- 4. BUILD HUD PANELS ---
+        const leftPanel = createDynamicPanel(512, 256);
+        hudGroup.add(leftPanel.mesh);
+
+        const rightPanel = createDynamicPanel(512, 256);
+        hudGroup.add(rightPanel.mesh);
+
+        const centerPanel = createDynamicPanel(128, 128);
+        hudGroup.add(centerPanel.mesh);
+
+        // Draw Crosshair (Static)
+        function drawCrosshair() {
+            const { ctx, width: w, height: h, texture } = centerPanel;
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = 'rgba(0, 255, 150, 0.8)';
+            ctx.lineWidth = 2;
+            const cx = w/2, cy = h/2;
+            
+            ctx.beginPath();
+            ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+            ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 10, cy); 
+            ctx.moveTo(cx + 25, cy); ctx.lineTo(cx + 10, cy); 
+            ctx.moveTo(cx, cy - 25); ctx.lineTo(cx, cy - 10); 
+            ctx.moveTo(cx, cy + 25); ctx.lineTo(cx, cy + 10); 
+            ctx.stroke();
+            
+            ctx.fillStyle = 'red';
+            ctx.fillRect(cx - 1, cy - 1, 2, 2);
+            texture.needsUpdate = true;
+        }
+        drawCrosshair();
+
+        // --- 5. RENDER HUD STATE (CALLED EVERY FRAME) ---
+        function updateHUD(time) {
+            // --- LEFT PANEL (Health/Armor) ---
+            const lCtx = leftPanel.ctx;
+            lCtx.clearRect(0, 0, leftPanel.width, leftPanel.height);
+            
+            // Blinking Low Health Effect
+            const isLowHealth = gameState.health <= 25;
+            const blinkOn = isLowHealth && (Math.sin(time * 10) > 0); // Fast blink
+            
+            lCtx.fillStyle = blinkOn ? 'rgba(150, 0, 0, 0.6)' : 'rgba(20, 5, 5, 0.6)';
+            lCtx.strokeStyle = blinkOn ? '#ff0000' : '#ff3333';
+            lCtx.lineWidth = 4;
+            lCtx.fillRect(0, 0, leftPanel.width, leftPanel.height);
+            lCtx.strokeRect(0, 0, leftPanel.width, leftPanel.height);
+
+            lCtx.fillStyle = '#555555';
+            lCtx.font = '16px Courier';
+            lCtx.fillText('CRIME_WARS_OS // TACTICAL', 20, 30);
+
+            // Health
+            lCtx.fillStyle = blinkOn ? '#ffffff' : '#ff3333';
+            lCtx.font = 'bold 36px Arial';
+            lCtx.fillText(`✚ HP  ${gameState.health}`, 20, 90);
+            
+            const hpWidth = (gameState.health / gameState.maxHealth) * 200;
+            lCtx.fillRect(20, 110, hpWidth, 15);
+            lCtx.fillStyle = 'rgba(255, 51, 51, 0.3)';
+            lCtx.fillRect(20 + hpWidth, 110, 200 - hpWidth, 15);
+
+            if (blinkOn) {
+                lCtx.fillStyle = '#ff0000';
+                lCtx.font = 'bold 24px Arial';
+                lCtx.fillText('CRITICAL DAMAGE', 20, 160);
+            }
+
+            // Armor
+            lCtx.fillStyle = '#33aaff';
+            lCtx.font = 'bold 36px Arial';
+            lCtx.fillText(`🛡 AP  ${gameState.armor}`, 20, 210);
+            const apWidth = (gameState.armor / 100) * 150;
+            lCtx.fillRect(20, 230, apWidth, 15);
+            lCtx.fillStyle = 'rgba(51, 170, 255, 0.3)';
+            lCtx.fillRect(20 + apWidth, 230, 150 - apWidth, 15);
+
+            leftPanel.texture.needsUpdate = true;
+
+            // --- RIGHT PANEL (Ammo/Weapons) ---
+            const rCtx = rightPanel.ctx;
+            const w = rightPanel.width;
+            rCtx.clearRect(0, 0, w, rightPanel.height);
+            
+            rCtx.fillStyle = 'rgba(20, 20, 5, 0.6)';
+            rCtx.strokeStyle = '#ffcc00';
+            rCtx.lineWidth = 4;
+            rCtx.fillRect(0, 0, w, rightPanel.height);
+            rCtx.strokeRect(0, 0, w, rightPanel.height);
+
+            rCtx.fillStyle = gameState.ammo === 0 ? '#ff0000' : '#ffcc00';
+            rCtx.textAlign = 'right';
+            rCtx.font = 'bold 48px Arial';
+            const ammoText = gameState.isReloading ? "RELOADING..." : `AMMO ${gameState.ammo}/${gameState.totalAmmo}`;
+            rCtx.fillText(ammoText, w - 20, 70);
+
+            // Calculate mags
+            const mags = Math.ceil(gameState.totalAmmo / gameState.maxAmmo);
+            let magStr = 'MAGS: ';
+            for(let i=0; i<4; i++) {
+                magStr += (i < mags) ? '▮' : '▯';
+            }
+            rCtx.font = '24px Arial';
+            rCtx.fillText(magStr, w - 20, 110);
+
+            rCtx.textAlign = 'left';
+            rCtx.fillStyle = '#cccccc';
+            rCtx.font = '18px Courier';
+            rCtx.fillText('WEAPON: ROCKET LAUNCHER', 20, 150);
+            
+            rCtx.fillStyle = '#00ffcc'; rCtx.fillText('FIRE RATE [██        ]', 20, 180);
+            rCtx.fillStyle = '#ff6600'; rCtx.fillText('DAMAGE    [██████████]', 20, 210);
+            rCtx.fillStyle = '#cc00ff'; rCtx.fillText('BLAST RAD [███████   ]', 20, 240);
+
+            rightPanel.texture.needsUpdate = true;
+        }
+
+        // --- 6. RESPONSIVE LAYOUT (MOBILE FIX) ---
+        function updateLayout() {
+            const aspect = window.innerWidth / window.innerHeight;
+            
+            // If aspect < 1 (mobile portrait), squeeze the panels closer to the center
+            // and pull them back slightly so they don't clip out of the FOV.
+            const xOffset = Math.min(6, aspect * 5); 
+            const zOffset = aspect < 1 ? -12 : -8;
+            const angle = aspect < 1 ? Math.PI / 8 : Math.PI / 6;
+
+            leftPanel.mesh.position.set(-xOffset, -2.5, zOffset);
+            leftPanel.mesh.rotation.y = angle;
+
+            rightPanel.mesh.position.set(xOffset, -2.5, zOffset);
+            rightPanel.mesh.rotation.y = -angle;
+
+            centerPanel.mesh.position.set(0, 0, zOffset);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            updateLayout();
+        });
+        updateLayout(); // Initial call
+
+        // --- 7. INPUT CONTROLS & PARALLAX ---
+        let targetRotationX = 0;
+        let targetRotationY = 0;
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        // Using Pointer Events handles both Mouse and Touch natively
+        window.addEventListener('pointerdown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+            fireWeapon();
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (isDragging || e.pointerType === 'mouse') {
+                const mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+                const mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+                
+                // Limit helmet rotation
+                targetRotationY = -mouseX * 0.25;
+                targetRotationX = mouseY * 0.25;
+            }
+        });
+
+        window.addEventListener('pointerup', () => isDragging = false);
+
+        // --- 8. SHOOTING MECHANICS ---
+        const rockets = [];
+        
+        function fireWeapon() {
+            if (gameState.isReloading) return;
+
+            if (gameState.ammo > 0) {
+                gameState.ammo--;
+                
+                // Create Rocket
+                const geometry = new THREE.CylinderGeometry(0.1, 0.1, 0.6, 8);
+                geometry.rotateX(Math.PI / 2); // Point forward
+                const material = new THREE.MeshBasicMaterial({ color: 0xff4400 });
+                const rocket = new THREE.Mesh(geometry, material);
+                
+                // Spawn rocket slightly to the right (like a shoulder launcher) and below camera
+                rocket.position.copy(camera.position);
+                rocket.position.y -= 0.5;
+                rocket.position.x += 1;
+                rocket.quaternion.copy(camera.quaternion);
+
+                // Add a "trail" glow
+                const glow = new THREE.PointLight(0xff4400, 1, 5);
+                rocket.add(glow);
+
+                scene.add(rocket);
+                rockets.push({ mesh: rocket, life: 100 });
+
+                // Recoil Effect: Kick the camera up temporarily
+                targetRotationX += 0.1;
+
+            } else if (gameState.totalAmmo > 0) {
+                // Auto Reload
+                gameState.isReloading = true;
+                setTimeout(() => {
+                    const ammoToTake = Math.min(gameState.maxAmmo, gameState.totalAmmo);
+                    gameState.ammo = ammoToTake;
+                    gameState.totalAmmo -= ammoToTake;
+                    gameState.isReloading = false;
+                }, 1500); // 1.5 second reload time
+            }
+        }
+
+        // --- 9. ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            const elapsedTime = clock.getElapsedTime();
+
+            // Smoothly interpolate camera to look around
+            camera.rotation.y += (targetRotationY - camera.rotation.y) * 0.1;
+            camera.rotation.x += (targetRotationX - camera.rotation.x) * 0.1;
+
+            // HUD Breathing effect
+            hudGroup.position.y = Math.sin(elapsedTime * 2) * 0.05;
+
+            // Update Rockets
+            for (let i = rockets.length - 1; i >= 0; i--) {
+                const r = rockets[i];
+                // Move forward along the rocket's local Z axis
+                r.mesh.translateZ(-30 * delta); // Speed
+                r.life--;
+
+                if (r.life <= 0) {
+                    scene.remove(r.mesh);
+                    rockets.splice(i, 1);
+                }
+            }
+
+            // Continuously render the HUD canvases to allow for blinking/state updates
+            updateHUD(elapsedTime);
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
