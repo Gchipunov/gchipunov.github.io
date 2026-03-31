@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Verlet Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        AD to Move | W to Jump | Space to Reset<br>
+        Physics: Verlet Integration (Ropes & Rods)
+    </div>
+    <canvas id="canvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl');
+
+// --- Shaders ---
+const vsSource = `
+    attribute vec2 aPosition;
+    uniform vec2 uResolution;
+    void main() {
+        vec2 zeroToOne = aPosition / uResolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        gl_PointSize = 4.0;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    uniform vec4 uColor;
+    void main() { gl_FragColor = uColor; }
+`;
+
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const posLoc = gl.getAttribLocation(program, "aPosition");
+const resLoc = gl.getUniformLocation(program, "uResolution");
+const colLoc = gl.getUniformLocation(program, "uColor");
+const buffer = gl.createBuffer();
+
+// --- Physics Engine ---
+class Particle {
+    constructor(x, y, isStatic = false) {
+        this.x = x; this.y = y;
+        this.oldX = x; this.oldY = y;
+        this.isStatic = isStatic;
+    }
+}
+
+class Constraint {
+    constructor(p1, p2, length, isRope = false) {
+        this.p1 = p1; this.p2 = p2;
+        this.length = length;
+        this.isRope = isRope; // If rope, only constrains when distance > length
+    }
+}
+
+let particles = [];
+let constraints = [];
+const gravity = 0.25;
+const friction = 0.98;
+const groundY = 550;
+
+function createRope(startX, startY, segments, length, isStatic = true) {
+    let prev = new Particle(startX, startY, isStatic);
+    particles.push(prev);
+    for(let i = 1; i <= segments; i++) {
+        let p = new Particle(startX, startY + (i * length));
+        particles.push(p);
+        constraints.push(new Constraint(prev, p, length, true));
+        prev = p;
+    }
+    return prev; // Return end of rope
+}
+
+function createBox(x, y, w, h) {
+    let p1 = new Particle(x, y);
+    let p2 = new Particle(x+w, y);
+    let p3 = new Particle(x+w, y+h);
+    let p4 = new Particle(x, y+h);
+    particles.push(p1, p2, p3, p4);
+    constraints.push(
+        new Constraint(p1, p2, w), new Constraint(p2, p3, h),
+        new Constraint(p3, p4, w), new Constraint(p4, p1, h),
+        new Constraint(p1, p3, Math.sqrt(w*w + h*h)) // Structural brace
+    );
+    return [p1, p2, p3, p4];
+}
+
+// --- Game State ---
+let player;
+let keys = {};
+window.onkeydown = e => keys[e.code] = true;
+window.onkeyup = e => keys[e.code] = false;
+
+function init() {
+    particles = []; constraints = [];
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Create Player (A simple box)
+    player = createBox(100, 100, 30, 40);
+    
+    // Create Swing Axes (Ropes with heavy ends)
+    for(let i = 0; i < 3; i++) {
+        createRope(400 + i * 300, 50, 10, 25);
+    }
+
+    // Create Enemies (Simple Ragdolls)
+    createBox(800, 400, 40, 40);
+}
+
+function update() {
+    // Player Input
+    const p = player[0];
+    if (keys['KeyA']) p.x -= 0.5;
+    if (keys['KeyD']) p.x += 0.5;
+    if (keys['KeyW'] && p.y > groundY - 50) p.y -= 15;
+    if (keys['Space']) init();
+
+    // Verlet Physics
+    for (let p of particles) {
+        if (p.isStatic) continue;
+        let vx = (p.x - p.oldX) * friction;
+        let vy = (p.y - p.oldY) * friction;
+        p.oldX = p.x;
+        p.oldY = p.y;
+        p.x += vx;
+        p.y += vy + gravity;
+
+        // Ground Collision
+        if (p.y > groundY) {
+            p.y = groundY;
+            p.oldY = p.y + vy * 0.5;
+        }
+    }
+
+    // Constraint Satisfaction (Iterate for rigidity)
+    for (let i = 0; i < 5; i++) {
+        for (let c of constraints) {
+            let dx = c.p2.x - c.p1.x;
+            let dy = c.p2.y - c.p1.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            
+            if (c.isRope && dist < c.length) continue;
+            
+            let diff = (c.length - dist) / dist;
+            let offsetX = dx * diff * 0.5;
+            let offsetY = dy * diff * 0.5;
+
+            if (!c.p1.isStatic) { c.p1.x -= offsetX; c.p1.y -= offsetY; }
+            if (!c.p2.isStatic) { c.p2.x += offsetX; c.p2.y += offsetY; }
+        }
+    }
+}
+
+function draw() {
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+
+    // Draw Constraints
+    const lineData = [];
+    for (let c of constraints) {
+        lineData.push(c.p1.x, c.p1.y, c.p2.x, c.p2.y);
+    }
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineData), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    
+    gl.uniform4f(colLoc, 0.5, 0.8, 1.0, 1.0);
+    gl.drawArrays(gl.LINES, 0, lineData.length / 2);
+
+    // Draw Ground
+    gl.uniform4f(colLoc, 0.3, 0.3, 0.3, 1.0);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, groundY, canvas.width, groundY]), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.LINES, 0, 2);
+
+    requestAnimationFrame(() => {
+        update();
+        draw();
+    });
+}
+
+init();
+draw();
+</script>
+</body>
+</html>
