@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Verlet Platformer - Mobile</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* Mobile UI */
+        .touch-ctrl { 
+            position: absolute; bottom: 30px; 
+            user-select: none; pointer-events: auto;
+        }
+        #joystick-container {
+            left: 30px; width: 120px; height: 120px;
+            background: rgba(255,255,255,0.1); border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2);
+        }
+        #joystick-knob {
+            position: absolute; top: 35px; left: 35px;
+            width: 50px; height: 50px; background: white;
+            border-radius: 50%; opacity: 0.5;
+        }
+        .btn-group { right: 30px; display: flex; gap: 20px; }
+        .action-btn {
+            width: 70px; height: 70px; border-radius: 50%;
+            background: rgba(255,255,255,0.2); border: 2px solid white;
+            color: white; display: flex; align-items: center;
+            justify-content: center; font-weight: bold;
+        }
+        #debug { position: absolute; top: 10px; left: 10px; color: #555; pointer-events: none; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div id="debug">Verlet WebGL Engine v2.0</div>
+    
+    <div id="joystick-container" class="touch-ctrl">
+        <div id="joystick-knob"></div>
+    </div>
+    
+    <div class="touch-ctrl btn-group">
+        <div id="btn-duck" class="action-btn">DUCK</div>
+        <div id="btn-jump" class="action-btn">JUMP</div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl', { antialias: true });
+
+// --- Shaders (Fixed Resolution/Aspect) ---
+const vsSource = `
+    attribute vec2 aPosition;
+    uniform vec2 uResolution;
+    uniform vec2 uOffset;
+    void main() {
+        vec2 pos = aPosition - uOffset;
+        vec2 zeroToOne = pos / uResolution;
+        vec2 clipSpace = (zeroToOne * 2.0) - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+    }
+`;
+const fsSource = `
+    precision mediump float;
+    uniform vec4 uColor;
+    void main() { gl_FragColor = uColor; }
+`;
+
+function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+    }
+    return s;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const posLoc = gl.getAttribLocation(program, "aPosition");
+const resLoc = gl.getUniformLocation(program, "uResolution");
+const offLoc = gl.getUniformLocation(program, "uOffset");
+const colLoc = gl.getUniformLocation(program, "uColor");
+const buffer = gl.createBuffer();
+
+// --- Physics Classes ---
+class Particle {
+    constructor(x, y, isStatic = false) {
+        this.x = x; this.y = y;
+        this.oldX = x; this.oldY = y;
+        this.isStatic = isStatic;
+    }
+}
+
+class Constraint {
+    constructor(p1, p2, length, isRope = false) {
+        this.p1 = p1; this.p2 = p2;
+        this.length = length;
+        this.isRope = isRope;
+    }
+}
+
+let particles = [];
+let constraints = [];
+let player = [];
+const gravity = 0.4;
+const friction = 0.95;
+const groundY = 800;
+let cameraY = 0;
+let targetCameraY = 0;
+
+// Inputs
+const input = { left: false, right: false, up: false, down: false, jump: false, duck: false };
+
+function createBox(x, y, w, h) {
+    let p1 = new Particle(x, y);         // Top Left
+    let p2 = new Particle(x + w, y);     // Top Right
+    let p3 = new Particle(x + w, y + h); // Bot Right
+    let p4 = new Particle(x, y + h);     // Bot Left
+    particles.push(p1, p2, p3, p4);
+    constraints.push(
+        new Constraint(p1, p2, w), new Constraint(p2, p3, h),
+        new Constraint(p3, p4, w), new Constraint(p4, p1, h),
+        new Constraint(p1, p3, Math.sqrt(w*w + h*h)),
+        new Constraint(p2, p4, Math.sqrt(w*w + h*h))
+    );
+    return [p1, p2, p3, p4];
+}
+
+function init() {
+    particles = []; constraints = [];
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    
+    player = createBox(200, 400, 40, 60);
+    
+    // Ropes / Axes
+    for(let i = 0; i < 5; i++) {
+        let prev = new Particle(600 + i * 400, 100, true);
+        particles.push(prev);
+        for(let j = 1; j <= 8; j++) {
+            let p = new Particle(600 + i * 400, 100 + (j * 30));
+            particles.push(p);
+            constraints.push(new Constraint(prev, p, 30, true));
+            prev = p;
+        }
+    }
+}
+
+// --- Input Handling ---
+window.addEventListener('keydown', e => {
+    if(e.code === 'KeyA') input.left = true;
+    if(e.code === 'KeyD') input.right = true;
+    if(e.code === 'KeyW') input.up = true;
+    if(e.code === 'KeyS') input.down = true;
+    if(e.code === 'Space') input.jump = true;
+    if(e.code === 'ShiftLeft') input.duck = true;
+});
+
+window.addEventListener('keyup', e => {
+    if(e.code === 'KeyA') input.left = false;
+    if(e.code === 'KeyD') input.right = false;
+    if(e.code === 'KeyW') input.up = false;
+    if(e.code === 'KeyS') input.down = false;
+    if(e.code === 'Space') input.jump = false;
+    if(e.code === 'ShiftLeft') input.duck = false;
+});
+
+// Mobile Joystick Logic
+const knob = document.getElementById('joystick-knob');
+const container = document.getElementById('joystick-container');
+container.addEventListener('touchstart', handleTouch);
+container.addEventListener('touchmove', handleTouch);
+container.addEventListener('touchend', () => {
+    knob.style.transform = `translate(0px, 0px)`;
+    input.left = input.right = input.up = input.down = false;
+});
+
+function handleTouch(e) {
+    const rect = container.getBoundingClientRect();
+    const touch = e.touches[0];
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    let dx = touch.clientX - centerX;
+    let dy = touch.clientY - centerY;
+    const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+    const angle = Math.atan2(dy, dx);
+    
+    const tx = Math.cos(angle) * dist;
+    const ty = Math.sin(angle) * dist;
+    knob.style.transform = `translate(${tx}px, ${ty}px)`;
+    
+    input.left = tx < -15;
+    input.right = tx > 15;
+    input.up = ty < -15;
+    input.down = ty > 15;
+}
+
+document.getElementById('btn-jump').ontouchstart = () => input.jump = true;
+document.getElementById('btn-jump').ontouchend = () => input.jump = false;
+document.getElementById('btn-duck').ontouchstart = () => input.duck = true;
+document.getElementById('btn-duck').ontouchend = () => input.duck = false;
+
+function update() {
+    const pTop = player[0];
+    const pBot = player[2];
+    const onGround = pBot.y >= groundY - 2;
+
+    // Movement
+    if (input.left) { pTop.x -= 0.8; pBot.x -= 0.8; }
+    if (input.right) { pTop.x += 0.8; pBot.x += 0.8; }
+    if (input.jump && onGround) {
+        player.forEach(p => p.y -= 15);
+    }
+
+    // Ducking: Squash the box constraints temporarily
+    const targetH = input.duck ? 25 : 60;
+    constraints[1].length = targetH; // Right side
+    constraints[3].length = targetH; // Left side
+    constraints[4].length = Math.sqrt(40*40 + targetH*targetH); // Diagonals
+    constraints[5].length = constraints[4].length;
+
+    // Camera Look Up/Down
+    targetCameraY = 0;
+    if (input.up) targetCameraY = -150;
+    if (input.down) targetCameraY = 150;
+    cameraY += (targetCameraY - cameraY) * 0.1;
+
+    // Physics Step
+    particles.forEach(p => {
+        if (p.isStatic) return;
+        let vx = (p.x - p.oldX) * friction;
+        let vy = (p.y - p.oldY) * friction;
+        p.oldX = p.x; p.oldY = p.y;
+        p.x += vx;
+        p.y += vy + gravity;
+        if (p.y > groundY) { p.y = groundY; p.oldY = p.y + vy * 0.5; }
+    });
+
+    for (let i = 0; i < 6; i++) {
+        constraints.forEach(c => {
+            let dx = c.p2.x - c.p1.x;
+            let dy = c.p2.y - c.p1.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (c.isRope && dist < c.length) return;
+            let diff = (c.length - dist) / dist;
+            let ox = dx * diff * 0.5;
+            let oy = dy * diff * 0.5;
+            if (!c.p1.isStatic) { c.p1.x -= ox; c.p1.y -= oy; }
+            if (!c.p2.isStatic) { c.p2.x += ox; c.p2.y += oy; }
+        });
+    }
+}
+
+function draw() {
+    gl.clearColor(0.05, 0.05, 0.05, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    gl.uniform2f(offLoc, 0, cameraY);
+
+    const lineData = [];
+    constraints.forEach(c => lineData.push(c.p1.x, c.p1.y, c.p2.x, c.p2.y));
+    
+    // Draw Ground Line
+    lineData.push(0, groundY, canvas.width * 5, groundY);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lineData), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    
+    gl.uniform4f(colLoc, 0.0, 1.0, 0.7, 1.0);
+    gl.drawArrays(gl.LINES, 0, lineData.length / 2);
+
+    requestAnimationFrame(() => { update(); draw(); });
+}
+
+window.addEventListener('resize', init);
+init();
+draw();
+</script>
+</body>
+</html>
