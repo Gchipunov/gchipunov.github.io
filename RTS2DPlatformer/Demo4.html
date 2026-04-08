@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Fixed WebGL RTS</title>
+    <style>
+        :root { --blue: #00f2ff; --red: #ff0055; }
+        body { 
+            margin: 0; overflow: hidden; background: #050508; 
+            font-family: monospace; user-select: none; 
+            touch-action: none; /* Critical for stopping browser gestures */
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui { position: absolute; top: 10px; left: 10px; color: var(--blue); pointer-events: none; }
+        
+        /* Mobile Controls */
+        .controls { position: absolute; bottom: 30px; width: 100%; display: flex; justify-content: space-between; padding: 0 30px; box-sizing: border-box; }
+        .joy-base { width: 100px; height: 100px; border: 2px solid var(--blue); border-radius: 50%; position: relative; background: rgba(0,0,0,0.5); }
+        #knob { width: 40px; height: 40px; background: var(--blue); border-radius: 50%; position: absolute; left: 30px; top: 30px; }
+        .btns { display: flex; gap: 15px; }
+        .btn { width: 70px; height: 70px; border: 2px solid white; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body>
+
+<div id="ui">CMD: ACTIVE | SQUAD: <span id="sq">4</span></div>
+
+<div class="controls">
+    <div class="joy-base" id="joy-box"><div id="knob"></div></div>
+    <div class="btns">
+        <div class="btn" id="jump-btn">JUMP</div>
+        <div class="btn" id="atk-btn" style="border-color:var(--red)">ATK</div>
+    </div>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script>
+// --- STERN MOBILE PROTECTION ---
+// Blocks double-tap zoom and pinch-to-zoom at the engine level
+document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+    const now = Date.now();
+    if (now - (window.lastTap || 0) < 300) e.preventDefault();
+    window.lastTap = now;
+}, { passive: false });
+
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false });
+
+// --- SHADERS ---
+const vs = `
+    attribute vec2 a_pos;
+    attribute vec4 a_col;
+    uniform vec2 u_res;
+    uniform vec2 u_cam;
+    varying vec4 v_col;
+    void main() {
+        vec2 p = a_pos - u_cam;
+        vec2 cp = (p / u_res * 2.0 - 1.0) * vec2(1, -1);
+        gl_Position = vec4(cp, 0, 1);
+        v_col = a_col;
+    }
+`;
+const fs = `precision mediump float; varying vec4 v_col; void main() { gl_FragColor = v_col; }`;
+
+function mkShdr(t, s) { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; }
+const prog = gl.createProgram();
+gl.attachShader(prog, mkShdr(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, mkShdr(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog);
+
+const posLoc = gl.getAttribLocation(prog, "a_pos");
+const colLoc = gl.getAttribLocation(prog, "a_col");
+const resLoc = gl.getUniformLocation(prog, "u_res");
+const camLoc = gl.getUniformLocation(prog, "u_cam");
+const vbo = gl.createBuffer();
+
+// --- GAME STATE ---
+const state = {
+    cam: { x: 0, y: 0 },
+    joyX: 0,
+    ents: [],
+    rally: null,
+    worldW: 5000,
+    platforms: [
+        {x: 0, y: 500, w: 5000, h: 200},
+        {x: 300, y: 380, w: 200, h: 20},
+        {x: 600, y: 280, w: 200, h: 20}
+    ]
+};
+
+class Ent {
+    constructor(x, y, team) {
+        this.x = x; this.y = y; this.team = team;
+        this.vx = 0; this.vy = 0;
+        this.w = 24; this.h = 32;
+        this.hp = 100;
+        this.grnd = false;
+        this.color = team === 'p' ? [0, 0.9, 1, 1] : (team === 'a' ? [0.2, 1, 0.4, 1] : [1, 0, 0.3, 1]);
+    }
+    update() {
+        this.vy += 0.7; // Gravity
+        this.x += this.vx; this.y += this.vy;
+        this.vx *= 0.8;
+        this.grnd = false;
+        state.platforms.forEach(p => {
+            if (this.x < p.x + p.w && this.x + this.w > p.x && this.y + this.h > p.y && this.y + this.h < p.y + p.h + 15 && this.vy >= 0) {
+                this.y = p.y - this.h; this.vy = 0; this.grnd = true;
+            }
+        });
+
+        if (this.team === 'a') {
+            let tx = state.rally ? state.rally.x : player.x - 40;
+            if (Math.abs(tx - this.x) > 20) this.vx += (tx > this.x ? 0.8 : -0.8);
+        } else if (this.team === 'e') {
+            this.vx += (player.x > this.x ? 0.4 : -0.4);
+            if (Math.abs(player.x - this.x) < 50 && Math.random() > 0.9) this.atk(player);
+        }
+    }
+    atk(t) {
+        this.vx = (t.x > this.x ? 1 : -1) * 10;
+        this.vy = -5;
+        t.hp -= 5;
+    }
+}
+
+const player = new Ent(100, 100, 'p');
+state.ents.push(player);
+for(let i=0; i<4; i++) state.ents.push(new Ent(80 + i*20, 100, 'a'));
+
+// --- TOUCH LOGIC ---
+const knob = document.getElementById('knob');
+const joyBox = document.getElementById('joy-box');
+
+const getJoy = (e) => {
+    const t = e.touches[0];
+    const r = joyBox.getBoundingClientRect();
+    const dx = t.clientX - (r.left + 50);
+    const dist = Math.min(Math.abs(dx), 40);
+    state.joyX = (dx / 40);
+    knob.style.transform = `translateX(${state.joyX * 30}px)`;
+};
+
+joyBox.addEventListener('touchstart', (e) => { e.preventDefault(); getJoy(e); }, {passive: false});
+joyBox.addEventListener('touchmove', (e) => { e.preventDefault(); getJoy(e); }, {passive: false});
+joyBox.addEventListener('touchend', () => { state.joyX = 0; knob.style.transform = 'none'; });
+
+document.getElementById('jump-btn').addEventListener('touchstart', (e) => {
+    e.preventDefault(); if(player.grnd) player.vy = -15;
+}, {passive: false});
+
+document.getElementById('atk-btn').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    state.ents.forEach(en => { if(en.team === 'e' && Math.abs(en.x - player.x) < 80) player.atk(en); });
+}, {passive: false});
+
+// Tap world for Rally Point
+canvas.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    if (t.clientX > 150 && t.clientY < window.innerHeight - 150) {
+        state.rally = { x: t.clientX + state.cam.x, y: t.clientY + state.cam.y };
+    }
+}, {passive: false});
+
+// --- RENDER LOOP ---
+function loop() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    player.vx += state.joyX * 2.5;
+    state.cam.x += (player.x - canvas.width/2 - state.cam.x) * 0.1;
+    
+    state.ents = state.ents.filter(e => e.hp > 0);
+    state.ents.forEach(e => e.update());
+    if (Math.random() > 0.99) state.ents.push(new Ent(player.x + 600, 100, 'e'));
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(prog);
+
+    let v = [];
+    const draw = (x, y, w, h, c) => {
+        v.push(x,y, ...c, x+w,y, ...c, x,y+h, ...c, x,y+h, ...c, x+w,y, ...c, x+w,y+h, ...c);
+    };
+
+    state.platforms.forEach(p => draw(p.x, p.y, p.w, p.h, [0.1, 0.1, 0.1, 1]));
+    state.ents.forEach(e => {
+        draw(e.x, e.y, e.w, e.h, e.color);
+        draw(e.x, e.y - 10, e.w * (e.hp/100), 4, [1,1,1,1]);
+    });
+    if(state.rally) draw(state.rally.x-5, state.rally.y-5, 10, 10, [0, 1, 0, 0.5]);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.STREAM_DRAW);
+    gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(colLoc); gl.vertexAttribPointer(colLoc, 4, gl.FLOAT, false, 24, 8);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    gl.uniform2f(camLoc, state.cam.x, state.cam.y);
+    gl.drawArrays(gl.TRIANGLES, 0, v.length / 6);
+
+    document.getElementById('sq').innerText = state.ents.filter(e => e.team === 'a').length;
+    requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
