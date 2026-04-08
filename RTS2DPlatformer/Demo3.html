@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>WebGL RTS Platformer Pro</title>
+    <style>
+        :root { --neon-blue: #00f2ff; --neon-red: #ff0055; --neon-green: #39ff14; }
+        body { margin: 0; overflow: hidden; background: #050508; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; -webkit-tap-highlight-color: transparent; }
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+        
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .hud { position: absolute; top: 20px; left: 20px; color: var(--neon-blue); text-transform: uppercase; letter-spacing: 2px; font-weight: bold; border-left: 4px solid var(--neon-blue); padding-left: 15px; background: rgba(0,0,0,0.4); }
+        
+        /* Mobile Protector Styles */
+        * { touch-action: manipulation; }
+
+        /* Controls */
+        .ctrl-zone { position: absolute; bottom: 30px; width: 100%; display: flex; justify-content: space-between; padding: 0 40px; box-sizing: border-box; pointer-events: auto; }
+        .joystick-base { width: 130px; height: 130px; background: rgba(255,255,255,0.05); border: 2px solid rgba(0,242,255,0.3); border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        #joy-knob { width: 50px; height: 50px; background: var(--neon-blue); border-radius: 50%; box-shadow: 0 0 15px var(--neon-blue); transition: transform 0.05s linear; }
+        
+        .btn-group { display: flex; gap: 25px; align-items: flex-end; }
+        .action-btn { width: 85px; height: 85px; border-radius: 50%; border: 2px solid #fff; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; background: rgba(255,255,255,0.1); backdrop-filter: blur(5px); transition: 0.1s; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        #btn-atk { border-color: var(--neon-red); color: var(--neon-red); font-size: 20px; width: 95px; height: 95px; }
+        .action-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="hud">
+        <div id="status">COMMANDER: ONLINE</div>
+        <div id="squad-info" style="color:var(--neon-green)">UNITS: 4 | ACTIVE</div>
+        <div id="wave-info" style="color:white; font-size: 0.8em; margin-top: 5px;">THREAT LEVEL: LOW</div>
+    </div>
+
+    <div class="ctrl-zone">
+        <div class="joystick-base" id="joy-area">
+            <div id="joy-knob"></div>
+        </div>
+        <div class="btn-group">
+            <div class="action-btn" id="btn-jump">JUMP</div>
+            <div class="action-btn" id="btn-atk">STRIKE</div>
+        </div>
+    </div>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script>
+/** * MOBILE ZOOM PROTECTOR
+ * Prevents double-tap zoom and multi-finger scale bugs in mobile browsers.
+ */
+document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+    const now = (new Date()).getTime();
+    if (now - lastTouchEnd <= 300) e.preventDefault();
+    lastTouchEnd = now;
+}, false);
+
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+// --- SHADER SOURCE ---
+const vs = `
+    attribute vec2 a_pos;
+    attribute vec4 a_col;
+    uniform vec2 u_res;
+    uniform vec2 u_cam;
+    varying vec4 v_col;
+    void main() {
+        vec2 p = a_pos - u_cam;
+        vec2 cp = (p / u_res * 2.0 - 1.0) * vec2(1, -1);
+        gl_Position = vec4(cp, 0, 1);
+        v_col = a_col;
+    }
+`;
+const fs = `precision mediump float; varying vec4 v_col; void main() { gl_FragColor = v_col; }`;
+
+// --- GL HELPERS ---
+function createShader(gl, type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl, gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, createShader(gl, gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog);
+
+const posLoc = gl.getAttribLocation(prog, "a_pos");
+const colLoc = gl.getAttribLocation(prog, "a_col");
+const resLoc = gl.getUniformLocation(prog, "u_res");
+const camLoc = gl.getUniformLocation(prog, "u_cam");
+const vbo = gl.createBuffer();
+
+// --- GAME CONFIG & STATE ---
+const state = {
+    camera: { x: 0, y: 0 },
+    joy: { x: 0, active: false },
+    rally: null,
+    entities: [],
+    particles: [],
+    platforms: [
+        {x: -500, y: 500, w: 5000, h: 200}, // Ground
+        {x: 200, y: 350, w: 150, h: 20},
+        {x: 450, y: 250, w: 200, h: 20},
+        {x: 800, y: 350, w: 150, h: 20},
+        {x: 1100, y: 250, w: 300, h: 20},
+        {x: 1500, y: 400, w: 200, h: 20}
+    ]
+};
+
+class Entity {
+    constructor(x, y, team) {
+        this.x = x; this.y = y; this.team = team;
+        this.vx = 0; this.vy = 0;
+        this.w = 26; this.h = 34;
+        this.hp = 100;
+        this.grounded = false;
+        this.atkTimer = 0;
+        this.animScaleY = 1.0;
+        this.animScaleX = 1.0;
+        
+        // Visuals
+        if(team === 'player') this.color = [0, 0.9, 1, 1];
+        else if(team === 'ally') this.color = [0.2, 1, 0.4, 1];
+        else this.color = [1, 0, 0.3, 1];
+    }
+
+    applyPhysics() {
+        this.vy += 0.65; // Gravity
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vx *= 0.82; // Friction
+
+        this.grounded = false;
+        state.platforms.forEach(p => {
+            if (this.x < p.x + p.w && this.x + this.w > p.x &&
+                this.y + this.h > p.y && this.y + this.h < p.y + p.h + 15 && this.vy >= 0) {
+                this.y = p.y - this.h;
+                this.vy = 0;
+                this.grounded = true;
+            }
+        });
+
+        // Animation smoothing
+        this.animScaleX += (1.0 - this.animScaleX) * 0.1;
+        this.animScaleY += (1.0 - this.animScaleY) * 0.1;
+        if(this.atkTimer > 0) this.atkTimer--;
+    }
+
+    performAction(target) {
+        if(this.atkTimer === 0) {
+            const dir = (target.x + target.w/2) > (this.x + this.w/2) ? 1 : -1;
+            this.vx = dir * 15;
+            this.vy = -6;
+            this.atkTimer = 35;
+            this.animScaleX = 1.5; // "Lunge" stretch
+            this.animScaleY = 0.7;
+            target.hp -= 12;
+            spawnBlood(target.x + 10, target.y + 10);
+        }
+    }
+
+    update() {
+        this.applyPhysics();
+        if (this.team === 'ally') {
+            // RTS Logic: Follow Rally Point or Commander
+            let tx = state.rally ? state.rally.x : player.x - 50;
+            let dx = tx - this.x;
+            if (Math.abs(dx) > 30) this.vx += dx > 0 ? 0.9 : -0.9;
+            
+            // Auto-Combat
+            state.entities.forEach(e => {
+                if(e.team === 'bad' && Math.abs(e.x - this.x) < 70) this.performAction(e);
+            });
+        }
+        if (this.team === 'bad') {
+            let dx = player.x - this.x;
+            this.vx += dx > 0 ? 0.45 : -0.45;
+            if(Math.abs(dx) < 55) this.performAction(player);
+        }
+    }
+}
+
+// --- INIT ENTITIES ---
+const player = new Entity(100, 100, 'player');
+state.entities.push(player);
+for(let i=0; i<4; i++) state.entities.push(new Entity(50 + i*25, 400, 'ally'));
+
+function spawnBlood(x, y) {
+    for(let i=0; i<5; i++) {
+        state.particles.push({
+            x, y, vx: (Math.random()-0.5)*10, vy: (Math.random()-1)*10, 
+            life: 30, c: [1, 0, 0, 1]
+        });
+    }
+}
+
+// --- INPUT HANDLING ---
+const knob = document.getElementById('joy-knob');
+const joyArea = document.getElementById('joy-area');
+
+const handleMove = (e) => {
+    const t = e.touches ? e.touches[0] : e;
+    const r = joyArea.getBoundingClientRect();
+    const cx = r.left + r.width/2;
+    const cy = r.top + r.height/2;
+    const dx = t.clientX - cx;
+    const dy = t.clientY - cy;
+    const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 50);
+    const ang = Math.atan2(dy, dx);
+    
+    state.joy.x = (Math.cos(ang) * dist) / 50;
+    knob.style.transform = `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
+};
+
+joyArea.addEventListener('touchstart', (e) => { e.preventDefault(); handleMove(e); });
+joyArea.addEventListener('touchmove', (e) => { e.preventDefault(); handleMove(e); });
+joyArea.addEventListener('touchend', () => { 
+    state.joy.x = 0; knob.style.transform = `translate(0,0)`; 
+});
+
+document.getElementById('btn-jump').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if(player.grounded) {
+        player.vy = -16;
+        player.animScaleY = 1.6;
+        player.animScaleX = 0.6;
+    }
+});
+
+document.getElementById('btn-atk').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    state.entities.forEach(en => {
+        if(en.team === 'bad' && Math.abs(en.x - player.x) < 100) player.performAction(en);
+    });
+});
+
+// RTS Tap
+canvas.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    if(t.clientX > 250 || t.clientY < window.innerHeight - 200) {
+        state.rally = { x: t.clientX + state.camera.x, y: t.clientY + state.camera.y };
+    }
+});
+
+// --- CORE LOOP ---
+function update() {
+    player.vx += state.joy.x * 2.5;
+    
+    // Camera Follow
+    state.camera.x += (player.x - window.innerWidth/2 - state.camera.x) * 0.1;
+    state.camera.y += (player.y - window.innerHeight/1.5 - state.camera.y) * 0.05;
+
+    state.entities = state.entities.filter(e => e.hp > 0);
+    state.entities.forEach(e => e.update());
+    
+    state.particles.forEach((p, i) => {
+        p.x += p.vx; p.y += p.vy; p.vy += 0.5; p.life--;
+        if(p.life <= 0) state.particles.splice(i, 1);
+    });
+
+    if(Math.random() > 0.985) {
+        state.entities.push(new Entity(player.x + 800 + Math.random()*200, 100, 'bad'));
+    }
+
+    render();
+    requestAnimationFrame(update);
+}
+
+function render() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.02, 0.02, 0.04, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(prog);
+
+    let v = [];
+    const pushRect = (x, y, w, h, c) => {
+        v.push(x,y, ...c, x+w,y, ...c, x,y+h, ...c, x,y+h, ...c, x+w,y, ...c, x+w,y+h, ...c);
+    };
+
+    // Parallax Stars
+    for(let i=0; i<20; i++) {
+        let px = (i * 200 - state.camera.x * 0.2) % 2000;
+        pushRect(px, 100 + i*10, 4, 4, [1,1,1,0.2]);
+    }
+
+    state.platforms.forEach(p => pushRect(p.x, p.y, p.w, p.h, [0.1, 0.1, 0.15, 1]));
+    
+    state.entities.forEach(e => {
+        const sw = e.w * e.animScaleX;
+        const sh = e.h * e.animScaleY;
+        const ox = (e.w - sw) / 2;
+        const oy = (e.h - sh);
+        pushRect(e.x + ox, e.y + oy, sw, sh, e.color);
+        // Health bar
+        pushRect(e.x, e.y - 15, e.w * (e.hp/100), 4, [1,1,1,1]);
+    });
+
+    state.particles.forEach(p => pushRect(p.x, p.y, 4, 4, p.c));
+    if(state.rally) pushRect(state.rally.x-10, state.rally.y-10, 20, 2, [0, 1, 0.5, 0.8]);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(colLoc); gl.vertexAttribPointer(colLoc, 4, gl.FLOAT, false, 24, 8);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    gl.uniform2f(camLoc, state.camera.x, state.camera.y);
+    gl.drawArrays(gl.TRIANGLES, 0, v.length / 6);
+
+    document.getElementById('squad-info').innerText = `UNITS: ${state.entities.filter(e=>
