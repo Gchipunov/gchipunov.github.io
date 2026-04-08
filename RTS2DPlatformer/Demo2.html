@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS Platformer Mobile</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; user-select: none; }
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+        
+        #ui-overlay { position: absolute; top: 10px; left: 10px; color: #0f0; pointer-events: none; text-shadow: 2px 2px #000; }
+        
+        /* Mobile Controls */
+        .joystick-container { position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 2px solid #fff; }
+        #joystick-knob { position: absolute; width: 50px; height: 50px; background: #fff; border-radius: 50%; left: 35px; top: 35px; }
+        
+        .buttons-container { position: absolute; bottom: 40px; right: 40px; display: flex; gap: 20px; }
+        .btn { width: 70px; height: 70px; background: rgba(255,255,255,0.2); border: 3px solid #fff; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; }
+        .btn:active { background: rgba(255,255,255,0.5); }
+    </style>
+</head>
+<body>
+
+<div id="ui-overlay">
+    <div>COMMANDER STATUS: ACTIVE</div>
+    <div id="unit-count">SQUAD: 4</div>
+    <div style="font-size: 0.8em; margin-top: 5px;">TAP WORLD FOR RTS COMMAND</div>
+</div>
+
+<div class="joystick-container" id="joy-base">
+    <div id="joystick-knob"></div>
+</div>
+<div class="buttons-container">
+    <div class="btn" id="btn-jump">JUMP</div>
+    <div class="btn" id="btn-atk" style="background: rgba(255,0,0,0.3);">ATK</div>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+// --- SHADERS (Same logic, faster batching) ---
+const vs = `attribute vec2 a_pos; attribute vec4 a_col; uniform vec2 u_res; varying vec4 v_col; 
+void main() { vec2 cp = (a_pos / u_res * 2.0 - 1.0) * vec2(1, -1); gl_Position = vec4(cp, 0, 1); v_col = a_col; }`;
+const fs = `precision mediump float; varying vec4 v_col; void main() { gl_FragColor = v_col; }`;
+
+function createProg(gl, vs, fs) {
+    const p = gl.createProgram();
+    [vs, fs].forEach((s, i) => {
+        const sh = gl.createShader(i ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER);
+        gl.shaderSource(sh, s); gl.compileShader(sh); gl.attachShader(p, sh);
+    });
+    gl.linkProgram(p); return p;
+}
+const program = createProg(gl, vs, fs);
+const posLoc = gl.getAttribLocation(program, "a_pos");
+const colLoc = gl.getAttribLocation(program, "a_col");
+const resLoc = gl.getUniformLocation(program, "u_res");
+const buf = gl.createBuffer();
+
+// --- GAME OBJECTS ---
+const state = {
+    joy: { x: 0, y: 0, active: false },
+    rallyPoint: null,
+    entities: [],
+    platforms: [
+        {x: 0, y: 500, w: 3000, h: 100},
+        {x: 200, y: 380, w: 200, h: 20},
+        {x: 500, y: 280, w: 200, h: 20},
+        {x: 800, y: 380, w: 200, h: 20}
+    ]
+};
+
+class Agent {
+    constructor(x, y, team) {
+        this.x = x; this.y = y; this.team = team;
+        this.vx = 0; this.vy = 0;
+        this.w = 24; this.h = 32;
+        this.hp = 100;
+        this.grounded = false;
+        this.state = 'idle'; // idle, move, attack
+        this.atkCooldown = 0;
+        this.color = team === 'good' ? [0, 0.8, 1, 1] : [1, 0, 0.3, 1];
+        if(team === 'ally') this.color = [0, 1, 0.4, 1];
+    }
+
+    update() {
+        this.vy += 0.6; // Gravity
+        this.x += this.vx; this.y += this.vy;
+        this.vx *= 0.8;
+        if(this.atkCooldown > 0) this.atkCooldown--;
+
+        // Collision
+        this.grounded = false;
+        state.platforms.forEach(p => {
+            if (this.x < p.x + p.w && this.x + this.w > p.x &&
+                this.y + this.h > p.y && this.y + this.h < p.y + p.h + 10 && this.vy >= 0) {
+                this.y = p.y - this.h; this.vy = 0; this.grounded = true;
+            }
+        });
+
+        // AI Logic
+        if (this.team === 'ally') this.updateAlly();
+        if (this.team === 'bad') this.updateBad();
+    }
+
+    attack(target) {
+        if(this.atkCooldown === 0) {
+            const dir = target.x > this.x ? 1 : -1;
+            this.vx = dir * 12; // Lunge
+            this.vy = -5; // Small hop
+            target.hp -= 15;
+            this.atkCooldown = 40;
+        }
+    }
+
+    updateAlly() {
+        let targetX = state.rallyPoint ? state.rallyPoint.x : player.x - 40;
+        let dx = targetX - this.x;
+        if (Math.abs(dx) > 20) this.vx += dx > 0 ? 0.8 : -0.8;
+        
+        // Combat: Find nearest bad guy
+        state.entities.filter(e => e.team === 'bad').forEach(enemy => {
+            let d = Math.abs(enemy.x - this.x);
+            if(d < 60) this.attack(enemy);
+        });
+    }
+
+    updateBad() {
+        let dx = player.x - this.x;
+        this.vx += dx > 0 ? 0.4 : -0.4;
+        if(Math.abs(dx) < 50) this.attack(player);
+    }
+}
+
+const player = new Agent(100, 100, 'good');
+state.entities.push(player);
+for(let i=0; i<4; i++) state.entities.push(new Agent(50 + i*20, 100, 'ally'));
+
+// --- CONTROLS ---
+const joyKnob = document.getElementById('joystick-knob');
+const joyBase = document.getElementById('joy-base');
+
+canvas.addEventListener('pointerdown', (e) => {
+    // Only set rally point if not touching UI
+    if(e.clientX > 200 || e.clientY < canvas.height - 200) {
+        state.rallyPoint = {x: e.clientX, y: e.clientY};
+    }
+});
+
+joyBase.addEventListener('pointermove', (e) => {
+    const rect = joyBase.getBoundingClientRect();
+    const centerX = rect.left + rect.width/2;
+    const centerY = rect.top + rect.height/2;
+    let dx = e.clientX - centerX;
+    let dy = e.clientY - centerY;
+    const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+    const angle = Math.atan2(dy, dx);
+    state.joy.x = (Math.cos(angle) * dist) / 40;
+    joyKnob.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+});
+
+joyBase.addEventListener('pointerup', () => {
+    state.joy.x = 0;
+    joyKnob.style.transform = `translate(0,0)`;
+});
+
+document.getElementById('btn-jump').addEventListener('pointerdown', () => {
+    if(player.grounded) player.vy = -14;
+});
+
+document.getElementById('btn-atk').addEventListener('pointerdown', () => {
+    state.entities.filter(e => e.team === 'bad').forEach(en => {
+        if(Math.abs(en.x - player.x) < 80) player.attack(en);
+    });
+});
+
+// --- RENDER & LOOP ---
+function loop() {
+    player.vx += state.joy.x * 2;
+    
+    state.entities = state.entities.filter(e => e.hp > 0);
+    state.entities.forEach(e => e.update());
+
+    if(Math.random() > 0.99) state.entities.push(new Agent(canvas.width + 100, 100, 'bad'));
+
+    render();
+    requestAnimationFrame(loop);
+}
+
+function render() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.05, 0.05, 0.1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+
+    let v = [];
+    const drawRect = (x, y, w, h, c) => {
+        v.push(x,y, ...c, x+w,y, ...c, x,y+h, ...c, x,y+h, ...c, x+w,y, ...c, x+w,y+h, ...c);
+    };
+
+    state.platforms.forEach(p => drawRect(p.x, p.y, p.w, p.h, [0.2, 0.2, 0.25, 1]));
+    state.entities.forEach(e => {
+        // Body
+        drawRect(e.x, e.y, e.w, e.h, e.color);
+        // Health Bar
+        drawRect(e.x, e.y - 10, (e.hp/100)*e.w, 4, [1, 1, 1, 1]);
+    });
+    if(state.rallyPoint) drawRect(state.rallyPoint.x-5, state.rallyPoint.y-5, 10, 10, [1, 1, 0, 0.5]);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(colLoc); gl.vertexAttribPointer(colLoc, 4, gl.FLOAT, false, 24, 8);
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    gl.drawArrays(gl.TRIANGLES, 0, v.length / 6);
+}
+
+loop();
+</script>
+</body>
+</html>
