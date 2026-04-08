@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL RTS Platformer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>Sector Shift Alpha</h1>
+        <p>WASD to Move | Mouse to Aim & Shoot</p>
+        <div id="stats">Units: 5 | Enemies: 0</div>
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+// --- Shaders ---
+const vsSource = `
+    attribute vec2 a_position;
+    attribute vec4 a_color;
+    uniform vec2 u_resolution;
+    varying vec4 v_color;
+    void main() {
+        vec2 zeroToOne = a_position / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        v_color = a_color;
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec4 v_color;
+    void main() { gl_FragColor = v_color; }
+`;
+
+// --- Initialization ---
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+
+const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+const colorAttributeLocation = gl.getAttribLocation(program, "a_color");
+const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+const positionBuffer = gl.createBuffer();
+
+// --- Game State ---
+const world = {
+    gravity: 0.5,
+    friction: 0.8,
+    entities: [],
+    bullets: [],
+    platforms: [
+        {x: 0, y: 500, w: 2000, h: 50},
+        {x: 300, y: 400, w: 200, h: 20},
+        {x: 600, y: 300, w: 200, h: 20}
+    ]
+};
+
+class Entity {
+    constructor(x, y, color, type) {
+        this.x = x; this.y = y;
+        this.vx = 0; this.vy = 0;
+        this.w = 20; this.h = 20;
+        this.color = color;
+        this.type = type; // 'player', 'ally', 'enemy'
+        this.hp = 100;
+        this.grounded = false;
+    }
+
+    update() {
+        this.vy += world.gravity;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vx *= world.friction;
+
+        // Simple Platform Collision
+        this.grounded = false;
+        world.platforms.forEach(p => {
+            if (this.x < p.x + p.w && this.x + this.w > p.x &&
+                this.y + this.h > p.y && this.y + this.h < p.y + p.h + 10 && this.vy >= 0) {
+                this.y = p.y - this.h;
+                this.vy = 0;
+                this.grounded = true;
+            }
+        });
+        
+        // AI Logic
+        if (this.type === 'ally') {
+            let dist = player.x - this.x;
+            if (Math.abs(dist) > 50) this.vx += dist > 0 ? 0.5 : -0.5;
+            if (Math.abs(dist) > 100 && this.grounded && Math.random() > 0.98) this.vy = -10;
+        } else if (this.type === 'enemy') {
+            let dist = player.x - this.x;
+            this.vx += dist > 0 ? 0.3 : -0.3;
+            if (this.grounded && Math.random() > 0.99) this.vy = -8;
+        }
+    }
+}
+
+const player = new Entity(100, 100, [0.2, 0.5, 1, 1], 'player');
+world.entities.push(player);
+
+// Spawn Allies
+for(let i=0; i<4; i++) world.entities.push(new Entity(100 + i*30, 100, [0.2, 0.8, 0.2, 1], 'ally'));
+
+// --- Input ---
+const keys = {};
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+window.onmousedown = (e) => {
+    const angle = Math.atan2(e.clientY - player.y, e.clientX - player.x);
+    world.bullets.push({
+        x: player.x + 10, y: player.y + 10, 
+        vx: Math.cos(angle) * 10, vy: Math.sin(angle) * 10,
+        life: 100
+    });
+};
+
+// --- Main Loop ---
+function loop() {
+    // Player movement
+    if (keys['KeyA']) player.vx -= 1;
+    if (keys['KeyD']) player.vx += 1;
+    if (keys['KeyW'] && player.grounded) player.vy = -12;
+
+    // Update Entities
+    world.entities.forEach(e => e.update());
+    
+    // Update Bullets
+    world.bullets.forEach((b, i) => {
+        b.x += b.vx; b.y += b.vy; b.life--;
+        if (b.life <= 0) world.bullets.splice(i, 1);
+    });
+
+    // Spawn Enemies
+    if (Math.random() > 0.98) world.entities.push(new Entity(canvas.width, 100, [1, 0.2, 0.2, 1], 'enemy'));
+
+    render();
+    requestAnimationFrame(loop);
+}
+
+function render() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(program);
+
+    let vertices = [];
+    const addRect = (x, y, w, h, c) => {
+        vertices.push(
+            x, y, ...c, x + w, y, ...c, x, y + h, ...c,
+            x, y + h, ...c, x + w, y, ...c, x + w, y + h, ...c
+        );
+    };
+
+    // Draw Platforms
+    world.platforms.forEach(p => addRect(p.x, p.y, p.w, p.h, [0.4, 0.4, 0.4, 1]));
+    // Draw Entities
+    world.entities.forEach(e => addRect(e.x, e.y, e.w, e.h, e.color));
+    // Draw Bullets
+    world.bullets.forEach(b => addRect(b.x, b.y, 4, 4, [1, 1, 0, 1]));
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+    
+    gl.enableVertexAttribArray(positionAttributeLocation);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(colorAttributeLocation);
+    gl.vertexAttribPointer(colorAttributeLocation, 4, gl.FLOAT, false, 24, 8);
+    
+    gl.uniform2f(resolutionUniformLocation, canvas.width, canvas.height);
+    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / 6);
+}
+
+loop();
+</script>
+</body>
+</html>
