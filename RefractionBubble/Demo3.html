@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Glass Orb - Fixed Renderer</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        varying vec3 vNormal;
+        varying vec3 vEyeVec;
+        varying vec3 vWorldPos;
+
+        void main() {
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPos = worldPos.xyz;
+            vNormal = normalize(normalMatrix * normal);
+            vEyeVec = normalize(worldPos.xyz - cameraPosition);
+            gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision highp float;
+        
+        varying vec3 vNormal;
+        varying vec3 vEyeVec;
+        varying vec3 vWorldPos;
+        uniform samplerCube envMap; // Switched to CubeSampler for better mobile support
+
+        float hash(vec3 p) {
+            p = fract(p * 0.3183099 + 0.1);
+            p *= 17.0;
+            return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+
+        void main() {
+            vec3 N = normalize(vNormal);
+            vec3 I = normalize(vEyeVec);
+
+            // Dispersion Indices
+            vec3 refractR = refract(I, N, 1.0/1.14);
+            vec3 refractG = refract(I, N, 1.0/1.18);
+            vec3 refractB = refract(I, N, 1.0/1.22);
+
+            float r = textureCube(envMap, refractR).r;
+            float g = textureCube(envMap, refractG).g;
+            float b = textureCube(envMap, refractB).b;
+
+            // Bubbles
+            vec3 bPos = vWorldPos * 12.0;
+            float n = hash(floor(bPos));
+            float bubble = 0.0;
+            if(n > 0.97) {
+                bubble = smoothstep(0.2, 0.0, length(fract(bPos) - 0.5)) * 0.8;
+            }
+
+            vec3 color = vec3(r, g, b) + bubble;
+            float fresnel = pow(1.0 + dot(I, N), 3.0);
+            
+            gl_FragColor = vec4(mix(color, vec3(1.0), fresnel * 0.5), 1.0);
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ 
+            canvas: document.getElementById('glCanvas'), 
+            antialias: true,
+            alpha: true 
+        });
+        
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- Environment ---
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0,0,512,512);
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 20; ctx.strokeRect(0,0,512,512);
+        ctx.font = 'bold 60px Arial'; ctx.fillStyle = '#000'; ctx.fillText('METEOR', 120, 280);
+        
+        const gridTex = new THREE.CanvasTexture(canvas);
+        gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping;
+        gridTex.repeat.set(4, 4);
+
+        const room = new THREE.Mesh(
+            new THREE.BoxGeometry(20, 20, 20),
+            new THREE.MeshBasicMaterial({ map: gridTex, side: THREE.BackSide })
+        );
+        scene.add(room);
+
+        // --- Glass Sphere ---
+        // Use RGBAFormat and HalfFloatType if available for better color precision on mobile
+        const cubeRT = new THREE.WebGLCubeRenderTarget(512, { 
+            generateMipmaps: true, 
+            minFilter: THREE.LinearMipmapLinearFilter,
+            format: THREE.RGBAFormat 
+        });
+        const cubeCam = new THREE.CubeCamera(0.1, 100, cubeRT);
+
+        const glassMat = new THREE.ShaderMaterial({
+            uniforms: {
+                envMap: { value: cubeRT.texture },
+                cameraPosition: { value: new THREE.Vector3() }
+            },
+            vertexShader: document.getElementById('vs').textContent,
+            fragmentShader: document.getElementById('fs').textContent
+        });
+
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(2, 64, 64), glassMat);
+        scene.add(sphere);
+
+        camera.position.set(0, 0, 7);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            controls.update();
+
+            // Render Cube Map
+            sphere.visible = false;
+            cubeCam.update(renderer, scene);
+            sphere.visible = true;
+
+            // Update Shader Uniforms
+            glassMat.uniforms.cameraPosition.value.copy(camera.position);
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
