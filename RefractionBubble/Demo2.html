@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Glass Orb - Mobile Optimized</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+
+    <script id="vs" type="x-shader/x-vertex">
+        attribute vec3 position;
+        attribute vec3 normal;
+        varying vec3 vNormal;
+        varying vec3 vEyeVec;
+        varying vec3 vWorldPos;
+        uniform mat4 modelMatrix;
+        uniform mat4 viewMatrix;
+        uniform mat4 projectionMatrix;
+        uniform vec3 cameraPosition;
+
+        void main() {
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPos = worldPos.xyz;
+            vNormal = normalize(mat3(modelMatrix) * normal);
+            vEyeVec = normalize(worldPos.xyz - cameraPosition);
+            gl_Position = projectionMatrix * viewMatrix * worldPos;
+        }
+    </script>
+
+    <script id="fs" type="x-shader/x-fragment">
+        precision highp float;
+        varying vec3 vNormal;
+        varying vec3 vEyeVec;
+        varying vec3 vWorldPos;
+        uniform sampler2D envMap;
+
+        float hash(vec3 p) {
+            p = fract(p * 0.3183099 + 0.1);
+            p *= 17.0;
+            return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+        }
+
+        void main() {
+            vec3 N = normalize(vNormal);
+            vec3 I = normalize(vEyeVec);
+
+            // Dispersion indices
+            float iorR = 1.14;
+            float iorG = 1.18;
+            float iorB = 1.22;
+
+            vec3 reR = refract(I, N, 1.0/iorR);
+            vec3 reG = refract(I, N, 1.0/iorG);
+            vec3 reB = refract(I, N, 1.0/iorB);
+
+            // Simple equirectangular mapping for the internal texture
+            vec2 uvR = vec2(0.5 + atan(reR.z, reR.x) / 6.28318, 0.5 + asin(reR.y) / 3.14159);
+            vec2 uvG = vec2(0.5 + atan(reG.z, reG.x) / 6.28318, 0.5 + asin(reG.y) / 3.14159);
+            vec2 uvB = vec2(0.5 + atan(reB.z, reB.x) / 6.28318, 0.5 + asin(reB.y) / 3.14159);
+
+            float r = texture2D(envMap, uvR).r;
+            float g = texture2D(envMap, uvG).g;
+            float b = texture2D(envMap, uvB).b;
+
+            // Bubbles
+            vec3 bPos = vWorldPos * 10.0;
+            float n = hash(floor(bPos));
+            float bubble = 0.0;
+            if(n > 0.96) {
+                bubble = smoothstep(0.15, 0.05, length(fract(bPos) - 0.5)) * 0.6;
+            }
+
+            vec3 color = vec3(r, g, b) + bubble;
+            float fresnel = pow(1.0 + dot(I, N), 3.0);
+            gl_FragColor = vec4(mix(color, vec3(1.0), fresnel * 0.4), 1.0);
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/OrbitControls.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('glCanvas'), antialias: true });
+        
+        // Mobile Fix: Sharpness for Retina screens
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        // Mobile Fix: Orbit Controls for touch rotation
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; 
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.5;
+
+        // Create Grid Room
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#eee'; ctx.fillRect(0,0,512,512);
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 15; ctx.strokeRect(0,0,512,512);
+        ctx.font = 'bold 70px Arial'; ctx.fillStyle = '#000'; ctx.fillText('METEOR', 110, 280);
+        
+        const gridTex = new THREE.CanvasTexture(canvas);
+        gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping;
+        gridTex.repeat.set(4, 4);
+
+        const room = new THREE.Mesh(
+            new THREE.BoxGeometry(20, 20, 20),
+            new THREE.MeshBasicMaterial({ map: gridTex, side: THREE.BackSide })
+        );
+        scene.add(room);
+
+        // CubeCamera for Refraction
+        const cubeRes = 512;
+        const cubeRT = new THREE.WebGLCubeRenderTarget(cubeRes, { format: THREE.RGBFormat, generateMipmaps: true });
+        const cubeCam = new THREE.CubeCamera(0.1, 100, cubeRT);
+
+        // Glass Sphere
+        const glassMat = new THREE.ShaderMaterial({
+            uniforms: {
+                envMap: { value: cubeRT.texture },
+                cameraPosition: { value: camera.position }
+            },
+            vertexShader: document.getElementById('vs').textContent,
+            fragmentShader: document.getElementById('fs').textContent
+        });
+        const sphere = new THREE.Mesh(new THREE.SphereGeometry(2, 64, 64), glassMat);
+        scene.add(sphere);
+
+        camera.position.set(0, 1, 7);
+        controls.update();
+
+        function animate(t) {
+            requestAnimationFrame(animate);
+            
+            // Interaction update
+            controls.update();
+
+            // Render env map pass
+            sphere.visible = false;
+            cubeCam.update(renderer, scene);
+            sphere.visible = true;
+
+            // Sync uniforms
+            glassMat.uniforms.cameraPosition.value.copy(camera.position);
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate(0);
+    </script>
+</body>
+</html>
