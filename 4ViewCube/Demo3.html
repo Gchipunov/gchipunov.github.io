@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL CAD Brush</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; touch-action: none; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; z-index: 10;
+            background: rgba(0,0,0,0.8); padding: 12px; border-radius: 8px; color: white;
+        }
+        .btn-group { display: flex; gap: 5px; margin-top: 8px; }
+        button { 
+            padding: 8px 12px; cursor: pointer; background: #333; color: white; border: 1px solid #555; 
+        }
+        button.active { background: #ce9178; color: black; font-weight: bold; }
+        #accelBtn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 15px; background: #4CAF50; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="status">Mode: Brush</div>
+    <div class="btn-group">
+        <button id="mode-brush" class="active">Brush</button>
+        <button id="mode-move">Move</button>
+        <button id="mode-vertex">Vertex</button>
+    </div>
+</div>
+
+<button id="accelBtn">Start Phone Sensors</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    let scene, renderer, views = [];
+    let cubes = [], selectedCube = null;
+    let currentMode = 'brush';
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    
+    // For "Brush" placement depth
+    const placementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+    init();
+    animate();
+
+    function init() {
+        scene = new THREE.Scene();
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.autoClear = false;
+        document.body.appendChild(renderer.domElement);
+
+        setupCameras();
+
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 20, 10);
+        scene.add(light, new THREE.AmbientLight(0x404040), new THREE.GridHelper(20, 20, 0x555555));
+
+        // Event Listeners
+        window.addEventListener('pointerdown', handleInput);
+        window.addEventListener('resize', onWindowResize);
+        
+        // Mode Toggles
+        document.querySelectorAll('button[id^="mode-"]').forEach(btn => {
+            btn.onclick = (e) => {
+                document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentMode = btn.id.replace('mode-', '');
+                document.getElementById('status').innerText = "Mode: " + currentMode.toUpperCase();
+            };
+        });
+
+        // Gyroscope
+        document.getElementById('accelBtn').onclick = () => {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission().then(res => { 
+                    if(res === 'granted') window.addEventListener('deviceorientation', handleGyro); 
+                });
+            } else { window.addEventListener('deviceorientation', handleGyro); }
+            document.getElementById('accelBtn').style.display = 'none';
+        };
+    }
+
+    function setupCameras() {
+        const s = 10;
+        // 3D Perspective (Top Left)
+        const pCam = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+        pCam.position.set(10, 10, 10);
+        pCam.lookAt(0,0,0);
+        views.push({ cam: pCam, l: 0, b: 0.5, w: 0.5, h: 0.5 });
+
+        // Top (Bottom Left)
+        const top = new THREE.OrthographicCamera(-s, s, s, -s, 1, 100);
+        top.position.set(0, 20, 0); top.lookAt(0,0,0);
+        views.push({ cam: top, l: 0, b: 0, w: 0.5, h: 0.5 });
+
+        // Front (Top Right)
+        const front = new THREE.OrthographicCamera(-s, s, s, -s, 1, 100);
+        front.position.set(0, 0, 20); front.lookAt(0,0,0);
+        views.push({ cam: front, l: 0.5, b: 0.5, w: 0.5, h: 0.5 });
+
+        // Right (Bottom Right)
+        const right = new THREE.OrthographicCamera(-s, s, s, -s, 1, 100);
+        right.position.set(20, 0, 0); right.lookAt(0,0,0);
+        views.push({ cam: right, l: 0.5, b: 0, w: 0.5, h: 0.5 });
+    }
+
+    function handleInput(event) {
+        if (event.target.tagName === 'BUTTON') return;
+
+        // Normalized Mouse
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        // We only interact through the 3D Perspective View (Top-Left)
+        if (event.clientX < window.innerWidth / 2 && event.clientY < window.innerHeight / 2) {
+            raycaster.setFromCamera(mouse, views[0].cam);
+
+            if (currentMode === 'brush') {
+                const intersectPoint = new THREE.Vector3();
+                raycaster.ray.intersectPlane(placementPlane, intersectPoint);
+                createCube(intersectPoint.x, 0.5, intersectPoint.z);
+            } 
+            else {
+                const intersects = raycaster.intersectObjects(cubes);
+                if (intersects.length > 0) {
+                    selectedCube = intersects[0].object;
+                    // Visual feedback for selection
+                    cubes.forEach(c => c.material.emissive.setHex(0x000000));
+                    selectedCube.material.emissive.setHex(0x333333);
+
+                    if (currentMode === 'move') {
+                        selectedCube.position.y += 1; // Step move
+                    } else if (currentMode === 'vertex') {
+                        deformGeometry(selectedCube);
+                    }
+                }
+            }
+        }
+    }
+
+    function createCube(x, y, z) {
+        const geo = new THREE.BoxGeometry(1, 1, 1);
+        const mat = new THREE.MeshPhongMaterial({ color: Math.random() * 0xffffff });
+        const cube = new THREE.Mesh(geo, mat);
+        cube.position.set(x, y, z);
+        scene.add(cube);
+        cubes.push(cube);
+    }
+
+    function deformGeometry(mesh) {
+        const pos = mesh.geometry.attributes.position;
+        const index = Math.floor(Math.random() * pos.count);
+        // Push a random vertex outward
+        pos.setXYZ(index, 
+            pos.getX(index) + (Math.random() - 0.5), 
+            pos.getY(index) + (Math.random() - 0.5), 
+            pos.getZ(index) + (Math.random() - 0.5)
+        );
+        pos.needsUpdate = true;
+    }
+
+    function handleGyro(e) {
+        // Simple rotation mapping
+        const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+        const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+        const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+        views[0].cam.rotation.set(beta, alpha, -gamma, 'YXZ');
+    }
+
+    function onWindowResize() {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const w = window.innerWidth, h = window.innerHeight;
+        renderer.clear();
+        views.forEach(v => {
+            renderer.setViewport(v.l * w, v.b * h, v.w * w, v.h * h);
+            renderer.setScissor(v.l * w, v.b * h, v.w * w, v.h * h);
+            renderer.setScissorTest(true);
+            v.cam.aspect = (v.w * w) / (v.h * h);
+            v.cam.updateProjectionMatrix();
+            renderer.render(scene, v.cam);
+        });
+    }
+</script>
+</body>
+</html>
