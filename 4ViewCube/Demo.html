@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Quad-View Brush</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
+        canvas { display: block; }
+        #overlay {
+            position: absolute; top: 10px; left: 10px; color: white;
+            pointer-events: none; text-shadow: 1px 1px 2px black;
+        }
+        button {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; cursor: pointer; z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    3D Perspective (Gyro) | Top View (Y)<br>
+    Front View (Z) | Right View (X)<br>
+    Tap 3D view to "Brush" a cube.
+</div>
+<button id="accelBtn">Enable Gyroscope</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    let scene, renderer, cubes = [];
+    let views = [];
+    const size = 10; // Ortho frustum size
+
+    init();
+    animate();
+
+    function init() {
+        scene = new THREE.Scene();
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.autoClear = false;
+        document.body.appendChild(renderer.domElement);
+
+        // 1. Perspective Camera (3D View) - Bottom Left
+        const pCam = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+        pCam.position.set(5, 5, 5);
+        pCam.lookAt(0, 0, 0);
+        views.push({ cam: pCam, left: 0, bottom: 0.5, width: 0.5, height: 0.5 });
+
+        // 2. Top View (Looking down Y) - Top Left
+        const topCam = new THREE.OrthographicCamera(-size, size, size, -size, 1, 100);
+        topCam.position.set(0, 20, 0);
+        topCam.lookAt(0, 0, 0);
+        views.push({ cam: topCam, left: 0, bottom: 0, width: 0.5, height: 0.5 });
+
+        // 3. Front View (Looking down Z) - Bottom Right
+        const frontCam = new THREE.OrthographicCamera(-size, size, size, -size, 1, 100);
+        frontCam.position.set(0, 0, 20);
+        frontCam.lookAt(0, 0, 0);
+        views.push({ cam: frontCam, left: 0.5, bottom: 0.5, width: 0.5, height: 0.5 });
+
+        // 4. Right View (Looking down X) - Top Right
+        const rightCam = new THREE.OrthographicCamera(-size, size, size, -size, 1, 100);
+        rightCam.position.set(20, 0, 0);
+        rightCam.lookAt(0, 0, 0);
+        views.push({ cam: rightCam, left: 0.5, bottom: 0, width: 0.5, height: 0.5 });
+
+        // Lights & Grid
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 10, 10);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0x404040));
+        scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
+
+        // Interaction: Brush Cube
+        window.addEventListener('pointerdown', onPointerDown);
+        window.addEventListener('resize', onWindowResize);
+
+        // Gyroscope Setup
+        document.getElementById('accelBtn').addEventListener('click', () => {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission().then(response => {
+                    if (response == 'granted') window.addEventListener('deviceorientation', handleOrientation);
+                });
+            } else {
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+            document.getElementById('accelBtn').style.display = 'none';
+        });
+    }
+
+    function createCube(x, y, z) {
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshPhongMaterial({ color: Math.random() * 0xffffff });
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(x, y, z);
+        scene.add(cube);
+        cubes.push(cube);
+    }
+
+    function onPointerDown(event) {
+        // Only trigger brush if clicking in the top-left quadrant (3D view)
+        if (event.clientX < window.innerWidth / 2 && event.clientY < window.innerHeight / 2) {
+            const x = (Math.random() - 0.5) * 10;
+            const y = (Math.random() - 0.5) * 10;
+            const z = (Math.random() - 0.5) * 10;
+            createCube(x, y, z);
+        }
+    }
+
+    function handleOrientation(event) {
+        // Map phone rotation to the 3D Perspective Camera
+        const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0; // Z
+        const beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;   // X
+        const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0; // Y
+        
+        views[0].cam.rotation.set(beta, alpha, -gamma, 'YXZ');
+    }
+
+    function onWindowResize() {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        render();
+    }
+
+    function render() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
+        views.forEach(view => {
+            const left = view.left * w;
+            const bottom = view.bottom * h;
+            const width = view.width * w;
+            const height = view.height * h;
+
+            renderer.setViewport(left, bottom, width, height);
+            renderer.setScissor(left, bottom, width, height);
+            renderer.setScissorTest(true);
+
+            view.cam.aspect = width / height;
+            if (view.cam.isOrthographicCamera) {
+                view.cam.left = -size * view.cam.aspect;
+                view.cam.right = size * view.cam.aspect;
+                view.cam.top = size;
+                view.cam.bottom = -size;
+            }
+            view.cam.updateProjectionMatrix();
+
+            renderer.render(scene, view.cam);
+        });
+    }
+</script>
+</body>
+</html>
