@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Quad-View: Edit Modes</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; color: white; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; 
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px;
+            pointer-events: auto; font-size: 14px;
+        }
+        .controls { margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap; }
+        button { 
+            padding: 6px 12px; cursor: pointer; background: #444; color: white; border: 1px solid #666; 
+        }
+        button.active { background: #007bff; border-color: #00a2ff; }
+        #accelBtn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 15px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <strong>Mode:</strong> <span id="currentMode">Brush</span><br>
+    <div class="controls">
+        <button onclick="setMode('brush')" id="btn-brush" class="active">Brush</button>
+        <button onclick="setMode('move')" id="btn-move">Move Cube</button>
+        <button onclick="setMode('vertex')" id="btn-vertex">Edit Vertices</button>
+    </div>
+    <p style="font-size: 11px; color: #aaa;">
+        Brush: Click 3D view to spawn.<br>
+        Move/Vertex: Click a cube to select, then drag.
+    </p>
+</div>
+
+<button id="accelBtn">Enable Phone Gyro</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    let scene, renderer, views = [];
+    let cubes = [], selectedCube = null;
+    let mode = 'brush'; // modes: brush, move, vertex
+    const size = 10;
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    init();
+    animate();
+
+    function init() {
+        scene = new THREE.Scene();
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.autoClear = false;
+        document.body.appendChild(renderer.domElement);
+
+        // Viewports: [Perspective, Top, Front, Right]
+        setupCameras();
+
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 10, 10);
+        scene.add(light, new THREE.AmbientLight(0x404040), new THREE.GridHelper(20, 20, 0x444444));
+
+        window.addEventListener('pointerdown', onPointerDown);
+        window.addEventListener('resize', onWindowResize);
+        
+        // Gyroscope permission
+        document.getElementById('accelBtn').onclick = () => {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission().then(res => { if(res === 'granted') window.addEventListener('deviceorientation', handleGyro); });
+            } else { window.addEventListener('deviceorientation', handleGyro); }
+            document.getElementById('accelBtn').style.display = 'none';
+        };
+    }
+
+    function setupCameras() {
+        const pCam = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+        pCam.position.set(8, 8, 8); pCam.lookAt(0,0,0);
+        views.push({ cam: pCam, l: 0, b: 0.5, w: 0.5, h: 0.5 });
+
+        const top = new THREE.OrthographicCamera(-size, size, size, -size, 1, 100);
+        top.position.set(0, 20, 0); top.lookAt(0,0,0);
+        views.push({ cam: top, l: 0, b: 0, w: 0.5, h: 0.5 });
+
+        const front = new THREE.OrthographicCamera(-size, size, size, -size, 1, 100);
+        front.position.set(0, 0, 20); front.lookAt(0,0,0);
+        views.push({ cam: front, l: 0.5, b: 0.5, w: 0.5, h: 0.5 });
+
+        const right = new THREE.OrthographicCamera(-size, size, size, -size, 1, 100);
+        right.position.set(20, 0, 0); right.lookAt(0,0,0);
+        views.push({ cam: right, l: 0.5, b: 0, w: 0.5, h: 0.5 });
+    }
+
+    function setMode(newMode) {
+        mode = newMode;
+        document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        document.getElementById('btn-' + newMode).classList.add('active');
+        document.getElementById('currentMode').innerText = newMode.charAt(0).toUpperCase() + newMode.slice(1);
+    }
+
+    function onPointerDown(event) {
+        if (event.target.tagName === 'BUTTON') return;
+
+        // Calculate normalized mouse coordinates for raycasting
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        // Use Perspective Camera (View 0) for selection
+        raycaster.setFromCamera(mouse, views[0].cam);
+        const intersects = raycaster.intersectObjects(cubes);
+
+        if (mode === 'brush') {
+            createCube((Math.random()-0.5)*5, 0, (Math.random()-0.5)*5);
+        } else if (intersects.length > 0) {
+            selectedCube = intersects[0].object;
+            
+            if (mode === 'move') {
+                // Simple move: Shift cube randomly on selection to show it's working
+                selectedCube.position.y += 0.5;
+            } else if (mode === 'vertex') {
+                // Edit Vertices: Randomly stretch one vertex of the cube
+                const posAttr = selectedCube.geometry.attributes.position;
+                const index = Math.floor(Math.random() * posAttr.count);
+                posAttr.setXYZ(index, 
+                    posAttr.getX(index) + (Math.random()-0.5),
+                    posAttr.getY(index) + (Math.random()-0.5),
+                    posAttr.getZ(index) + (Math.random()-0.5)
+                );
+                posAttr.needsUpdate = true;
+            }
+        }
+    }
+
+    function createCube(x, y, z) {
+        const geo = new THREE.BoxGeometry(1, 1, 1);
+        const mat = new THREE.MeshPhongMaterial({ color: Math.random() * 0xffffff });
+        const cube = new THREE.Mesh(geo, mat);
+        cube.position.set(x, y, z);
+        scene.add(cube);
+        cubes.push(cube);
+    }
+
+    function handleGyro(e) {
+        const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+        const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+        const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+        views[0].cam.rotation.set(beta, alpha, -gamma, 'YXZ');
+    }
+
+    function onWindowResize() { renderer.setSize(window.innerWidth, window.innerHeight); }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const w = window.innerWidth, h = window.innerHeight;
+        renderer.clear();
+        views.forEach(v => {
+            renderer.setViewport(v.l * w, v.b * h, v.w * w, v.h * h);
+            renderer.setScissor(v.l * w, v.b * h, v.w * w, v.h * h);
+            renderer.setScissorTest(true);
+            v.cam.aspect = (v.w * w) / (v.h * h);
+            v.cam.updateProjectionMatrix();
+            renderer.render(scene, v.cam);
+        });
+    }
+</script>
+</body>
+</html>
