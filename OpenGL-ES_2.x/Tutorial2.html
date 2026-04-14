@@ -1,0 +1,2149 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head><script src="//archive.org/includes/athena.js" type="text/javascript"></script>
+<script type="text/javascript">window.addEventListener('DOMContentLoaded',function(){var v=archive_analytics.values;v.service='wb';v.server_name='wwwb-app254.us.archive.org';v.server_ms=466;archive_analytics.send_pageview({});});</script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/bundle-playback.js?v=2N_sDSC0" charset="utf-8"></script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/wombat.js?v=txqj7nKC" charset="utf-8"></script>
+<script>window.RufflePlayer=window.RufflePlayer||{};window.RufflePlayer.config={"autoplay":"on","unmuteOverlay":"hidden","showSwfDownload":true};</script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/ruffle/ruffle.js"></script>
+<script type="text/javascript">
+    __wm.init("https://web.archive.org/web");
+  __wm.wombat("http://blog.db-in.com:80/all-about-opengl-es-2-x-part-2/","20140302041553","https://web.archive.org/","web","https://web-static.archive.org/_static/",
+	      "1393733753");
+</script>
+<link rel="stylesheet" type="text/css" href="https://web-static.archive.org/_static/css/banner-styles.css?v=1utQkbB3" />
+<link rel="stylesheet" type="text/css" href="https://web-static.archive.org/_static/css/iconochive.css?v=3PDvdIFv" />
+<!-- End Wayback Rewrite JS Include -->
+
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>All about OpenGL ES 2.x - (part 2/3)</title>
+
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+    <meta name="description" content="">
+
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="All about OpenGL ES 2.x - (part 2/3)">
+    <meta name="twitter:description" content="">
+
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="All about OpenGL ES 2.x - (part 2/3)">
+    <meta property="og:description" content="">
+
+    
+<meta name="twitter:site" content="@dineybomfim">
+
+
+<meta name="twitter:creator" content="@dineybomfim2">
+
+
+<meta name="google-site-verification" content="">
+
+
+<meta property="fb:admins" content="">
+
+
+    <link href="/web/20140302041553im_/http://blog.db-in.com/favicon.ico" rel="shortcut icon" type="image/x-icon">
+    <link href="/web/20140302041553im_/http://blog.db-in.com/apple-touch-icon-precomposed.png" rel="apple-touch-icon">
+
+    <link href="//web.archive.org/web/20140302041553/http://fonts.googleapis.com/" rel="dns-prefetch">
+    <link href="//web.archive.org/web/20140302041553cs_/http://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic|Open+Sans:700,400&amp;subset=latin,latin-ext" rel="stylesheet">
+
+    <link rel="stylesheet" href="/web/20140302041553cs_/http://blog.db-in.com/assets/css/3c236dc6.main.min.css"/>
+
+    <script src="/web/20140302041553js_/http://blog.db-in.com/assets/js/b14267da.head-scripts.min.js"></script>
+
+    <meta name="generator" content="Ghost 0.3"/>
+<link rel="alternate" type="application/rss+xml" title="RSS" href="/web/20140302041553/http://blog.db-in.com/rss/">
+  </head>
+  <body class="post-template"><!-- BEGIN WAYBACK TOOLBAR INSERT -->
+<script>__wm.rw(0);</script>
+<div id="wm-ipp-base" lang="en" style="display:none;direction:ltr;" toolbar-mode="auto">
+<div id="wm-ipp" style="position:fixed;left:0;top:0;right:0;">
+<div id="donato" style="position:relative;width:100%;height:0;">
+  <div id="donato-base">
+    <iframe id="donato-if" src="https://archive.org/includes/donate.php?as_page=1&amp;platform=wb&amp;referer=https%3A//web.archive.org/web/20140302041553/http%3A//blog.db-in.com/all-about-opengl-es-2-x-part-2/"
+	    scrolling="no" frameborder="0" style="width:100%; height:100%">
+    </iframe>
+  </div>
+</div><div id="wm-ipp-inside">
+  <div id="wm-toolbar" style="position:relative;display:flex;flex-flow:row nowrap;justify-content:space-between;" nav="async">
+    <div id="wm-logo" style="/*width:110px;*/padding-top:12px;">
+      <a href="/web/" title="Wayback Machine home page"><img src="https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-200.png" srcset="https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-100.png, https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-150.png 1.5x, https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-200.png 2x" alt="Wayback Machine" style="width:100px" border="0" /></a>
+    </div>
+    <div class="c" style="display:flex;flex-flow:column nowrap;justify-content:space-between;flex:1;">
+      <form class="u" style="display:flex;flex-direction:row;flex-wrap:nowrap;" target="_top" method="get" action="/web/submit" name="wmtb" id="wmtb"><input type="text" name="url" id="wmtbURL" value="http://blog.db-in.com/all-about-opengl-es-2-x-part-2/" onfocus="this.focus();this.select();" style="flex:1;"/><input type="hidden" name="type" value="replay" /><input type="hidden" name="date" value="20140302041553" /><input type="submit" value="Go" />
+      </form>
+      <div style="display:flex;flex-flow:row nowrap;align-items:flex-end;">
+                <div class="s" id="wm-nav-captures" style="flex:1;">
+          </div>
+        <div class="k">
+          <a href="" id="wm-graph-anchor">
+            <div id="wm-ipp-sparkline" title="Explore captures for this URL" style="position: relative">
+              <canvas id="wm-sparkline-canvas" width="775" height="27" border="0"></canvas>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="n">
+      <table>
+        <tbody>
+          <!-- NEXT/PREV MONTH NAV AND MONTH INDICATOR -->
+          <tr class="m">
+            <td class="b" nowrap="nowrap">Feb</td>
+            <td class="c" id="displayMonthEl" title="You are here: 04:15:53 Mar 02, 2014">MAR</td>
+            <td class="f" nowrap="nowrap">Apr</td>
+          </tr>
+          <!-- NEXT/PREV CAPTURE NAV AND DAY OF MONTH INDICATOR -->
+          <tr class="d">
+            <td class="b" nowrap="nowrap"><span class="ta"></span></td>
+            <td class="c" id="displayDayEl" style="width:34px;font-size:22px;white-space:nowrap;" title="You are here: 04:15:53 Mar 02, 2014">02</td>
+            <td class="f" nowrap="nowrap"><span class="ta"></span></td>
+          </tr>
+          <!-- NEXT/PREV YEAR NAV AND YEAR INDICATOR -->
+          <tr class="y">
+            <td class="b" nowrap="nowrap">2013</td>
+            <td class="c" id="displayYearEl" title="You are here: 04:15:53 Mar 02, 2014">2014</td>
+            <td class="f" nowrap="nowrap">2015</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="r" style="display:flex;flex-flow:column nowrap;align-items:flex-end;justify-content:space-between;">
+      <div id="wm-btns" style="text-align:right;height:23px;">
+                <span class="xxs">
+          <div id="wm-save-snapshot-success">success</div>
+          <div id="wm-save-snapshot-fail">fail</div>
+          <a id="wm-save-snapshot-open" href="#" title="Share via My Web Archive" >
+            <span class="iconochive-web"></span>
+          </a>
+          <a href="https://archive.org/account/login.php" title="Sign In" id="wm-sign-in">
+            <span class="iconochive-person"></span>
+          </a>
+          <span id="wm-save-snapshot-in-progress" class="iconochive-web"></span>
+        </span>
+                <a class="xxs" href="https://help.archive.org/help/category/the-wayback-machine/" title="Get some help using the Wayback Machine" style="top:-6px;"><span class="iconochive-question" style="color:rgb(87,186,244);font-size:160%;"></span></a>
+        <a id="wm-tb-close" href="#close" style="top:-2px;" title="Close the toolbar"><span class="iconochive-remove-circle" style="color:#888888;font-size:240%;"></span></a>
+      </div>
+      <div id="wm-share" class="xxs">
+        <a href="/web/20140302041553/http://web.archive.org/screenshot/http://blog.db-in.com/all-about-opengl-es-2-x-part-2/"
+           id="wm-screenshot"
+           title="screenshot">
+          <span class="wm-icon-screen-shot"></span>
+        </a>
+        <a href="#" id="wm-video" title="video">
+          <span class="iconochive-movies"></span>
+        </a>
+        <a id="wm-share-facebook" href="#" data-url="https://web.archive.org/web/20140302041553/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-2/" title="Share on Facebook" style="margin-right:5px;" target="_blank"><span class="iconochive-facebook" style="color:#3b5998;font-size:160%;"></span></a>
+        <a id="wm-share-twitter" href="#" data-url="https://web.archive.org/web/20140302041553/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-2/" title="Share on Twitter" style="margin-right:5px;" target="_blank"><span class="iconochive-twitter" style="color:#1dcaff;font-size:160%;"></span></a>
+      </div>
+      <div style="padding-right:2px;text-align:right;white-space:nowrap;">
+        <a id="wm-expand" class="wm-btn wm-closed" href="#expand"><span id="wm-expand-icon" class="iconochive-down-solid"></span> <span class="xxs" style="font-size:80%;">About this capture</span></a>
+      </div>
+    </div>
+  </div>
+    <div id="wm-capinfo" style="border-top:1px solid #777;display:none; overflow: hidden">
+        <div id="wm-capinfo-notice" source="api"></div>
+                <div id="wm-capinfo-collected-by">
+    <div style="background-color:#666;color:#fff;font-weight:bold;text-align:center;padding:2px 0;">COLLECTED BY</div>
+    <div style="padding:3px;position:relative" id="wm-collected-by-content">
+            <div style="display:inline-block;vertical-align:top;width:50%;">
+			<span class="c-logo" style="background-image:url(https://archive.org/services/img/alexacrawls);"></span>
+		Organization: <a style="color:#33f;" href="https://archive.org/details/alexacrawls" target="_new"><span class="wm-title">Alexa Crawls</span></a>
+		<div style="max-height:75px;overflow:hidden;position:relative;">
+	  <div style="position:absolute;top:0;left:0;width:100%;height:75px;background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 90%,rgba(255,255,255,255) 100%);"></div>
+	  Starting in 1996, <a href="http://www.alexa.com/">Alexa Internet</a> has been donating their crawl data to the Internet Archive.  Flowing in every day, these data are added to the <a href="http://web.archive.org/">Wayback Machine</a> after an embargo period.
+	</div>
+	      </div>
+      <div style="display:inline-block;vertical-align:top;width:49%;">
+			<span class="c-logo" style="background-image:url(https://archive.org/services/img/alexacrawls)"></span>
+		<div>Collection: <a style="color:#33f;" href="https://archive.org/details/alexacrawls" target="_new"><span class="wm-title">Alexa Crawls</span></a></div>
+		<div style="max-height:75px;overflow:hidden;position:relative;">
+	  <div style="position:absolute;top:0;left:0;width:100%;height:75px;background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 90%,rgba(255,255,255,255) 100%);"></div>
+	  Starting in 1996, <a href="http://www.alexa.com/">Alexa Internet</a> has been donating their crawl data to the Internet Archive.  Flowing in every day, these data are added to the <a href="http://web.archive.org/">Wayback Machine</a> after an embargo period.
+	</div>
+	      </div>
+    </div>
+    </div>
+    <div id="wm-capinfo-timestamps">
+    <div style="background-color:#666;color:#fff;font-weight:bold;text-align:center;padding:2px 0;" title="Timestamps for the elements of this page">TIMESTAMPS</div>
+    <div>
+      <div id="wm-capresources" style="margin:0 5px 5px 5px;max-height:250px;overflow-y:scroll !important"></div>
+      <div id="wm-capresources-loading" style="text-align:left;margin:0 20px 5px 5px;display:none"><img src="https://web-static.archive.org/_static/images/loading.gif" alt="loading" /></div>
+    </div>
+    </div>
+  </div></div></div></div><div id="wm-ipp-print">The Wayback Machine - https://web.archive.org/web/20140302041553/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-2/</div>
+<script type="text/javascript">//<![CDATA[
+__wm.bt(775,27,25,2,"web","http://blog.db-in.com/all-about-opengl-es-2-x-part-2/","20140302041553",1996,"https://web-static.archive.org/_static/",["https://web-static.archive.org/_static/css/banner-styles.css?v=1utQkbB3","https://web-static.archive.org/_static/css/iconochive.css?v=3PDvdIFv"], false);
+  __wm.rw(1);
+//]]></script>
+<!-- END WAYBACK TOOLBAR INSERT -->
+ 
+
+    <button data-action="open-drawer" id="drawer-button" class="drawer-button"><i class="fa fa-bars"></i></button>
+<nav tabindex="-1" class="drawer">
+  <div class="drawer-container">
+    <!--.drawer-search(role="search")-->
+    <ul role="navigation" class="drawer-list">
+      
+
+<li class="drawer-list-item">
+  <a href="/web/20140302041553/http://blog.db-in.com/" data-pjax>
+    <i class="fa fa-home"></i>Home
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="/web/20140302041553/http://blog.db-in.com/about" data-pjax>
+    <i class="fa fa-user"></i>About
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/rss/">
+    <i class="fa fa-rss"></i>Subscribe to Feed
+  </a>
+</li>
+<li class="drawer-list-divider"></li>
+<li class="drawer-list-item drawer-list-title">
+  Follow me
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302041553/http://twitter.com/dineybomfim" target="_blank">
+    <i class="fa fa-twitter"></i>Twitter
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302041553/http://github.com/dineybomfim" target="_blank">
+    <i class="fa fa-github"></i>Github
+  </a>
+</li>
+
+    </ul>
+  </div>
+</nav>
+
+
+    <div class="drawer-overlay"></div>
+    <main id="container" role="main" class="container">
+      <div class="surface">
+        <div class="surface-container">
+          <div data-pjax-container class="content">
+            
+
+<section class="wrapper wrapper-post">
+  <div class="wrapper-container">
+    <article itemscope itemtype="http://schema.org/BlogPosting" role="article" class="post post">
+      
+        <section class="post-container">
+          <header class="post-header">
+            <ul class="post-meta-list">
+              <li class="post-meta-item">
+                <time datetime="2014-02-04" itemprop="datePublished">
+                  a month ago
+                </time>
+              </li>
+              
+              <li class="post-meta-item">
+                <a href="#disqus_thread" data-disqus-identifier="7"></a>
+              </li>
+            </ul>
+            <h1 itemprop="name headline" class="post-title"><a href="/web/20140302041553/http://blog.db-in.com/all-about-opengl-es-2-x-part-2/" itemprop="url" data-pjax title="All about OpenGL ES 2.x - (part 2/3)">All about OpenGL ES 2.x - (part 2/3)</a></h1>
+            
+            <!--h2 itemprop="about" class="post-subtitle"></h2-->
+          </header>
+          <aside class="post-side">
+            <div class="post-author">
+              
+              <div class="post-author-info">
+                <a href="" class="post-author-name">
+                  Diney Bomfim
+                </a>
+                <p class="post-author-bio"></p>
+              </div>
+            </div>
+          </aside>
+          <div itemprop="articleBody" class="post-body">
+            <p><img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/opengl_part2.jpg" alt="" title="opengl_part2" width="350" height="350" class="alignright size-full wp-image-1291"/> <br/>
+Very welcome back, my friends!</p>
+
+<p>Now we are aware about the basic concepts of 3D world and OpenGL. Now it's time to start the fun! Let's go deep into code and see some result on our screens. Here I'll show you how to construct an OpenGL application, using the best practices.</p>
+
+<p>If you lost the first one, you can check the parts of this serie below.</p>
+
+<p>This serie is composed by 3 parts:  </p>
+
+<ul>  
+    <li><a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/all-about-opengl-es-2-x-part-1" target="_blank">Part 1 - Basic concepts of 3D world and OpenGL (Beginners)</a></li>
+    <li>Part 2 - OpenGL ES 2.0 in-depth (Intermediate)</li>
+    <li><a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/all-about-opengl-es-2-x-part-3" target="_blank">Part 3 - Jedi skills in OpenGL ES 2.0 and 2D graphics (Advanced)</a></li>
+</ul>  
+
+<!--more-->  
+
+<p>Before start, I want to say something: is Thank You! <br/>
+The first tutorial of this serie became much much bigger than I could imagine. When I saw the news at the home of <a href="https://web.archive.org/web/20140302041553/http://www.opengl.org/" target="_blank">http://www.opengl.org</a> website, I was speechless, stunned, that was really amazing!!! <br/>
+So I want to say again, Thank you so much!</p>
+
+<p><a name="list_contents"></a> <br/>
+Here is a little list of contents to orient your reading:  </p>
+
+<table width="675">  
+<tr>  
+<th colspan="2">List of Contents to this Tutorial</th>  
+</tr>  
+<tr><td valign="top">  
+<ul>  
+    <li><a href="#download_project">Download the OpenGL ES 2.0 iPhone project</a></li>
+    <li><a href="#data_types">OpenGL data types and programmable pipeline</a></li>
+    <li><a href="#primitives">Primitives</a>
+        <ul>
+            <li><a href="#meshes_lines_optimization">Meshes and Lines Optimization</a></li>
+        </ul></li>
+    <li><a href="#buffers">Buffers</a>
+        <ul>
+            <li><a href="#frame_buffers">Frame buffer</a></li>
+            <li><a href="#render_buffers">Render buffer</a></li>
+            <li><a href="#buffer_object">Buffer Object</a></li>
+        </ul></li>
+    <li><a href="#textures">Textures</a></li>
+    <li><a href="#rasterize">Rasterize</a>
+        <ul>
+            <li><a href="#face_culling">Face Culling</a></li>
+            <li><a href="#per-fragment">Per-Fragment Operations</a></li>
+        </ul></li>
+</ul>  
+</td>  
+<td valign="top">  
+<ul>  
+    <li><a href="#shaders">Shaders</a>
+        <ul>
+            <li><a href="#shader_program">Shader and Program Creation</a></li>
+            <li><a href="#shader_language">Shader Language</a></li>
+            <li><a href="#vertex_fragment">Vertex and Fragment Structures</a></li>
+            <li><a href="#attributes_uniforms">Setting the Attributes and Uniforms</a></li>
+            <li><a href="#using_buffer_objects">Using the Buffer Objects</a></li>
+        </ul></li>
+    <li><a href="#rendering">Rendering</a>
+        <ul>
+            <li><a href="#pre-render">Pre-Render</a></li>
+            <li><a href="#drawing">Drawing</a></li>
+            <li><a href="#render">Render</a></li>
+        </ul></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+</ul>  
+</td></tr>  
+</table>
+
+<p><br/>  </p>
+
+<h2><strong>At a glance</strong></h2>  
+
+<p>As asked in comments below, here is a PDF file for those of you who  prefer to read this tutorial on a file instead of here in the blog. <br/>
+<a href="https://web.archive.org/web/20140302041553/http://db-in.com/downloads/all_about_opengl_es_2x.pdf" onmousedown="_gaq.push(['_trackEvent', 'All About OpenGL', 'PDF', 'Download']);" target="blank"><img class="alignleft" title="download" src="https://web.archive.org/web/20140302041553im_/http://db-in.com/imgs/pdf_button.png" alt="Download this tutorial in PDF"/> <br/>
+<strong>Download now</strong> <br/>
+PDF file with navigation links <br/>
+1.3Mb <br/>
+</a><br/></p>
+
+<p>Remembering the first part of this serie, we've seen:  </p>
+
+<ol>  
+    <li>OpenGL’s logic is composed by just 3 simple concepts: Primitives, Buffers and Rasterize.</li>
+    <li>OpenGL works with fixed or programmable pipeline.</li>
+    <li>Programmable pipeline is synonymous of Shaders: Vertex Shader and Fragment Shader.</li>
+</ol>
+
+<p>Here I'll show code more based in C and Objective-C. In some parts I'll talk specifically about iPhone and iOS. But in general the code will be generic to any language or platform. As OpenGL ES is the most concise API of OpenGL, I'll focus on it. If you're using OpenGL or WebGL you could use all the codes and concepts here. <br/>
+<a name="download_project"></a> <br/>
+The code in this tutorial is just to illustrate the functions and concepts, not real code. In the link bellow you can get a Xcode project which uses all the concepts and code of this tutorial. I made the principal class (CubeExample.mm) using Objective-C++ just to make clearly to everybody how the OpenGL ES 2.0 works, even those which don't use Objective-C. This training project was made for iOS, more specifically targeted for iPhone.</p>
+
+<p><a href="https://web.archive.org/web/20140302041553/http://db-in.com/downloads/ogles2_cube_example.zip" onmousedown="_gaq.push(['_trackEvent', 'All About OpenGL', 'Xcode', 'Download']);"><img class="alignleft" title="download" src="https://web.archive.org/web/20140302041553im_/http://db-in.com/imgs/download_button.png" alt="Download Xcode project files to iPhone"/> <br/>
+<strong>Download now</strong> <br/>
+Xcode project files to iOS 4.2 or later <br/>
+172kb <br/>
+</a><br/></p>
+
+<p>Here I'll use OpenGL functions following the syntax: gl + FunctionName. Almost all implementation of OpenGL use the prefix "gl" or "gl.". But if your programming language don't use this, just ignore this prefix in the following lines. <br/>
+<a name="data_types"></a> <br/>
+Another important thing to say before we start is about OpenGL data types. As OpenGL is multiplatform and depends of the vendors implementation, many data type could change from one programming language to another. For example, a float in C++ could represent 32 bits exactly, but in JavaScript a float could be only 16 bits. To avoid these kind of conflict, OpenGL always works with it's own data types. The OpenGL's data type has the prefix "GL", like <strong>GLfloat</strong> or <strong>GLint</strong>. Here is a full list of OpenGL's data type:</p>
+
+<table width="675">  
+<tr>  
+<th>OpenGL's Data Type</th><th>Same as C</th><th>Description</th>  
+</tr>  
+<tr><td><strong>GLboolean</strong> (1 bits)</td><td>unsigned char</td><td>0 to 1</td></tr>  
+<tr><td><strong>GLbyte</strong> (8 bits)</td><td>char</td><td>-128 to 127</td></tr>  
+<tr><td><strong>GLubyte</strong> (8 bits)</td><td>unsigned char</td><td>0 to 255</td></tr>  
+<tr><td><strong>GLchar</strong> (8 bits)</td><td>char</td><td>-128 to 127</td></tr>  
+<tr><td><strong>GLshort</strong> (16 bits)</td><td>short</td><td>-32,768 to 32,767</td></tr>  
+<tr><td><strong>GLushort</strong> (16 bits)</td><td>unsigned short</td><td>0 to 65,353</td></tr>  
+<tr><td><strong>GLint</strong> (32 bits)</td><td>int</td><td>-2,147,483,648 to 2,147,483,647</td></tr>  
+<tr><td><strong>GLuint</strong> (32 bits)</td><td>unsigned int</td><td>0 to 4,294,967,295</td></tr>  
+<tr><td><strong>GLfixed</strong> (32 bits)</td><td>int</td><td>-2,147,483,648 to 2,147,483,647</td></tr>  
+<tr><td><strong>GLsizei</strong> (32 bits)</td><td>int</td><td>-2,147,483,648 to 2,147,483,647</td></tr>  
+<tr><td><strong>GLenum</strong> (32 bits)</td><td>unsigned int</td><td>0 to 4,294,967,295</td></tr>  
+<tr><td><strong>GLdouble</strong> (64 bits)</td><td>double</td><td>−9,223,372,036,854,775,808 to 9,223,372,036,854,775,807</td></tr>  
+<tr><td><strong>GLbitfield</strong> (32 bits)</td><td>unsigned int</td><td>0 to 4,294,967,295</td></tr>  
+<tr><td><strong>GLfloat</strong> (32 bits)</td><td>float</td><td>-2,147,483,648 to 2,147,483,647</td></tr>  
+<tr><td><strong>GLclampx</strong> (32 bits)</td><td>int</td><td>Integer clamped to the range 0 to 1</td></tr>  
+<tr><td><strong>GLclampf</strong> (32 bits)</td><td>float</td><td>Floating-point clamped to the range 0 to 1</td></tr>  
+<tr><td><strong>GLclampd</strong> (64 bits)</td><td>double</td><td>Double clamped to the range 0 to 1</td></tr>  
+<tr><td><strong>GLintptr</strong></td><td>int</td><td>pointer *</td></tr>  
+<tr><td><strong>GLsizeiptr</strong></td><td>int</td><td>pointer *</td></tr>  
+<tr><td><strong>GLvoid</strong></td><td>void</td><td>Can represent any data type</td></tr>  
+</table>
+
+<p>A very important information about Data Types is that OpenGL ES does NOT support 64 bits data types, because embedded systems usually need performance and several devices don't support 64 bits processors. By using the OpenGL data types, you can easily and safely move your OpenGL application from C++ to JavaScript with less changes, for example.</p>
+
+<p>One last thing to introduce is the graphics pipeline. We'll use and talk about the Programmable Pipeline a lot, here is a visual illustration: <br/>
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/programmable_pipepline_example.png" alt="The OpenGL programmable pipeline." title="programmable_pipepline_example" width="600" height="450" class="size-full wp-image-998"/></p>
+
+<p>We'll talk deeply about each step in that diagram. The only thing I want to say now is about the "Frame Buffer" in the image above. The Frame Buffer is marked as optional because you have the choice of don't use it directly, but internally the OpenGL's core always will work with a Frame Buffer and a Color Render Buffer at least.</p>
+
+<p>Did you notice the EGL API in the image above? <br/>
+This is a very very important step to our OpenGL's application. Before start this tutorial we need to know at least the basic concept and setup about EGL API. But EGL is a dense subject and I can't place it here. So I've created an article to explain that. You can check it here: <a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/khronos-egl-and-apple-eagl/" target="_blank">EGL and EAGL APIs</a>. I really recommend you read that before to continue with this tutorial. </p>
+
+<p>If you've read or already know about EGL, let's move following the order of the first part and start talking about the Primitives.</p>
+
+<p><br/><a name="primitives"></a>  </p>
+
+<h2><strong>Primitives</strong></h2><a href="#list_contents">top</a>  
+Do you remember from the first part, when I said that Primitives are Points, Lines and Triangles?  
+All of them use one or more points in space to be constructed, also called vertex.  
+A vertex has 3 informations, X position, Y position and Z position. A 3D point is constructed by one vertex, a 3D line is composed by two vertices and a triangle is formed by three vertices. As OpenGL always wants to boost the performance, all the informations should be a single dimensional array, more specifically an array of float values. Like this:
+
+
+<pre class="brush:csharp">  
+GLfloat point3D = {1.0,0.0,0.5};  
+GLfloat line3D = {0.5,0.5,0.5,1.0,1.0,1.0};  
+GLfloat triangle3D = {0.0,0.0,0.0,0.5,1.0,0.0,1.0,0.0,0.0};  
+</pre>
+
+
+As you can see, the array of floats to OpenGL is in sequence without distinction between the vertices, OpenGL will automatically understand the first value as the X value, the second as Y value and the third as the Z value. OpenGL will loop this interpretation at every sequence of 3 values. All that you need is inform to OpenGL if you want to construct a point, a line or a triangle. An advanced information is which you can customize this order if you want and the OpenGL could work with a fourth value, but this is a subject to advanced topics. For now assume that the order always will be X,Y,Z.
+
+The coordinates above will construct something like this:
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/primitives_example.gif" alt="The three primitives in OpenGL" title="primitives_example" width="600" height="600" class="size-full wp-image-845"/>
+
+In this image, the dashed orange lines is just an indication to you see more clearly where the vertices are related to the floor. Until here seems very simple! But now a question comes up: "OK, so how could I transform my 3D models from 3DS Max or Maya into an OpenGL's array?"
+
+When I was learning OpenGL, I thought that could exist some 3D file formats we could import directly into OpenGL. "After all, the OpenGL is the most popular Graphics Library and is used by almost all 3D softwares! I'm sure it has some methods to import 3D files directly!"
+
+Well, I was wrong! Bad news.
+
+I've learned and need to say you: remember that OpenGL is focused on the most important and hard part of the 3D world construction. So it should not be responsible by fickle things, like 3D file formats. Exist so many 3D file formats, .obj, .3ds, .max, .ma, .fbx, .dae, .lxo... it's too much to the OpenGL and the Khronos worrying about.
+
+But the Collada format is from Khronos, right? So would I expect that, one day, OpenGL will be able to import Collada files directly? No! Don't do this. Accept this immutable truth, OpenGL does not deal with 3D files!
+
+OK, so what we need to do to import 3D models from 3D softwares into our OpenGL's application? Well my friend, unfortunately I need to say you: you will need a 3D engine or a third party API. There's no easy way to do that.
+
+If you choose a 3D engine, like PowerVR, SIO2, Oolong, UDK, Ogre and many others, you'll be stuck inside their APIs and their implementation of OpenGL. If you choose a third party API just to load a 3D file, you will need to integrate the third party class to your own implementation of OpenGL.
+
+Another choice is to search a plugin to your 3D software to export your objects as a .h file. The .h is just a header file containing your 3D objects in the OpenGL array format. Unfortunately, until today I just saw 2 plugins to do this: One to Blender made with Phyton and another made with Pearl and both was horribles. I never seen plugins to Maya, 3DS Max, Cinema 4D, LightWave, XSI, ZBrush or Modo.
+
+I wanna give you another opportunity, buddy. Something called NinevehGL!  
+I'll not talk about it here, but it's my new 3D engine to OpenGL ES 2.x made with pure Objective-C. I offer you the entire engine or just the parse API to some file formats as .obj and .dae. Whatever you prefer. You can check the NinevehGL's website here:  
+<a href="https://web.archive.org/web/20140302041553/http://nineveh.gl/" target="_blank">http://nineveh.gl</a>
+
+What is the advantage of NinevehGL? Is to KEEP IT SIMPLE! The others 3D engines is too big and unnecessary expensive. NinevehGL is free!
+
+OK, let's move deeply into primitives.
+
+<br/><a name="meshes_lines_optimization"></a>  
+<h3>Meshes and Lines Optimization</h3><a href="#list_contents">top</a>  
+A 3D point has only one way to be draw by OpenGL, but a line and a triangle have three different ways: normal, strip and loop for the lines and normal, strip and fan for the triangles. Depending on the drawing mode, you can boost your render performance and save memory in your application. But at the right time we'll discuss this, later on this tutorial.
+
+For now, all that we need to know is that the most complex 3D mesh you could imagine will be made with a bunch of triangles. We call these triangles of "faces". So let's create a 3D cube using an array of vertices.
+
+
+<pre class="brush:csharp">  
+// Array of vertices to a cube.
+GLfloat cube3D[] =  
+{
+    0.50,-0.50,-0.50,    // vertex 1
+    0.50,-0.50,0.50,    // vertex 2
+    -0.50,-0.50,0.50,    // vertex 3
+    -0.50,-0.50,-0.50,    // vertex 4
+    0.50,0.50,-0.50,    // vertex 5
+    -0.50,0.50,-0.50,    // vertex 6
+    0.50,0.50,0.50,        // vertex 7
+    -0.50,0.50,0.50        // vertex 8
+}
+</pre>
+
+
+The precision of the float numbers really doesn't matter to OpenGL, but it can save a lot of memory and size into your files (precision of 2 is 0.00 precision of 5 is 0.00000). So I always prefer to use low precision, 2 is very good!
+
+I don't want to make you confused too soon, but has something you have to know. Normally meshes have three great informations: verticex, texture coordinates and normals. A good practice is to create one single array containing all these informations. This is called <strong>Array of Structures</strong>. A short example of it could be:
+
+
+<pre class="brush:csharp">  
+// Array of vertices to a cube.
+GLfloat cube3D[] =  
+{
+    0.50,-0.50,-0.50,    // vertex 1
+    0.00,0.33,            // texture coordinate 1
+    1.00,0.00,0.00        // normal 1
+    0.50,-0.50,0.50,    // vertex 2
+    0.33,0.66,            // texture coordinate 2
+    0.00,1.00,0.00        // normal 2
+    ...
+}
+</pre>
+
+
+You can use this construction technique for any kind of information you want to use as a per-vertex data. A question arises: Well, but at this way all my data must be of only one data type, GLfloat for example? Yes. But I'll show you later in this tutorial that this is not a problem, because to where your data goes, just accept floating-point values, so everything will be GLfloats. But don't worry with this now, in the right time you will understand.
+
+OK, now we have a 3D mesh, so let's start to configure our 3D application and store this mesh into an OpenGL's buffer.
+
+<br/><a name="buffers"></a>  
+<h2><strong>Buffers</strong></h2><a href="#list_contents">top</a>  
+Do you remember from the first part when I said that OpenGL is a state machine working like a Port Crane? Now let's refine a little that illustration. OpenGL is like a Port Crane with severeal arms and hooks. So it can hold many containers at the same time.
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/opengl_crane_hooks_example.gif" alt="OpenGL is like a Port Crane with few arms and hooks." title="opengl_crane_hooks_example" width="600" height="400" class="size-full wp-image-1190"/>
+
+Basically, there are four "arms": texture arm (which is a double arm), buffer object arm (which is a double arm), render buffer arm and frame buffer arm. Each arm can hold only one container at a time. This is very important, so I'll repeat this: <strong>Each arm can hold only ONE CONTAINER AT A TIME!</strong> The texture and buffer object arms are double arms because can hold two different kinds of texture and buffer objects, respectively, but also only ONE KIND OF CONTAINER AT A TIME! We need is instruct the OpenGL's crane to take a container from the port, we can do this by informing the name/id of the container.
+
+Backing to the code, the command to instruct OpenGL to "take a container" is: <strong>glBind*</strong>. So every time you see a glBindSomething you know, that is an instruction to OpenGL "take a container". Exist only one exception to this rule, but we'll discuss that later on. Great, before start binding something into OpenGL we need to create that thing. We use the <strong>glGen*</strong> function to generate a "container" name/id.
+
+<br/><a name="frame_buffers"></a>  
+<h3>Frame Buffers</h3><a href="#list_contents">top</a>  
+A frame buffer is a temporary storage to our render output. Once our render is in a frame buffer we can choose present it into device's screen or save it as an image file or either use the output as a snapshot.  
+This is the pair of functions related to frame buffers:
+
+
+<table width="675">  
+<tr>  
+<th>FrameBuffer Creation</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glGenFramebuffers (GLsizei n, GLuint* framebuffers)</strong></h5><br/>  
+<ul>  
+    <li><strong>n</strong>: The number representing how many frame buffers's names/ids will be generated at once.</li>
+    <li><strong>framebuffers</strong>: A pointer to a variable to store the generated names/ids. If more than one name/id was generated, this pointer will point to the start of an array.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBindFramebuffer (GLenum target, GLuint framebuffer)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be GL_FRAMEBUFFER, this is just an internal convention for OpenGL.</li>
+    <li><strong>framebuffers</strong>: The name/id of the frame buffer to be bound.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+In deeply the creation process of an OpenGL Object will be done automatically by the core when we bind that object at the first time. But this process doesn't generates a name/id to us. So is advisable always use <strong>glGen*</strong> to create buffer names/ids instead create your very own names/ids. Seems confused?  
+OK, let's go to our first lines of code and you'll understand more clearly:
+
+
+<pre class="brush:csharp">  
+GLuint frameBuffer;
+
+// Creates a name/id to our frameBuffer.
+glGenFramebuffers(1, &frameBuffer;);
+
+// The real Frame Buffer Object will be created here,
+// at the first time we bind an unused name/id.
+glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
+
+// We can suppress the glGenFrambuffers.
+// But in this case we'll need to manage the names/ids by ourselves.
+// In this case, instead the above code, we could write something like:
+//
+// GLint frameBuffer = 1;
+// glBindFramebuffer(GL_FRAMEBUFFER, frameBuffer);
+</pre>
+
+
+The above code creates an instance of Gluint data type called frameBuffer. Then we inform the memory location of frameBuffer variable to the glGenFramebuffers and instruct this function to generate only 1 name/id (Yes, we can generate multiple names/ids at once). So finally we bind that generated frameBuffer to OpenGL's core. 
+
+<br/><a name="render_buffers"></a>  
+<h3>Render Buffers</h3><a href="#list_contents">top</a>  
+A render buffer is a temporary storage for images coming from an OpenGL's render. This is the pair of functions related to render buffers:
+
+
+<table width="675">  
+<tr>  
+<th>RenderBuffer Creation</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glGenRenderbuffers (GLsizei n, GLuint* renderbuffers)</strong></h5><br/>  
+<ul>  
+    <li><strong>n</strong>: The number representing how many render buffers's names/ids will be generated at once.</li>
+    <li><strong>renderbuffers</strong>: A pointer to a variable to store the generated names/ids. If more than one name/id was generated, this pointer will point to the start of an array.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBindRenderbuffer (GLenum target, GLuint renderbuffer)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be GL_RENDERBUFFER, this is just an internal convention for OpenGL.</li>
+    <li><strong>renderbuffer</strong>: The render buffer name/id to be bound.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+OK, now, before we proceed, do you remember from the first part when I said that render buffer is a temporary storage and could be of 3 types? So we need to specify the kind of render buffer and some properties of that temporary image. We set the properties to a render buffer by using this function:
+
+
+<table width="675">  
+<tr>  
+<th>RenderBuffer Properties</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glRenderbufferStorage (GLenum target, GLenum internalformat, GLsizei width, GLsizei height)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be GL_RENDERBUFFER, this is just an internal convention for OpenGL.</li>
+    <li><strong>internalformat</strong>: This specifies what kind of render buffer we want and what color format this temporary image will use. This parameter can be:
+<ul>  
+    <li><strong>GL_RGBA4</strong>, <strong>GL_RGB5_A1</strong> or <strong>GL_RGB56</strong> to a render buffer with final colors;</li>
+    <li><strong>GL_DEPTH_COMPONENT16</strong> to a render buffer with Z depth;</li>
+    <li><strong>GL_STENCIL_INDEX</strong> or <strong>GL_STENCIL_INDEX8</strong> to a render buffer with stencil informations.</li>
+</ul>  
+</li>  
+    <li><strong>width</strong>: The final width of a render buffer.</li>
+    <li><strong>height</strong>: The final height of a render buffer.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+You could ask, "but I'll set these properties for which render buffer? How OpenGL will know for which render buffer is these properties?" Well, it's here that the great OpenGL's state machine comes up! The properties will be set to the last render buffer bound! Very simple.
+
+Look at how we can set the 3 render buffers kind:
+
+
+<pre class="brush:csharp">  
+GLuint colorRenderbuffer, depthRenderbuffer, stencilRenderbuffer;  
+GLint sw = 320, sh = 480; // Screen width and height, respectively.
+
+// Generates the name/id, creates and configures the Color Render Buffer.
+glGenRenderbuffers(1, &colorRenderbuffer;);  
+glBindRenderbuffer(GL_RENDERBUFFER, colorRenderbuffer);  
+glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA4, sw, sh);
+
+// Generates the name/id, creates and configures the Depth Render Buffer.
+glGenRenderbuffers(1, &depthRenderbuffer;);  
+glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);  
+glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, sw, sh);
+
+// Generates the name/id, creates and configures the Stencil Render Buffer.
+glGenRenderbuffers(1, &stencilRenderbuffer;);  
+glBindRenderbuffer(GL_RENDERBUFFER, stencilRenderbuffer);  
+glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, sw, sh);  
+</pre>
+
+
+OK, but in our cube application we don't need stencil buffer, so let's optimize the above code:
+
+
+<pre class="brush:csharp">  
+GLuint *renderbuffers;  
+GLint sw = 320, sh = 480; // Screen width and height, respectively.
+
+// Let's create multiple names/ids at once.
+// To do this we declared our variable as a pointer *renderbuffers.
+glGenRenderbuffers(2, renderbuffers);
+
+// The index 0 will be our color render buffer.
+glBindRenderbuffer(GL_RENDERBUFFER, renderbuffers[0]);  
+glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA4, sw, sh);
+
+// The index 1 will be our depth render buffer.
+glBindRenderbuffer(GL_RENDERBUFFER, renderbuffers[1]);  
+glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, sw, sh);  
+</pre>
+
+
+At this point I need to make a digression.  
+This step is a little bit different if you are in Cocoa Framework. The Apple doesn't allow to us put the OpenGL render directly onto device's screen, we need to place the output into a color render buffer and ask to the EAGL (The EGL's implementation by Apple) to present the buffer on the device's screen. As the color render buffer in this case is always mandatory, to set their properties we need to call a different method from the EAGLContext called <strong>renderbufferStorage:fromDrawable:</strong> and inform a CAEAGLLayer which we want to render onto. Seems confused? So is time to you make a digression in your reading and go to this article: <a href="https://web.archive.org/web/20140302041553/http://db-in.com/blog/2011/02/khronos-egl-and-apple-eagl/" target="_blank">Apple's EAGL</a>.  
+In that article I explain what is the EAGL and how to use it.
+
+Once knowing about EAGL, you use the following code to set the color render buffer's properties, instead glRenderbufferStorage:
+
+
+<table width="675">  
+<tr>  
+<th>RenderBuffer Properties in case of Cocoa Framework</th>  
+</tr>  
+<tr>  
+<td><h5><strong>- (BOOL) renderbufferStorage:(NSUInteger)target fromDrawable:(id<eagldrawable>)drawable</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be GL_RENDERBUFFER, this is just an internal convention for OpenGL.</li>
+    <li><strong>fromDrawable</strong>: Your custom instance of CAEAGLLayer.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+
+<pre class="brush:csharp">  
+// Suppose you previously set EAGLContext *_context
+// as I showed in my EAGL article.
+
+GLuint colorBuffer;
+
+glGenRenderbuffers(1, &amp; colorBuffer);  
+glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer);  
+[_context renderbufferStorage:GL_RENDERBUFFER fromDrawable:myCAEAGLLayer];
+</pre>
+
+
+When you call renderbufferStorage:fromDrawable: informing a CAEAGLLayer, the EAGLContext will take all relevant properties from the layer and will properly set the bound color render buffer.
+
+Now is time to place our render buffers inside our previously created frame buffer. Each frame buffer can contain ONLY ONE render buffer of each type. So we can't have a frame buffer with 2 color render buffers, for example. To attach a render buffer into a frame buffer, we use this function:
+
+
+<table width="675">  
+<tr>  
+<th>Attach RenderBuffers to a FrameBuffer</th>  
+</tr>  
+<tr>  
+<td><h5><strong> GLvoid  glFramebufferRenderbuffer (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be GL_FRAMEBUFFER, this is just an internal convention for OpenGL.</li>
+    <li><strong>attachment</strong>: This specifies which kind of render buffer we want to attach inside a frame buffer, this parameter can be:
+<ul>  
+    <li><strong>GL_COLOR_ATTACHMENT0</strong>: To attach a color render buffer;</li>
+    <li><strong>GL_DEPTH_ATTACHMENT</strong>: To attach a depth render buffer;</li>
+    <li><strong>GL_STENCIL_ATTACHMENT</strong>: To attach a stencil render buffer.</li>
+</ul>  
+</li>  
+    <li><strong>renderbuffertarget</strong>: The renderbuffertarget always will be GL_RENDERBUFFER, this is just an internal convention for OpenGL.</li>
+    <li><strong>renderbuffer</strong>: The name/id of the render buffer we want to attach.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+The same question comes up: "How OpenGL will know for which frame buffer attach these render buffers?" Using the state machine! The last  frame buffer bound will receive these attachments.
+
+OK, before move on, let's talk about the combination of Frame Buffer and Render Buffer. This is how they looks like:
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/framebuffer_example.jpg" alt="Relationship between Frame Buffer and Render Buffers." title="framebuffer_example" width="600" height="600" class="size-full wp-image-1016"/>
+
+Internally OpenGL's always works with a frame buffer. This is called window-system-provided frame buffer and the frame buffer name/id 0 is reserved to it. The frame buffers which we control are know as application-created frame buffers.
+
+The depth and stencil render buffers are optionals. But the color buffer is always enabled and as OpenGL's core always uses a color render buffer too, the render buffer name/id 0 is reserved to it. To optimize all the optional states, OpenGL gives to us an way to turn on and turn off some states (understanding as state every optional OpenGL's feature). To do this, we use these function:
+
+
+<table width="675">  
+<tr>  
+<th>Turning ON/OFF the OpenGL' States</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glEnable(GLenum capability)</strong></h5><br/>  
+<ul>  
+    <li><strong>capability</strong>: The feature to be turned on. The values can be:
+<ul>  
+    <li><strong>GL_TEXTURE_2D</strong></li>
+    <li><strong>GL_CULL_FACE</strong></li>
+    <li><strong>GL_BLEND</strong></li>
+    <li><strong>GL_DITHER</strong></li>
+    <li><strong>GL_STENCIL_TEST</strong></li>
+    <li><strong>GL_DEPTH_TEST</strong></li>
+    <li><strong>GL_SCISSOR_TEST</strong></li>
+    <li><strong>GL_POLYGON_OFFSET_FILL</strong></li>
+    <li><strong>GL_SAMPLE_ALPHA_TO_COVERAGE</strong></li>
+    <li><strong>GL_SAMPLE_COVERAGE</strong></li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glDisable(GLenum capability)</strong></h5><br/>  
+<ul>  
+    <li><strong>capability</strong>: The feature to be turned off. The values can be the same as <strong>glEnable</strong>.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Once we turned on/off a feature, this instruction will affect the entire OpenGL machine. Some people prefer to turn on a feature just for a while to use it and then turn off, but this is not advisable. It's expensive. The best way is turn on once and turn off once. Or if you really need, minimize the turn on/off in your application.
+
+So, back to the depth and stencil buffer, if you need in your application to use one of them or both, try enable what you need once. As in our cube's example we just need a depth buffer, we could write:
+
+
+<pre class="brush:csharp">  
+// Doesn't matter if this is before or after
+// we create the depth render buffer.
+// The important thing is enable it before try
+// to render something which needs to use it.
+glEnable(GL_DEPTH_TEST);  
+</pre>
+
+
+Later I'll talk deeply about what the depth and stencil tests make and their relations with fragment shaders.
+
+<br/><a name="buffer_object"></a>  
+<h3>Buffer Objects</h3><a href="#list_contents">top</a>  
+The buffer objects are optimized storage for our primitive's arrays. Has two kind of buffer objects, the first is that we store the array of vertices, because it the buffer objects is also known as Vertex Buffer Object (VBO). After you've created the buffer object you can destruct the original data, because the Buffer Object (BO) made a copy from it. We are used to call it VBO, but this kind of buffer object could hold on any kind of array, like array of normals or an array of texture coordinates or even an array of structures. To adjust the name to fit the right idea, some people also call this kind of buffer object as Array Buffer Object (ABO).
+
+The other kind of buffer object is the Index Buffer Object (IBO). Do you remember the array of indices from the first part? (<a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/all-about-opengl-es-2-x-part-1/#buffer_objects" target="_blank">click here to remember</a>). So the IBO is to store that kind of array. Usually the data type of array of indices is GLubyte or GLushort. Some devices have support up to GLuint, but this is like an extension, almost a plugin which vendors have to implement. The majority just support the default behavior (GLubyte or GLushort). So my advice is, always limit your array of indices to GLushort.
+
+OK, now to create these buffers the process is very similar to frame buffer and render buffer. First you create one or more names/ids, later you bind one buffer object, and then you define the properties and data into it.
+
+
+<table width="675">  
+<tr>  
+<th>Buffer Objects Creation</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glGenBuffers(GLsizei n, GLuint* buffers)</strong></h5><br/>  
+<ul>  
+    <li><strong>n</strong>: The number representing how many buffer objects's names/ids will be generated at once.</li>
+    <li><strong>buffers</strong>: A pointer to a variable to store the generated names/ids. If more than one name/id was generated, this pointer will point to the start of an array.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBindBuffer(GLenum target, GLuint buffer)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target will define what kind of buffer object will be, VBO or IBO. The values can be:
+<ul>  
+    <li><strong>GL_ARRAY_BUFFER</strong>: This will set a VBO (or ABO, whatever).</li>
+    <li><strong>GL_ELEMENT_ARRAY_BUFFER</strong>: This will set an IBO.</li>
+</ul></li>  
+    <li><strong>buffer</strong>: The name/id of the frame buffer to be bound.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Now is time to refine that illustration about the Port Crane's hooks. The BufferObject Hook is in reality a double hook. Because it can hold two buffer objects, one of each type: <strong>GL_ARRAY_BUFFER</strong> and <strong>GL_ELEMENT_ARRAY_BUFFER</strong>.
+
+OK, once you have bound a buffer object is time to define its properties, or was better to say define its content. As the "BufferObject Hook" is a double one and you can have two buffer objects bound at same time, you need to instruct the OpenGL about the kind of buffer object you want to set the properties for.
+
+
+<table width="675">  
+<tr>  
+<th>Buffer Objects Properties</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBufferData(GLenum target, GLsizeiptr size, const GLvoid* data, GLenum usage)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: Indicates for what kind of buffer you want to set the properties for. This param can be <strong>GL_ARRAY_BUFFER</strong> or <strong>GL_ELEMENT_ARRAY_BUFFER</strong>.</li>
+    <li><strong>size</strong>: The size of the buffer in the basic units (bytes).</li>
+    <li><strong>data</strong>: A pointer to the data.</li>
+    <li><strong>usage</strong>: The usage kind. This is like a tip to help the OpenGL to optimize the data. This can be of three kinds:
+<ul>  
+    <li><strong>GL_STATIC_DRAW</strong>: This denotes an immutable data. You set it once and use the buffer often.</li>
+    <li><strong>GL_DYNAMIC_DRAW</strong>: This denotes a mutable data. You set it once and update its content several times using it often.</li>
+    <li><strong>GL_STREAM_DRAW</strong>: This denotes a temporary data. For who of you which is familiar with Objective-C, this is like an autorelease. You set it once and use few times. Later the OpenGL automatically will clean and destroy this buffer.</li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid* data)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: Indicates for what kind of buffer you want to set the properties for. This param can be <strong>GL_ARRAY_BUFFER</strong> or <strong>GL_ELEMENT_ARRAY_BUFFER</strong>.</li>
+    <li><strong>offset</strong>: This number represent the offset which you will start to make changes into the previously defined buffer object. This number is given is basic units (bytes).</li>
+    <li><strong>size</strong>: This number represent the size of the changes into the previously defined buffer object. This number is given is basic units (bytes).</li>
+    <li><strong>data</strong>: A pointer to the data.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Now let's understand what these functions make. The first one, glBufferData, you use this function to set the content for your buffer object and its properties. If you choose the usage type of GL_DYNAMIC_DRAW, it means you want to update that buffer object later and to do this you need to use the second one, glBufferSubData.
+
+When you use the glBufferSubData the size of your buffer object was previously defined, so you can't change it. But to optimize the updates, you can choose just a little portion of the whole buffer object to be updated.
+
+Personally, I don't like to use GL_DYNAMIC_DRAW, if you stop to think about it you will see that doesn't exist in the 3D world an effect of behavior which only can be done changing the original vertex data, normal data or texture coordinate data. By using the shaders you can change almost everything related to those data. Using GL_DYNAMIC_DRAW certainly will be much more expansive than using a shaders's approach.  So, my advice here is: Avoid to use GL_DYNAMIC_DRAW as much as possible! Always prefer think in a way to achieve the same behavior using the Shaders features.
+
+Once the Buffer Object was properly created and configured, it's very very simple to use it. All we need to do is bind the desired Buffer Objects. Remember we can bind only one kind of Buffer Object at a time. While the Buffer Objects stay bound, all the drawing commands we make  will use them. After the usage is a good idea unbind them.
+
+Now let's move to the textures.
+
+<br/><a name="textures"></a>  
+<h2><strong>Textures</strong></h2><a href="#list_contents">top</a>  
+Oh man, textures is very large topic in OpenGL. To don't increase the size of this tutorial more than it actually is, let's see the basic about the texture here. The advanced topics I'll let to the third part of this tutorial or an exclusive article.
+
+The first thing I need to say you is about the Power of Two (POT). OpenGL ONLY accept POT textures. What that means? That means all the textures must to have the width and height a power of two value. Like 2, 4, 8, 16, 32, 64, 128, 256, 512 or 1024 pixels. To a texture, 1024 is a bigger size and normally indicate the maximum possible size of a texture. So all texture which will be used in OpenGL must to have dimensions like: 64 x 128 or 256 x 32 or 512 x 512, for example. You can't use 200 x 200 or 256 x 100. This is a rule to optimize the internal OpenGL processing in the GPU.
+
+Another important thing to know about textures in OpenGL is the read pixel order. Usually image file formats store the pixel information starting at the upper left corner and moves through line by line to the lower right corner. File format like JPG, PNG, BMP, GIF, TIFF and others use this pixel order. But in the OpenGL this order is flipped upside down. The textures in OpenGL reads the pixels starting from the lower left corner and goes to the upper right corner.
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/pixel_order_example.jpg" alt="OpenGL reads the pixels from lower left corner to the upper right corner." title="pixel_order_example" width="600" height="600" class="size-full wp-image-1076"/>
+
+So, to solve this little issue, we usually make a vertical flip on our images data before upload it to the OpenGL's core. If your programming language let you re-scale the images, this is equivalent to re-scale the height in -100%.
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/image_flipped_example.jpg" alt="Image data must be flipped vertically to right fit into OpenGL." title="image_flipped_example" width="600" height="600" class="size-full wp-image-1070"/>
+
+Now, shortly about the logic, the textures in OpenGL works at this way: You have an image file, so you must to extract the binary color informations from it, the hexadecimal value. You could extract the alpha information too, OpenGL supports RGB and RGBA format. In this case you'll need to extract the hexadecimal + alpha value from your image. Store everything into an array of pixels.
+
+With this array of pixel (also called texels, because will be used in a texture) you can construct an OpenGL's texture object. OpenGL will copy your array and store it in an optimized format to use in the GPU and in the frame buffer, if needed.
+
+Now is the complex part, some people has criticized OpenGL so much by this approach. Personally I think this could be better too, but is what we have today. OpenGL has something called "Texture Units", by default any OpenGL implementation by vendors must supports up to 32 Texture Units. These Units represent a temporary link between the stored array of pixels and the actual render processing. You'll use the Texture Units inside the shaders, more specifically inside the fragment shaders. By default each shader can use up to 8 textures, some vendors's implementation support up to 16 textures per shader. Further, OpenGL has a limit to the pair of shader, though each shader could use up to 8 texture units, the pair of shader (vertex and fragment) are limited to use up to 8 texture units together. Confused? Look, if you are using the texture units in only one shader you are able to use up to 8. But if you are using texture units in both shader (different textures units), you can't use more than 8 texture units combined.
+
+Well, OpenGL could hold on up to 32 Texture Units, which we'll use inside the shaders, but the shader just support up to 8, this doesn't make sense, right? Well, the point is that you can set up to 32 Texture Units and use it throughout many shaders. But if you need a 33th Texture Unit you'll need reuse a slot from the firsts 32.
+
+Very confused! I know...  
+Let's see if an visual explanation can clarify the point:  
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/texture_units_example.gif" alt="You can define up to 32 Texture Units, but just up to 8 textures per shader." title="texture_units_example" width="600" height="438" class="size-full wp-image-1045"/>
+
+As you saw in that image, one Texture Unit can be used many times by multiple shaders pairs. This approach is really confused, but let's understand it by the Khronos Eyes: "Shader are really great!", a Khronos developer said to the other, "They are processed very fast by the GPU. Right! But the textures... hmmm..  textures data still on the CPU, they are bigger and heavy informations! Hmmm..  So we need a fast way to let the shaders get access the textures, like a bridge, or something temporary. Hmmm...  We could create an unit of the texture that could be processed directly in the GPU, just as the shaders. We could limit the number of current texture units running on the GPU. A cache in the GPU, it's fast, it's better. Right, to make the setup, the user bind a texture data to a texture unit and instruct his shaders to use that unit! Seems simple! Let's use this approach."
+
+Normally the texture units are used in the fragment shader, but the vertex shader can also performs look up into a texture. This is not common but could be useful in some situations.
+
+Two very important things to remember are: first, you must to activate the texture unit by using <strong>glActiveTexture()</strong> and then you bind the texture name/id using <strong>glBindTexture()</strong>. The second important thing is that even by default the OpenGL supports up to 32 texture units, you can't use a slot number higher than the maximum supported texture units in your vendor's implementation, so if your OpenGL implementation doesn't support more than 16 texture units, you just can use the texture units in range 0 - 15.
+
+Well, the OpenGL texture units approach could be better, of course, but as I said, it's what we have for now! OK, again the code is very similar to the others above: You Generate a texture object, Bind this texture and set its properties. Here are the functions:
+
+
+<table width="675">  
+<tr>  
+<th>Texture Creation</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glGenTextures(GLsizei n, GLuint* textures)</strong></h5><br/>  
+<ul>  
+    <li><strong>n</strong>: The number representing how many textures' names/ids will be generated at once.</li>
+    <li><strong>textures</strong>: A pointer to a variable to store the generated names/ids. If more than one name/id was generated, this pointer will point to the start of an array.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBindTexture(GLenum target, GLuint texture)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target will define what kind of texture will be, a 2D texture or a 3D texture. The values can be:
+<ul>  
+    <li><strong>GL_TEXTURE_2D</strong>: This will set a 2D texture.</li>
+    <li><strong>GL_TEXTURE_CUBE_MAP</strong>: This will set a 3D texture.</li>
+</ul></li>  
+    <li><strong>texture</strong>: The name/id of the texture to be bound.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Is so weirdest a "3D texture"? The first time I heard "3D texture" I thought:"WTF!". Well, because of this weirding, the OpenGL calls a 3D texture of a Cube Map. Sounds better! Anyway, the point is that represent a cube with one 2D texture in each face, so the 3D texture or cube map represents a collection of six 2D textures. And how we can fetch the the texels? With a 3D vector placed in the center of the cube. This subject need much more attention, so I'll skip the 3D textures here and will let this discussion to the third part of this tutorial. Let's focus on 2D texture. Using only the GL_TEXTURE_2D.
+
+So, after we've created a 2D texture we need to set its properties. The Khronos group calls the OpenGL's core as "server", so when we define a texture data they say this is an "upload". To upload the texture data and set some properties, we use:
+
+
+<table width="675">  
+<tr>  
+<th>Texture Properties</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glTexImage2D (GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid* pixels)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: To a 2D texture this always will be GL_TEXTURE_2D.</li>
+    <li><strong>level</strong>: This parameter represents the mip map level. The base level is 0, for now let's use only 0.</li>
+    <li><strong>internalformat</strong>: This represents the color format of the pixels. This parameter can be:
+<ul>  
+    <li><strong>GL_RGBA</strong>: For RGB + Alpha.</li>
+    <li><strong>GL_RGB</strong>: For RGB only.</li>
+    <li><strong>GL_LUMINANCE_ALPHA</strong>: For Red + Alpha only. In this case the red channel will represent the luminosity.</li>
+    <li><strong>GL_LUMINANCE</strong>: For Red only. In this case the red channel will represent the luminosity.</li>
+    <li><strong>GL_ALPHA</strong>: For Alpha only.</li>
+</ul></li>  
+    <li><strong>width</strong>: The width of the image in pixels.</li>
+    <li><strong>height</strong>: The height of the image in pixels.</li>
+    <li><strong>border</strong>: This parameter is ignored in OpenGL ES. Always use the value 0. This is just an internal constant to conserve the compatibly with the desktop versions.</li>
+    <li><strong>format</strong>: The format must to have the same value of <strong>internalformat</strong>. Again, this is just an internal OpenGL convention.</li>
+    <li><strong>type</strong>: This represent the data format of the pixels. This parameter can be:
+<ul>  
+    <li><strong>GL_UNSIGNED_BYTE</strong>: This format represent 4 Bytes per pixel, so you can use 8 bits for red, 8 bits for green, 8 bits for blue and 8 bits for alpha channels, for example. This definition is used with all color formats.</li>
+    <li><strong>GL_UNSIGNED_SHORT_4_4_4_4</strong>: This format represents 2 bytes per pixel, so you can use 4 bits for red, 4 bits for green, 4 bits for blue and 4 bits for alpha channels, for example. This definition is used with RGBA only.</li>
+    <li><strong>GL_UNSIGNED_SHORT_5_5_5_1</strong>: This format represents 2 bytes per pixel, so you can use 5 bits for red, 5 bits for green, 5 bits for blue and 1 bit for alpha channels, for example. This definition is used with RGBA only.</li>
+    <li><strong>GL_UNSIGNED_SHORT_5_6_5</strong>: This format represents 2 bytes per pixel, so you can use 5 bits for red, 6 bits for green and 5 bits for blue, for example. This definition is used with RGB only.</li>
+</ul></li>  
+    <li><strong>pixels</strong>: The pointer to your array of pixels.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Wow! A lot of parameters!  
+OK, but is not hard to understand. First of all, same behavior of the others "Hooks", a call to glTexImage2D will set the properties for the last texture bound.
+
+About the mip map, it is another OpenGL feature to optimize the render time. In few words, what it does is progressively create smaller copies of the original texture until an insignificant copy of 1x1 pixel. Later, during the rasterize process, OpenGL can choose the original or the one of the copies to use depending on the final size of the 3D object in relation to the view. For now, don't worry with this feature, probably I'll create an article only to talk about the texture with OpenGL.
+
+After the mip map, we set the color format, the size of the image, the format of our data and finally our pixel data. The 2 bytes per pixel optimized data formats is the best way to optimize your texture, use it always you can. Remember which the color you use in the OpenGL can't exceed the color range and format of your device and EGL context.
+
+OK, now we know how to construct a basic texture and how it works inside OpenGL. So now let's move to the Rasterize.
+
+<br/><a name="rasterize"></a>  
+<h2><strong>Rasterize</strong></h2><a href="#list_contents">top</a>  
+The Rasterize in the strict sense is only the process which the OpenGL takes a 3D object and convert its bunch of maths into a 2D image. Later, each fragment of this visible area will be processed by the fragment shader.
+
+Looking at that Programmable Pipeline illustration at the beginning of this tutorial, you can see the Rasterize is just a small step through the graphics pipeline. So why it is so important? I like to say which everything that comes after the Rasterize step is also a Rasterize process, because all that is done later on is also to construct a final 2D image from a 3D object. OK, anyway.
+
+The fact is the Rasterize is the process of creating an image from a 3D object. The Rasterize will occurs to each 3D object in the scene and will update the frame buffer. You can do interferences by many ways in the Rasterize process.
+
+<br/><a name="face_culling"></a>  
+<h3>Face Culling</h3><a href="#list_contents">top</a>  
+Now is time to talk about the Culling, Front Facing and Back Facing. OpenGL works with methods to find and discard the not visible faces. Imagine a simple plane in your 3D application. Let's say you want this plane be visible just by one side (because it represent a wall or a floor, whatever). By default OpenGL will render the both sides of that plane. To solve this issue you can use the culling. Based on the order of vertices OpenGL can determine which is the front and the back face of your mesh (more precisely, it calculates the front and back face of each triangle) and using the culling you can instruct OpenGL to ignore one of these sides (or even both). Look at this picture:
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/culling_example.jpg" alt="If the culling was enabled, the default behavior will treat clock wise order as a back face." title="culling_example" width="600" height="378" class="size-full wp-image-1099"/>
+
+This feature called culling is completely flexible, you have at least three ways to do the same thing. That picture show only one way, but the most important is understand how it works. In the picture's case, a triangle is composed by vertex 1, vertex 2 and vertex 3. The triangle at the left is constructed using the order of {1,2,3} and that one at the right is formed by the order {1,3,2}. By default the culling will treat triangles formed in the Counter ClockWise as a Front Face and it will not be culled. Following this same behavior, in the right side of the image, the triangle formed in ClockWise will be treated as Back Face and it will be culled (ignored in rasterization process).
+
+To use this feature you need to use <strong>glEnable</strong> function using the parameter <strong>GL_CULL_FACE</strong> and doing this the default behavior will be the explained above. But if you want to customize it, you can use these functions:
+
+
+<table width="675">  
+<tr>  
+<th>Cull Face properties</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glCullFace(GLenum mode)</strong></h5><br/>  
+<ul>  
+    <li><strong>mode</strong>: Indicates which face will be culled. This parameter can be:
+<ul>  
+    <li><strong>GL_BACK</strong>: This will ignore the back faces. This is the default behavior.</li>
+    <li><strong>GL_FRONT</strong>: This will ignore the front faces.</li>
+    <li><strong>GL_FRONT_AND_BACK</strong>: This will ignore both front and back faces (don't ask me why someone will want to exclude the both sides, even knowing which this will produce no render. I'm still trying to figure out the reason of this silly setup until today).</li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glFrontFace(GLenum mode)</strong></h5><br/>  
+<ul>  
+    <li><strong>mode</strong>: Indicates how the OpenGL will define the front face (and obviously also the back face). This parameter can be:
+<ul>  
+    <li><strong>GL_CCW</strong>: This will instruct OpenGL to treat triangles formed in counter clock wise as a Front Face. This is the default behavior.</li>
+    <li><strong>GL_CW</strong>: This will instruct OpenGL to treat triangles formed in clock wise as a Front Face.</li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+As you can imagine, if you set the <strong>glCullFace(GL_FRONT)</strong> and <strong>glFrontFace(GL_CW)</strong> you will achieve the same behavior as default. Another way to change the default behavior is by changing the order which your 3D objects are constructed, but of course this is much more laborious, because you need to change your array of indices.
+
+The culling is the first thing to happens in the Rasterize step, so this can determine if a Fragment Shader (the next step) will be processed or not.
+
+<br/><a name="per-fragment"></a>  
+<h3>Per-Fragment Operations</h3><a href="#list_contents">top</a>  
+Now let's refine a little our programmable pipeline diagram at the top of this tutorial, more specifically what happens in the process of post fragment shader.
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/rasterize_pipepline_example.png" alt="Refined Per-Fragment Operations into the the programmable pipeline." title="rasterize_pipepline_example" width="600" height="600" class="size-full wp-image-1098"/>
+
+Between the Fragment Shader and the Scissor Test exist one little omitted step. Something called "Pixel Ownership Test". This is an internal step. It will decide the ownership of a pixel between the OpenGL internal Frame Buffer and the current EGL's context. This is an insignificant step to us. You can't use it to anything, I just told this to you know what happens internally. To us, developers, this step is completely ignored.
+
+As you saw, the only step which you don't have access is the Logicop. The Logicop is an internal process which includes things like clamp values to 0.0 - 1.0 range, process the final color to the frame buffer after all per-fragment operations, additional Multisample and other kind of internal things. You don't need to worry about that. We need to focus on purple boxes.
+
+The purple boxes indicate processes which is disabled by default, you need to enable each of them using the <strong>glEnable</strong> function, if you want to use them, of course. You can look again at the <strong>glEnable</strong> parameters, though just to make this point clear, in short words the purple boxes at this image represent the following parameters and means:  
+
+<ul>  
+    <li><strong>Scissor Test</strong>: GL_SCISSOR_TEST - This can crop the image, so every fragment outside the scissor area will be ignored.</li>
+    <li><strong>Stencil Test</strong>: GL_STENCIL_TEST - Works like a mask, the mask is defined by a black-white image where the white pixels represent the visible area. So every fragment placed on the black area will be ignored. This requires a stencil render buffer to works.</li>
+    <li><strong>Depth Test</strong>: GL_DEPTH_TEST - This test compares the Z depth of the current 3D object against the others Z depths previously rendered. The fragment with a depth higher than another will be ignored (that means, more distant from the viewer). This will be done using a grey scale image. This requires a depth render buffer to works.</li>
+    <li><strong>Blend</strong>: GL_BLEND - This step can blend the new fragment with the existing fragment into the color buffer.</li>
+    <li><strong>Dither</strong>: GL_DITHER - This is a little OpenGL's trick. In the systems wich color available to the frame buffer is limited, this step can optimize the color usage to appears to have more colors than has in real. The Dither has no configuration, you just choose to use it or not.</li>
+</ul>
+
+
+To each of them, OpenGL gives few functions to setup the process like <strong>glScissor</strong>, <strong>glBlendColor</strong> or <strong>glStencilFunc</strong>. There are more than 10 functions and I'll not talk about they here, maybe in another article. The important thing to understand here is the process. I told you about the default behavior, like the black and white in stencil buffer, but by using those functions you can customize the processing, like change the black and white behavior on the stencil buffer.
+
+Look again at the programmable pipeline at the top. Each time you render a 3D object, that entire pipeline will occur from the <strong>glDraw*</strong> until the frame buffer, but does not enter in EGL API. Imagine a complex scene, a game scene, like a Counter Strike scene. You could render tens, maybe hundreds 3D object to create only one single static image. When you render the first 3D object, the frame buffer will begin to be filled. If the subsequents 3D objects had their fragments ignored by one or more of the Fragment Operations, then the ignored fragment will not be placed in the frame buffer, but remember that this action will not exclude the fragments which are already in the frame buffer. The final Counter Strike scene is a single 2D image resulting for many shaders, lights, effects and 3D objects. So every 3D object will have its vertex shader processed, maybe also its fragment shader, but this doesn't means that its resulting image will be really visible.
+
+Well, now you understand why I said the rasterization process include more than only one single step in the diagram. Rasterize is everything between the vertex shader and the frame buffer steps.
+
+Now let's move to the most important section, the shaders!
+
+<br/><a name="shaders"></a>  
+<h2><strong>Shaders</strong></h2><a href="#list_contents">top</a>  
+Here we are! The greatest invention of 3D world!  
+If you've read the first part of this serie of tutorials and read all this part until here, I think you have now a good idea of what the shaders are and what they do. Just to refresh our memories, let's remember a little:  
+
+<ul>  
+    <li>Shaders use the GLSL or GLSL ES, a compact version of the first one.</li>
+    <li>Shaders always work in pairs, a Vertex Shader (VSH) and a Fragment Shader (FSH).</li>
+    <li>That pair of shader will be processed every time you submit a render command, like <strong>glDrawArrays</strong> or <strong>glDrawElements</strong>.</li>
+    <li>VSH will be processed per-vertex, if your 3D object has 8 vertices, so the vertex shader will be processed 8 times. The VSH is responsible by determine the final position of a vertex.</li>
+    <li>FSH will be processed in each visible fragment of your objects, remember that FSH is processed before the "Fragment Operations" in the graphics pipeline, so the OpenGL doesn't knows yet what object is in front of others, I mean, even the fragments behind the others will be processed. The FSH is responsible by define the final color of a fragment.</li>
+    <li>VSH and FSH must be compiled separately and linked together within a Program Object. You can reuse a compiled shader into multiple Program Objects, but can link only one kind of shader (VSH and FSH) at each Program Object.</li>
+</ul>
+
+
+<br/><a name="shader_program"></a>  
+<h3>Shader and Program Creation</h3><a href="#list_contents">top</a>  
+OK, first let's talk about the process of creating a shader object, put some source code in it and compile it.  As any other OpenGL's object, we first create a nane/id to it and then set its properties. In comparison to the other OpenGL objects, the additional process here is the compiling. Remember that the shaders will be processed by the GPU and to optimize the process the OpenGL compiles your source code into a binary format. Optionally, if you have a previously compiled shader in a binary file you could load it directly instead to load the source and compile. But for now, let's focus on the compiling process.  
+These are the functions related to shader creation process:
+
+
+<table width="675">  
+<tr>  
+<th>Shader Object Creation</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLuint glCreateShader(GLenum type)</strong></h5><br/>  
+<ul>  
+    <li><strong>type</strong>: Indicates what kind of shader will be created. This parameter can be:
+<ul>  
+    <li><strong>GL_VERTEX_SHADER</strong>: To create a Vertex Shader.</li>
+    <li><strong>GL_FRAGMENT_SHADER</strong>: To create a Fragment Shader.</li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glShaderSource(GLuint shader, GLsizei count, const GLchar** string, const GLint* length)</strong></h5><br/>  
+<ul>  
+    <li><strong>shader</strong>: The shader name/id generated by the <strong>glCreateShader</strong> function.</li>
+    <li><strong>count</strong>: Indicates how many sources you are passing at once. If you are uploading only one shader source, this parameter must be 1.</li>
+    <li><strong>string</strong>: The source of your shader(s). This parameter is a double pointer because you can pass an array of C strings, where each element represent a source. The pointed array should has the same length as the <strong>count</strong> parameter above.</li>
+    <li><strong>length</strong>: A pointer to an array which each element represent the number of chars into each C string of the above parameter. This array must has the same number of elements as specified in the <strong>count</strong> parameter above. This parameter can also be NULL. In this case, each element in the <strong>string</strong> parameter above must be null-terminated.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glCompileShader(GLuint shader)</strong></h5><br/>  
+<ul>  
+    <li><strong>shader</strong>: The shader name/id generated by the <strong>glCreateShader</strong> function.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+As you saw, this step is easy. You create a shader name/id, make the upload of the source code to it and then compile it. If you upload a source code into a shader which had another source into it, the old source will be completely replaced. Once the shader has been compiled, you can't change the source code anymore using the <strong>glShaderSource</strong>.
+
+Each Shader object has a GLboolean status to indicate if it is compiled or not. This status will be set to TRUE if the shader was compiled with no errors. This status is good for you use in debug mode of your application to check if the shaders are being compiled correctly. Jointly with this check, it's a good idea you query the info log which is provided. The functions are <strong>glGetShaderiv</strong> to retrieve the status and <strong>glGetShaderInfoLog</strong> to retrieve the status message. I'll not place the functions and parameters here, but I'll show this shortly in a code example.
+
+Is important tell you the OpenGL names/ids reserved to the shaders are one single list. For example, if you generate a VSH which has the name/id 1 this number will never be used again, if you now create a FSH, the new name/id will probably be 2 and so on. Never a VSH will has the same name/id of a FSH, and vice versa.
+
+Once you have a pair of shaders correctly compiled is time to create a Program Object to place both shaders into it. The process to create a program object is similar to the shader process. First you create a Program Object, then you upload something (in this case, you place the compiled shaders into it) and finally you compile the program (in this case we don't use the word "compile", we use "link"). The Program will be linked to what? The Program will link the shaders pair togheter and be link itself to the OpenGL's core. This process is very important, because is into it that many verifications on your shaders occur. Just as the shaders, the Programs also has a link status and a link info log which you can use to check the errors. Once a Program was linked with success, you can be sure: your shaders will work correctly. Here are the functions to Program Object:
+
+
+<table width="675">  
+<tr>  
+<th>Program Object Creation</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLuint glCreateProgram(void)</strong></h5><br/>  
+<ul>  
+    <li>This function requires no parameter. This is because only exist one kind of Program Object, unlike the shaders. Plus, instead to take the memory location to one variable, this function will return the name/id directly, this different behavior is because you can't create more than one Program Object at once, so you don't need to inform a pointer.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glAttachShader(GLuint program, GLuint shader)</strong></h5><br/>  
+<ul>  
+    <li><strong>program</strong>: The program name/id generated by the <strong>glCreateProgram</strong> function.</li>
+    <li><strong>shader</strong>: The shader name/id generated by the <strong>glCreateShader</strong> function.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glLinkProgram(GLuint program)</strong></h5><br/>  
+<ul>  
+    <li><strong>program</strong>: The program name/id generated by the <strong>glCreateProgram</strong> function.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+In the <strong>glAttachShader</strong> you don't have any parameter to identify if the shader is a Vertex or Fragment one. You remember the shaders names/ids are one single list, right?.  The OpenGL will atumatically identify the type of the shaders based on their unique names/ids. So the important part is you call the <strong>glAttachShader</strong> twice, one to VSH and other to FSH. If you attach two VSH or two FSH, the program will not be properly linked, also if you attach more than two shaders, the program will fail in linking.
+
+You could create many programs, but how the OpenGL will know which program to use when you call a <strong>glDraw*</strong>? The OpenGL's Crane doesn't has an arm and a hook to programs objects, right? So how the OpenGL will know? Well, the programs are our exception. OpenGL doesn't has a bind function to it, but works with programs at the same way as a hook. When you want to use a program you call this function:
+
+
+<table width="675">  
+<tr>  
+<th>Program Object Usage</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glUseProgram(GLuint program)</strong></h5><br/>  
+<ul>  
+    <li><strong>program</strong>: The program name/id generated by the <strong>glCreateProgram</strong> function.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+After calling the function above, every subsequent call to <strong>glDraw*</strong> functions will use the program which is currently in use. As any other <strong>glBind*</strong> function, the name/id 0 is reserved to OpenGL and if you call <strong>glUseProgram(0)</strong> this will unbind any current program.
+
+Now is time to code, any OpenGL application which you create will have a code like this:
+
+<div style="overflow:auto; height:600px"><pre class="brush:csharp">
+
+GLuint _program;
+
+GLuint createShader(GLenum type, const char **source)  
+{
+    GLuint name;
+
+    // Creates a Shader Object and returns its name/id.
+    name = glCreateShader(type);
+
+    // Uploads the source to the Shader Object.
+    glShaderSource(name, 1, &source;, NULL);
+
+    // Compiles the Shader Object.
+    glCompileShader(name);
+
+    // If you are running in debug mode, query for info log.
+    // DEBUG is a pre-processing Macro defined to the compiler.
+    // Some languages could not has a similar to it.
+#if defined(DEBUG)
+
+    GLint logLength;
+
+    // Instead use GL_INFO_LOG_LENGTH we could use COMPILE_STATUS.
+    // I prefer to take the info log length, because it'll be 0 if the
+    // shader was successful compiled. If we use COMPILE_STATUS
+    // we will need to take info log length in case of a fail anyway.
+    glGetShaderiv(name, GL_INFO_LOG_LENGTH, &logLength;);
+
+    if (logLength &gt; 0)
+    {
+        // Allocates the necessary memory to retrieve the message.
+        GLchar *log = (GLchar *)malloc(logLength);
+
+        // Get the info log message.
+        glGetShaderInfoLog(name, logLength, &logLength;, log);
+
+        // Shows the message in console.
+        printf("%s",log);
+
+        // Frees the allocated memory.
+        free(log);
+    }
+#endif
+
+    return name;
+}
+
+GLuint createProgram(GLuint vertexShader, GLuint fragmentShader)  
+{
+    GLuint name;
+
+    // Creates the program name/index.
+    name = glCreateProgram();
+
+    // Will attach the fragment and vertex shaders to the program object.
+    glAttachShader(name, vertexShader);
+    glAttachShader(name, fragmentShader);
+
+    // Will link the program into OpenGL's core.
+    glLinkProgram(_name);
+
+#if defined(DEBUG)
+
+    GLint logLength;
+
+    // This function is different than the shaders one.
+    glGetProgramiv(name, GL_INFO_LOG_LENGTH, &logLength;);
+
+    if (logLength &gt; 0)
+    {
+        GLchar *log = (GLchar *)malloc(logLength);
+
+        // This function is different than the shaders one.
+        glGetProgramInfoLog(name, logLength, &logLength;, log);
+
+        printf("%s",log);
+
+        free(log);
+    }
+#endif
+
+    return name;
+}
+
+void initProgramAndShaders()  
+{
+    const char *vshSource = "... Vertex Shader source using SL ...";
+    const char *fshSource = "... Fragment Shader source using SL ...";
+
+    GLuint vsh, fsh;
+
+    vsh = createShader(GL_VERTEX_SHADER, &vshSource;);
+    fsh = createShader(GL_FRAGMENT_SHADER, &fshSource;);
+
+    _program = createProgram(vsh, fsh);
+
+    // Clears the shaders objects.
+    // In this case we can delete the shader because we
+    // will not use they anymore and once compiled,
+    // the OpenGL stores a copy of they into the program object.
+    glDeleteShader(vsh);
+    glDeleteShader(fsh);
+
+    // Later you can use the _program variable to use this program.
+    // If you are using an Object Oriented Programming is better make
+    // the program variable an instance variable, otherwise is better make
+    // it a static variable to reuse it in another functions.
+    // glUseProgram(_program);
+}
+</pre></div>
+
+<br/>  
+Here I've made a minimal elaboration to make it more reusable, separating the functions which creates OpenGL objects. For example, instead to rewrite the code of shader creation, we can simply call the function <strong>createShader</strong> and inform the kind of shader we want and the source from it. The same with programs. Of course if you are using an OOP language you could elaborate it much more, creating separated classes for Program Objects and Shader Objects, for example.
+
+This is the basic about the shader and program creation, but we have much more to see. Let's move to the Shader Language (SL). I'll treat specifically the GLSL ES, the compact version of OpenGL Shader Language for Embedded Systems.
+
+<br/><a name="shader_language"></a>  
+<h3>Shader Language</h3><a href="#list_contents">top</a>  
+The shader language is very similar to C standard. The variables declarations and function syntax are the same, the if-then-else and loops has the same syntax too, the SL even accept preprocessor Macros, like #if, #ifdef, #define and others. The shader language was made to be as fast as possible. So be careful about the usage of loops and conditions, they are very expansive. Remember the shaders will be processed by the GPU and the floating-point calculations are optimized. To explore this great improvement, SL has exclusive data types to work with 3D world:
+
+
+<table width="675">  
+<tr>  
+<th>SL's Data Type</th><th>Same as C</th><th>Description</th>  
+</tr>  
+<tr><td><strong>void</strong></td><td>void</td><td>Can represent any data type</td></tr>  
+<tr><td><strong>float</strong></td><td>float</td><td>The range depends on the precision.</td></tr>  
+<tr><td><strong>bool</strong></td><td>unsigned char</td><td>0 to 1</td></tr>  
+<tr><td><strong>int</strong></td><td>char/short/int</td><td>The range depends on the precision.</td></tr>  
+<tr><td><strong>vec2</strong></td><td>-</td><td>Array of 2 float. {x, y}, {r, g}, {s, t}</td></tr>  
+<tr><td><strong>vec3</strong></td><td>-</td><td>Array of 3 float. {x, y, z}, {r, g, b}, {s, t, r}</td></tr>  
+<tr><td><strong>vec4</strong></td><td>-</td><td>Array of 4 float. {x, y, z, w}, {r, g, b, a}, {s, t, r, q}</td></tr>  
+<tr><td><strong>bvec2</strong></td><td>-</td><td>Array of 2 bool. {x, y}, {r, g}, {s, t}</td></tr>  
+<tr><td><strong>bvec3</strong></td><td>-</td><td>Array of 3 bool. {x, y, z}, {r, g, b}, {s, t, r}</td></tr>  
+<tr><td><strong>bvec4</strong></td><td>-</td><td>Array of 4 bool. {x, y, z, w}, {r, g, b, a}, {s, t, r, q}</td></tr>  
+<tr><td><strong>ivec2</strong></td><td>-</td><td>Array of 2 int. {x, y}, {r, g}, {s, t}</td></tr>  
+<tr><td><strong>ivec3</strong></td><td>-</td><td>Array of 3 int. {x, y, z}, {r, g, b}, {s, t, r}</td></tr>  
+<tr><td><strong>ivec4</strong></td><td>-</td><td>Array of 4 int. {x, y, z, w}, {r, g, b, a}, {s, t, r, q}</td></tr>  
+<tr><td><strong>mat2</strong></td><td>-</td><td>Array of  4 float. Represent a matrix of 2x2.</td></tr>  
+<tr><td><strong>mat3</strong></td><td>-</td><td>Array of  9 float. Represent a matrix of 3x3.</td></tr>  
+<tr><td><strong>mat4</strong></td><td>-</td><td>Array of  16 float. Represent a matrix of 4x4.</td></tr>  
+<tr><td><strong>sampler2D</strong></td><td>-</td><td>Special type to access a 2D texture</td></tr>  
+<tr><td><strong>samplerCube</strong></td><td>-</td><td>Special type to access a Cube texture (3D texture)</td></tr>  
+</table>
+
+
+All the vector data types (<strong>vec*</strong>, <strong>bvec*</strong> and <strong>ivec*</strong>) can have their elements accessed by either using "." syntax or array subscripting syntax "[x]". In the above table you saw the sequences <strong>{x, y, z, w}, {r, g, b, a}, {s, t, r, q}</strong>. They are the accessors for the vector elements. For example, .xyz could represent the first three elements of a vec4, but you can't use .xyz in a vec2, because .xyz in a vec2 is out of bounds, for a vec2 just .xy could be used. You also can change the order to achieve your results, for example .yzx of a vec4 means you are querying the second, third and first elements, respectively. The reason for three different sequences is because a <strong>vec</strong> data type can be used to represent vectors (x,y,z,w), colors (r,g,b,a) or even texture coordinates (s,t,r,q). The important thing is that you can't mix these sets, for example you can't use .xrt. The following example can help:
+
+
+<pre class="brush:csharp">  
+vec4 myVec4 = vec4(0.0, 1.0, 2.0, 3.0);  
+vec3 myVec3;  
+vec2 myVec2;
+
+myVec3 = myVec4.xyz;        // myVec3 = {0.0, 1.0, 2.0};  
+myVec3 = myVec4.zzx;        // myVec3 = {2.0, 2.0, 0.0};  
+myVec2 = myVec4.bg;            // myVec2 = {2.0, 1.0};  
+myVec4.xw = myVec2;            // myVec4 = {2.0, 1.0, 2.0, 1.0};  
+myVec4[1] = 5.0;            // myVec4 = {2.0, 5.0, 2.0, 1.0};  
+</pre>
+
+
+Is very simple.  
+Now, about the conversions, you need to take care with some things. The SL uses something called Precision Qualifiers to define the range of minimum and maximum values to a data type.
+
+Precision Qualifiers are little instructions which you can use in front of any variable declaration. As any data range, this depends on the hardware capacity. So, the following table is about the minimum range necessary to SL. Some vendors can increase these ranges:
+
+
+<table width="675">  
+<tr>  
+<th>Precision</th><th>Floating Point Range</th><th>Integer Range</th>  
+</tr>  
+<tr><td><strong>lowp</strong></td><td>-2.0 to 2.0</td><td>-256 to 256</td></tr>  
+<tr><td><strong>mediump</strong></td><td>-16,384.0 to 16,384.0</td><td>-1,024 to 1,024</td></tr>  
+<tr><td><strong>highp</strong></td><td>-4,611,686,018,427,387,904.0 to 4,611,686,018,427,387,904.0</td><td>-65,536 to 65,536</td></tr>  
+</table>
+
+
+Instead declare a qualifier at each variable you can also define global qualifiers by using the keyword <strong>precision</strong>. The Precision Qualifiers can help when you need to convert between data types, this should be avoided, but if you really need, use the Precision Qualifiers to help you. For example, to convert a float to an int you should use a mediump float and a lowp int, if you try to convert a lowp float (range -2.0 to 2.0) to a lowp int all result you will have is between -2 and 2 integers. And to convert you must use a build-in function to the desired data type. The following code can help:
+
+
+<pre class="brush:csharp">  
+precision mediump float;  
+precision lowp int;
+
+vec4 myVec4 = vec4(0.0, 1.0, 2.0, 3.0);  
+ivec3 myIvec3;  
+mediump ivec2 myIvec2;
+
+// This will fail. Because the data types are not compatible.
+//myIvec3 = myVec4.zyx;
+
+myIvec3 = ivec3(myVec4.zyx);    // This is OK.  
+myIvec2.x = myIvec3.y;            // This is OK.
+
+myIvec2.y = 1024;
+
+// This is OK too, but the myIvec3.x will assume its maximum value.
+// Instead 1024, it will be 256, because the precisions are not
+// equivalent here.
+myIvec3.x = myIvec2.y;  
+</pre>
+
+
+One of the great advantages and performance gain of working directly in the GPU is the operations with the floating-point. You can do multiplications or other operation with the floating-point very easily. Matrices types, vectors types and float type are fully compatibles, respecting their dimensions, of course. You could make complex calculations, like matrices multiplications, in a single line, just like these:
+
+
+<pre class="brush:csharp">  
+mat4 myMat4;  
+mat3 myMat3;  
+vec4 myVec4 = vec4(0.0, 1.0, 2.0, 3.0);  
+vec3 myVec3 = vec3(-1.0, -2.0, -3.0);  
+float myFloat = 2.0;
+
+// A mat4 has 16 elements, could be constructed by 4 vec4.
+myMat4 = mat4(myVec4,myVec4,myVec4,myVec4);
+
+// A float will multiply each vector value.
+myVec4 = myFloat * myVec4;
+
+// A mat4 multiplying a vec4 will result in a vec4.
+myVec4 = myMat4 * myVec4;
+
+// Using the accessor, we can multiply two vector of different orders.
+myVec4.xyz = myVec3 * myVec4.xyz;
+
+// A mat3 produced by a mat4 will take the first 9 elements.
+myMat3 = mat3(myMat4);
+
+// A mat3 multiplying a vec3 will result in a vec3.
+myVec3 = myMat3 * myVec3;  
+</pre>
+
+
+You can also use array of any data type and even can construct structs, just like in C. The SL defines which every shader must have one function <strong>void main()</strong>. The shader execution will start by this function, just like C. Any shader which doesn't has this function will not be compiled. A function in SL works exactly as in C. Just remember that SL is an inline language, I mean, if you've wrote a function before call it, it's OK, otherwise the call will fail. So if you have more functions in your shader, remember which the <strong>void main()</strong> must be the last to be written.
+
+Now is time to go deeply and understand what exactly the vertex and fragment shaders make.
+
+<br/><a name="vertex_fragment"></a>  
+<h3>Vertex and Fragment Structures</h3><a href="#list_contents">top</a>  
+First of all, let's take a look into the Shaders Pipeline and then I'll introduce you the Attributes, Uniforms, Varyings and Built-In Functions.
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/shader_pipeline_example.jpg" alt="The shaders pipeline." title="shader_pipeline_example" width="600" height="600" class="size-full wp-image-1170"/>
+
+Your VSH should always have one or more Attributes, because the Attributes is used to construct the vertices of your 3D object, only the attributes can be defined per-vertex. To define the final vertex position you'll use the built-in variable gl_Position. If you are drawing a 3D point primitive you could also set the gl_PointSize. Later on, you'll set the gl_FragColor built-in variable in FSH.
+
+The Attributes, Uniforms and Varyings construct the bridge between the GPU processing and your application in CPU. Before you make a render (call <strong>glDraw*</strong> functions), you'll probably set some values to the Attributes in VSH. These values can be constant in all vertices or can be different at each vertex. By default, any implementation of OpenGL's programmable pipeline must supports at least 8 Attributes.
+
+You can't set any variable directly to the FSH, what you need to do is set a Varying output into the VSH and prepare your FSH to receive that variable. This step is optional, as you saw in the image, but in reality is very uncommon construct a FSH which doesn't receive any Varying. By default, any implementation of OpenGL's programmable pipeline must to support at least 8 Varyings.
+
+Another way to comunicate with the shader is by using the Uniforms, but as the name suggest, the Uniforms are constants throughout all the shaders processing (all vertices and all fragments). A very common usage to uniforms is the samplers, you remember sampler data types, right? They are used to hold our Texture Units. You remember the Texture Units too, right? Just to make this point clear, samplers data types should be like int data types, but is a special kind reserved to work with textures. Just it. The minimum supported Uniforms is different from each shader type. The VSH supports at least 128 Uniforms, but the FSH supports at least 16 Uniforms.
+
+Now, about the Built-In Variables, OpenGL defines few variables which is mandatory to us at each shader. The VSH must define the final vertex position, this is done through the variable <strong>gl_Position</strong>, if current drawing primitive is a 3D point is a good idea to set the <strong>gl_PointSize</strong> too. The <strong>gl_PointSize</strong> will instruct the FSH about how many fragments each point will affect, or in simple words, the size in the screen of a 3D point. This is very useful to make particle effects, like fire. In the VSH has built-in read-only variable, like the <strong>gl_FrontFacing</strong>. This variable is of bool data type, it instructs if the current vertex is front facing or not.
+
+In the FSH the built-in output variable is <strong>gl_FragColor</strong>. For compatibility with the OpenGL's desktop versions, the <strong>gl_FragData</strong> can also be used. <strong>gl_FragData</strong> is an array which is related to the drawable buffers, but as OpenGL ES has only one internal drawable buffer, this variable must always be used as <strong>gl_FragData[0]</strong>. My advice here is to forget it and focus on <strong>gl_FragColor</strong>.
+
+About the read-only built-in variables, the FSH has three of them: <strong>gl_FrontFacing</strong>, <strong>gl_FragCoord</strong> and <strong>gl_PointCoord</strong>. The <strong>gl_FrontFacing</strong> is equal in the VSH, it's a bool which indicates if the current fragment is front facing or not. The <strong>gl_FragCoord</strong> is vec4 data type which indicates the fragment coordinate relative to the window (window here means the actual OpenGL's view. The <strong>gl_PointCoord</strong> is used when you are rendering 3D points. In cases when you specify <strong>gl_PointSize</strong> you can use the <strong>gl_PointCoord</strong> to retrieve the texture coordinate to the current fragment. For example, a point size is always square and given in pixels, so a size of 16 represent a point formed by 4 x 4 pixels. The <strong>gl_PointCoord</strong> is in range of 0.0 - 1.0, exactly like a texture coordinate information.
+
+The most important in the built-in output variables is the final values. So you could change the value of <strong>gl_Position</strong> several times in a VSH, the final position will be the final value. The same is true for <strong>gl_FragColor</strong>.
+
+The following table shows the built-in variables and their data types:
+
+
+<table width="675">  
+<tr>  
+<th>Built-In Variable</th><th>Precision</th><th>Data Type</th>  
+</tr>  
+<tr>  
+<th colspan="3">Vertex Shader Built-In Variables</th>  
+</tr>  
+<tr><td><strong>gl_Position</strong></td><td>highp</td><td>vec4</td></tr>  
+<tr><td><strong>gl_FrontFacing</strong></td><td>-</td><td>bool</td></tr>  
+<tr><td><strong>gl_PointSize</strong></td><td>mediump</td><td>float</td></tr>  
+<tr>  
+<th colspan="3">Fragment Shader Built-In Variables</th>  
+</tr>  
+<tr><td><strong>gl_FragColor</strong></td><td>mediump</td><td>vec4</td></tr>  
+<tr><td><strong>gl_FrontFacing</strong></td><td>-</td><td>bool</td></tr>  
+<tr><td><strong>gl_FragCoord</strong></td><td>mediump</td><td>vec4</td></tr>  
+<tr><td><strong>gl_PointCoord</strong></td><td>mediump</td><td>vec2</td></tr>  
+</table>
+
+
+Is time to construct a real shader. The following code constructs a Vertex and a Fragment Shader which uses two texture maps. Let's start with the VSH.
+
+
+<pre class="brush:csharp">  
+precision mediump float;  
+precision lowp int;
+
+uniform mat4        u_mvpMatrix;
+
+attribute vec4        a_vertex;  
+attribute vec2        a_texture;
+
+varying vec2        v_texture;
+
+void main()  
+{
+    // Pass the texture coordinate attribute to a varying.
+    v_texture = a_texture;
+
+    // Here we set the final position to this vertex.
+    gl_Position = u_mvpMatrix * a_vertex;
+}
+</pre>
+
+
+And now the corresponding FSH:
+
+
+<pre class="brush:csharp">  
+precision mediump float;  
+precision lowp int;
+
+uniform sampler2D    u_maps[2];
+
+varying vec2        v_texture;
+
+void main()  
+{
+    // Here we set the diffuse color to the fragment.
+    gl_FragColor = texture2D(u_maps[0], v_texture);
+
+    // Now we use the second texture to create an ambient color.
+    // Ambient color doesn't affect the alpha channel and changes
+    // less than half the natural color of the fragment.
+    gl_FragColor.rgb += texture2D(u_maps[1], v_texture).rgb * .4;
+}
+</pre>
+
+
+Great, now is time to back to OpenGL API and prepare our Attributes and Uniforms, remember that we don't have directly control to the Varyings, so we must to set an Attribute to be send to a Varying during the VSH execution.
+
+<br/><a name="attributes_uniforms"></a>  
+<h3> Setting the Attributes and Uniforms</h3><a href="#list_contents">top</a>  
+To identify any variable inside the shaders, the Program Object defines locations to its variables (location is same as index). Once you know the final location to an Attribute or Uniform you can use that location to set its value.
+
+To setup an Uniform, OpenGL gives to us only one way: after the linking, we retrieve a location to the desired Uniform based on its name inside the shaders. To setup the Attributes, OpenGL gives to us two ways: we could retrieve the location after the program be linked or could define the location before the program be linked. I'll show you the both ways anyway, but set the locations before the linking process is useless, you'll understand why. So let's start with this useless method.
+
+Do you remember that exception to the rule of glBindSomething = "take a container"? OK, here is it. To set an attribute location before the program be linked we use a function which starts with glBindSomething, but in reality the OpenGL's Port Crane doesn't take any container at this time. Here the "bind" word is related with the process inside the Program Object, the process of make a connection between an attribute name and a location inside the program. So, the function is:
+
+
+<table width="675">  
+<tr>  
+<th>Setting Attribute Location before the linkage</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glBindAttribLocation(GLuint program, GLuint index, const GLchar* name)</strong></h5><br/>  
+<ul>  
+    <li><strong>program</strong>: The program name/id generated by the <strong>glCreateProgram</strong> function.</li>
+    <li><strong>index</strong>: The location we want to set.</li>
+    <li><strong>name</strong>: The name of attribute inside the vertex shader.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+The above method must be called after you create the Program Object, but before you link it. This is the first reason because I discourage doing this. It's a middle step in the Program Object creation. Obviously you can choose the best way to your application. I prefer the next one.
+
+Now let's see how to get the locations to Attributes and Uniforms after the linking process. Whatever way you choose, you must to hold the location to each shader variable in your application. Because you will need these locations to set its values later on. Here is the functions to use after the linking:
+
+
+<table width="675">  
+<tr>  
+<th>Getting Attribute and Uniform Location</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLint glGetAttribLocation(GLuint program, const GLchar* name)</strong></h5><br/>  
+<ul>  
+    <li><strong>program</strong>: The program name/id generated by the <strong>glCreateProgram</strong> function.</li>
+    <li><strong>name</strong>: The attribute's name inside the vertex shader.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLint glGetUniformLocation(GLuint program, const GLchar* name)</strong></h5><br/>  
+<ul>  
+    <li><strong>program</strong>: The program name/id generated by the <strong>glCreateProgram</strong> function.</li>
+    <li><strong>name</strong>: The uniform's name inside the shaders.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Once we have the locations to our attributes and uniforms, we can do use these locations to set the values we want. OpenGL gives to us 28 different function to set the values of our attributes and uniforms. Those functions are separated in groups which let you define constant values (uniforms or attributes) or dynamic values (attributes only). To use dynamic attributes you need enable them for a while. You could ask what is the difference between the uniforms, which are always constants, and the constants attributes. Well, the answer is: Good question! Just like the culling GL_FRONT_AND_BACK, this is one thing which I can't understand why the OpenGL continue using it. There are no real difference on the performance of uniforms and constant attributes, or on the memory size and these kind of impacts. So my big advice here is: let the attributes to dynamic values only! If you have a constant value, use the uniforms!
+
+Plus, have two things which make the uniforms the best choice to constant values: Uniforms can be used 128 times in the vertex shader but the attributes just 8 times and the other reason is because attributes can't be arrays. I'll explain this fact later on. For now, although by default the OpenGL does use the attributes as constants, they was not made for this purpose, they was made to be dynamic.
+
+Anyway, I'll show how to set the dynamic attributes, uniforms and even the useless constant attributes. Uniforms can be used with any of the data types or even be a structure or an array of any of those. Here are the functions to set the uniforms values:
+
+
+<table width="675">  
+<tr>  
+<th>Defining the Uniforms Values</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glUniform{1234}{if}(GLint location, T value[N])</strong></h5><br/>  
+<ul>  
+    <li><strong>location</strong>: The uniform location retrieved by the <strong>glGetUniformLocation</strong> function.</li>
+    <li><strong>value[N]</strong>: The value you want to set based on the last letter of the function name, <em>i</em> = GLint, <em>f</em> = GLfloat. You must repeat this parameter N times, according to the number specified in the function name {1234}.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glUniform{1234}{if}v(GLint location, GLsizei count, const T* value)</strong></h5><br/>  
+<ul>  
+    <li><strong>location</strong>: The uniform location retrieved by the <strong>glGetUniformLocation</strong> function.</li>
+    <li><strong>count</strong>: The length of the array which you are setting. This will be 1 if you want to set only a single uniform. Values greater than 1 means you want to set values to an array.</li>
+    <li><strong>value</strong>: A pointer to the data you want to set. If you are setting vector uniforms (vec3, for example), each set of 3 values will represent one vec3 in the shaders. The data type of the values must match with the letter in the function name, <em>i</em> = GLint, <em>f</em> = GLfloat.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glUniformMatrix{234}fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value)</strong></h5><br/>  
+<ul>  
+    <li><strong>location</strong>: The uniform location retrieved by the <strong>glGetUniformLocation</strong> function.</li>
+    <li><strong>count</strong>: The number of matrices which you are setting. This will be 1 if you want to set only one mat{234} into the shader. Values greater than 1 means you want to set values to an array of matrices, arrays are defined as mat{234}["<em>count</em>"] in the shaders.</li>
+    <li><strong>transpose</strong>: This parameter must be GL_FALSE, it is an internal convention just to compatibility with desktop version.</li>
+    <li><strong>value</strong>: A pointer to your data.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Many question, I know... Let me explain it step by step.  
+The above table shows exactly 19 OpenGL functions. The notation {1234} means you have to write one of these number in the function name, followed by {if} which means you have to choose one of those letters to write the function name and the final "v" of "fv" means you have to write one of both anyway. The [N] in the parameter means you have to repeat that parameter according to the number {1234} in the function name. Here are the complete list of 19 functions:
+
+
+<ul>  
+    <li><strong>glUniform1i(GLint location, GLint x)</strong></li>
+    <li><strong>glUniform1f(GLint location, GLfloat x)</strong></li>
+    <li><strong>glUniform2i(GLint location, GLint x, GLint y)</strong></li>
+    <li><strong>glUniform2f(GLint location, GLfloat x, GLfloat y)</strong></li>
+    <li><strong>glUniform3i(GLint location, GLint x, GLint y, GLint z)</strong></li> 
+    <li><strong>glUniform3f(GLint location, GLfloat x, GLfloat y, GLfloat z)</strong></li>
+    <li><strong>glUniform4i(GLint location, GLint x, GLint y, GLint z, GLint w)</strong></li>
+    <li><strong>glUniform4f(GLint location, GLfloat x, GLfloat y, GLfloat z, GLfloat w)</strong></li>
+    <li><strong>glUniform1iv(GLint location, GLsizei count, const GLint* v)</strong></li>
+    <li><strong>glUniform1fv(GLint location, GLsizei count, const GLfloat* v)</strong></li>
+    <li><strong>glUniform2iv(GLint location, GLsizei count, const GLint* v)</strong></li>
+    <li><strong>glUniform2fv(GLint location, GLsizei count, const GLfloat* v)</strong></li>
+    <li><strong>glUniform3iv(GLint location, GLsizei count, const GLint* v)</strong></li>
+    <li><strong>glUniform3fv(GLint location, GLsizei count, const GLfloat* v)</strong></li>
+    <li><strong>glUniform4iv(GLint location, GLsizei count, const GLint* v)</strong></li>
+    <li><strong>glUniform4fv(GLint location, GLsizei count, const GLfloat* v)</strong></li>
+    <li><strong>glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value)</strong></li>
+    <li><strong>glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value)</strong></li>
+    <li><strong>glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat* value)</strong></li>
+</ul>
+
+
+Wow!!!  
+By this perspective, can seems so many functions to learn all, but trust me, it's not!  
+I prefer look at that table. If I want to set a single uniform which is not of matrix data type I use <strong>glUniform{1234}{if}</strong> according to what I want, 1 = <strong>float/bool/int</strong>, 2 = <strong>vec2/bvec2/ivec2</strong>, 3 = <strong>vec3/bvec3/ivec3</strong> and 4 = <strong>vec4/bvec4/ivec4</strong>. Very simple! If I want to set an array I just place a "v" (of vector) at the end of my last reasoning, so I'll use <strong>glUniform{1234}{if}v</strong>. And finally if what I want is set a matrix data type, being an array or not, I surely will use <strong>glUniformMatrix{234}fv</strong> according to what I want, 2 = <strong>mat2</strong>, 3 = <strong>mat3</strong> and 4 =<strong>mat4</strong>. To define an array you need to remember that the count of your array must be informed to one of above functions by the parameter <strong>count</strong>. Seems more simple now, right?
+
+This is all about how to set an uniform into the shaders. Remember two important things: the same uniform can be used by both shaders, to do this just declare it into both. And the second thing is the most important, the uniforms will be set to the currently program object in use. So you MUST to start using a program before set the uniforms and attributes values to it. To use a program object you remember, right? Just call <strong>glUseProgram</strong> informing the desired name/id.
+
+Now let's see how to set up the values to attributes. Attributes can be used only with the data types <strong>float</strong>, <strong>vec2</strong>, <strong>vec3</strong>, <strong>vec4</strong>, <strong>mat2</strong>, <strong>mat3</strong>, and <strong>mat4</strong>. Attributes cannot be declared as arrays or structures. Following are the functions to define the attributes values.
+
+
+<table width="675">  
+<tr>  
+<th>Defining the Attributes Values</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glVertexAttrib{1234}f(GLuint index, GLfloat value[N])</strong></h5><br/>  
+<ul>  
+    <li><strong>index</strong>: The attribute's location retrieved by the <strong>glGetUniformLocation</strong> function or defined with <strong>glBindAttribLocation</strong>.</li>
+    <li><strong>value[N]</strong>: The value you want to set. You must repeat this parameter N times, according to the number specified in the function name {1234}.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glVertexAttrib{1234}fv(GLuint index, const GLfloat* values)</strong></h5><br/>  
+<ul>  
+    <li><strong>index</strong>: The attribute's location retrieved by the <strong>glGetUniformLocation</strong> function or defined with <strong>glBindAttribLocation</strong>.</li>
+    <li><strong>values</strong>: A pointer to an array containing the values you want to set up. Only the necessary elements in the array will be used, for example, in case of setting a vec3 if you inform an array of 4 elements, only the first three elements will be used. If the shader need to make automatically fills, it will use the identity of vec4 (x = 0, y = 0, z = 0, z = 1), for example, in case you setting a vec3 if you inform an array of 2 elements, the third elements will be filled with value 0. To matrices, the auto fill will use the matrix identity.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid* ptr)</strong></h5><br/>  
+<ul>  
+    <li><strong>index</strong>: The attribute's location retrieved by the <strong>glGetUniformLocation</strong> function or defined with <strong>glBindAttribLocation</strong>.</li>
+    <li><strong>size</strong>: This is the size of each element. Here the values can be:
+<ul>  
+    <li><strong>1</strong>: to set up float in shader.</li>
+    <li><strong>2</strong>: to set up vec2 in shader.</li>
+    <li><strong>3</strong>: to set up vec3 in shader.</li>
+    <li><strong>4</strong>: to set up vec4 in shader.</li>
+</ul></li>  
+    <li><strong>type</strong>: Specify the OpenGL data type used in the informed array. Valid values are:
+<ul>  
+    <li><strong>GL_BYTE</strong></li>
+    <li><strong>GL_UNSIGNED_BYTE</strong></li>
+    <li><strong>GL_SHORT</strong></li>
+    <li><strong>GL_UNSIGNED_SHORT</strong></li>
+    <li><strong>GL_FIXED</strong></li>
+    <li><strong>GL_FLOAT</strong></li>
+</ul></li>  
+    <li><strong>normalized</strong>: If set to true (GL_TRUE) this will normalize the non-floating point data type. The normalize process will place the converted float number in the range 0.0 - 1.0. If this is set to false (GL_FALSE) the non-floating point data type will be converted directly to floating points.</li>
+    <li><strong>stride</strong>: It means the interval of elements in the informed array. If this is 0, then the array elements will be used sequentially. If this value is greater than 0, the elements in the array will be used respecting this stride. This values must be in the basic machine units (bytes). </li>
+    <li><strong>ptr</strong>: The pointer to an array containing your data.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+The above table has the same rules as the uniforms notations. This last table have 9 functions described, which 8 are to set constant values and only one function to set dynamic values. The function to set dynamic values is <strong>glVertexAttribPointer</strong>. Here are the complete list of functions:
+
+
+<ul>  
+    <li><strong>glVertexAttrib1f(GLuint index, GLfloat x)</strong></li>
+    <li><strong>glVertexAttrib2f(GLuint index, GLfloat x, GLfloat y)</strong></li>
+    <li><strong>glVertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z)</strong></li>
+    <li><strong>glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w)</strong></li>
+    <li><strong>glVertexAttrib1fv(GLuint index, const GLfloat* values)</strong></li>
+    <li><strong>glVertexAttrib2fv(GLuint index, const GLfloat* values)</strong></li>
+    <li><strong>glVertexAttrib3fv(GLuint index, const GLfloat* values)</strong></li>
+    <li><strong>glVertexAttrib4fv(GLuint index, const GLfloat* values)</strong></li>
+    <li><strong>glVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const GLvoid* ptr)</strong></li>
+</ul>
+
+
+The annoying thing here is the constant value is the default behavior to the shaders, if you want to use dynamic values to attributes you will need to temporarily enable this feature. Dynamic values will be set as per-vertex. You must to use the following functions to enable and disable the dynamic values behavior:
+
+
+<table width="675">  
+<tr>  
+<th>Variable Values Feature</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glEnableVertexAttribArray(GLuint index)</strong></h5><br/>  
+<ul>  
+    <li><strong>index</strong>: The attribute's location retrieved by the <strong>glGetUniformLocation</strong> function or defined with <strong>glBindAttribLocation</strong>.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glDisableVertexAttribArray(GLuint index)</strong></h5><br/>  
+<ul>  
+    <li><strong>index</strong>: The attribute's location retrieved by the <strong>glGetUniformLocation</strong> function or defined with <strong>glBindAttribLocation</strong>.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+So, before using <strong>glVertexAttribPointer</strong> to define per-vertex values to the attributes, you must enable the location of the desired attribute to accept dynamic values by using the <strong> glEnableVertexAttribArray</strong>.
+
+To the pair of VSH and FSH shown early, we could use the following code to setup their values:
+
+
+<pre class="brush:csharp">  
+// Assume which _program defined early in another code example.
+
+GLuint mvpLoc, mapsLoc, vertexLoc, textureLoc;
+
+// Gets the locations to uniforms.
+mvpLoc = glGetUniformLocation(_program, "u_mvpMatrix");  
+mapsLoc = glGetUniformLocation(_program, "u_maps");
+
+// Gets the locations to attributes.
+vertexLoc = glGetAttribLocation(_program, "a_vertex");  
+textureLoc = glGetAttribLocation(_program, "a_texture");
+
+// ...
+// Later, in the render time...
+// ...
+
+// Sets the ModelViewProjection Matrix.
+// Assume which "matrix" variable is an array with
+// 16 elements defined, matrix[16].
+glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, matrix);
+
+// Assume which _texture1 and _texture2 are two texture names/ids.
+// The order is very important, first you activate
+// the texture unit and then you bind the texture name/id.
+glActiveTexture(GL_TEXTURE0);  
+glBindTexture(GL_TEXTURE_2D, _texture1);  
+glActiveTexture(GL_TEXTURE1);  
+glBindTexture(GL_TEXTURE_2D, _texture2);
+
+// The {0,1} correspond to the activated textures units.
+int textureUnits[2] = {0,1};
+
+// Sets the texture units to an uniform.
+glUniform1iv(mapsLoc, 2, &textureUnits;);
+
+// Enables the following attributes to use dynamic values.
+glEnableVertexAttribArray(vertexLoc);  
+glEnableVertexAttribArray(textureLoc);
+
+// Assume which "vertexArray" variable is an array of vertices
+// composed by several sequences of 3 elements (X,Y,Z)
+// Something like {0.0,0.0,0.0, 1.0,2.0,1.0, -1.0,-2.0,-1.0, ...}
+glVertexAttribPointer(vertexLoc, 3, GL_FLOAT, GL_FALSE, 0, vertexArray);
+
+// Assume which "textureArray" is an array of texture coordinates
+// composed by several sequences of 2 elements (S,T)
+// Something like {0.0,0.0, 0.3,0.2,  0.6, 0.3,  0.3,0.7, ...}
+glVertexAttribPointer(textureLoc, 2, GL_FLOAT, GL_FALSE, 0, textureArray);
+
+// Assume which "indexArray" is an array of indices
+// Something like {1,2,3,  1,3,4,  3,4,5,  3,5,6,  ...}
+glDrawElements(GL_TRIANGLES, 64, GL_UNSIGNED_SHORT, indexArray);
+
+// Disables the vertices attributes.
+glDisableVertexAttribArray(vertexLoc);  
+glDisableVertexAttribArray(textureLoc);  
+</pre>
+
+
+I had enabled and disabled the dynamic values to attributes just to show you how to do. As I said before, enable and disable features in OpenGL are expansive tasks, so you could want enable the dynamic values to the attributes once, maybe in time you get its location, for example. I prefer enable them once.
+
+<br/><a name="using_buffer_objects"></a>  
+<h3>Using the Buffer Objects</h3><a href="#list_contents">top</a>  
+To use the buffer objects is very simple! All that you need is bind the buffer objects again. Do you remember the buffer object hook is a double one? So you can bind a <strong>GL_ARRAY_BUFFER</strong> and a <strong>GL_ELEMENT_ARRAY_BUFFER</strong> at the same time. Then you call the <strong>glDraw*</strong> informing the starting index of the buffer object which you want to initiate. You'll need to inform the start index instead of an array data, so the start number must be a pointer to void. The start index must be in the basic machine units (bytes).
+
+To the above code of attributes and uniforms, you could make something like this:
+
+
+<pre class="brush:csharp">  
+GLuint arrayBuffer, indicesBuffer;
+
+// Generates the name/ids to the buffers
+glGenBuffers(1, &arrayBuffer;);  
+glGenBuffers(1, &indicesBuffer;);
+
+// Assume we are using the best practice to store all informations about
+// the object into a single array: vertices and texture coordinates.
+// So we would have an array of {x,y,z,s,t,  x,y,z,s,t,  ...}
+// This will be our "arrayBuffer" variable.
+// To the "indicesBuffer" variable we use a
+// simple array {1,2,3,  1,3,4,  ...}
+
+// ...
+// Proceed with the retrieving attributes and uniforms locations.
+// ...
+
+// ...
+// Later, in the render time...
+// ...
+
+// ...
+// Uniforms definitions
+// ...
+
+glBindBuffer(GL_ARRAY_BUFFER, arrayBuffer);  
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indicesBuffer);
+
+int fsize = sizeof(float);  
+GLsizei str = 5 * fsize;  
+void * void0 = (void *) 0;  
+void * void3 = (void *) 3 * fsize;
+
+glVertexAttribPointer(vertexLoc, 3, GL_FLOAT, GL_FALSE, str, void0);  
+glVertexAttribPointer(textureLoc, 2, GL_FLOAT, GL_FALSE, str, void3);
+
+glDrawElements(GL_TRIANGLES, 64, GL_UNSIGNED_SHORT, void0);  
+</pre>
+
+
+If you are using an OOP language you could create elegant structures with the concepts of buffer objects and attributes/uniforms.
+
+OK, those are the basic concepts and instructions about the shaders and program objects. Now let's go to the last part (finally)! Let's see how to conclude the render using the EGL API.
+
+<br/><a name="rendering"></a>  
+<h2><strong>Rendering</strong></h2><a href="#list_contents">top</a>  
+I'll show the basic kind of render, a render to the device's screen. As you noticed before in this serie of tutorials, you could render to an off-screen surfaces like a frame buffer or a texture and then save it to a file, or create an image in the device's screen, whatever you want.
+
+<br/><a name="pre-render"></a>  
+<h3>Pre-Render</h3><a href="#list_contents">top</a>  
+I like to think in the rendering as two steps. The first is the Pre-Render, in this step you need to clean any vestige from the last render. This is important because exists conservation in the frame buffers. You remember what is a frame buffer, right? A colletion of images from render buffers. So when you make a complete render, the images in render buffer still alive even after the final image have been presented to its desired surface. What the Pre-Render step does is just clean up all the render buffers. Unless you want, for some reason, reuse the previous image into the render buffers.
+
+Make the clean up in the frame buffer is very simple. This is the function you will use:
+
+
+<table width="675">  
+<tr>  
+<th>Clearing the Render Buffers</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glClear(GLbitfield mask)</strong></h5><br/>  
+<ul>  
+    <li><strong>mask</strong>: The mask represent the buffers you want to clean. This parameter can be:
+<ul>  
+    <li><strong>GL_COLOR_BUFFER_BIT</strong>: To clean the Color Render Buffer.</li>
+    <li><strong>GL_DEPTH_BUFFER_BIT</strong>: To clean the Depth Render Buffer.</li>
+    <li><strong>GL_STENCIL_BUFFER_BIT</strong>: To clean the Stencil Render Buffer.</li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+As now you know well, every instruction related to one of the Port Crane Hooks will affect the last object bound. So before call the above function, make sure you have bound the desired frame buffer. You can clean many buffers at once, as the mask parameter is bit informations, you can use the bitwise operator OR "|". Something like this:
+
+
+<pre class="brush:csharp">  
+glBindFramebuffer(GL_FRAMEBUFFER, _frameBuffer);  
+glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);  
+</pre>
+
+
+OpenGL also gives to us others functions to make the clean up. But the above function is pretty good for any cases.  
+The Pre-Render step should be called before any <strong>glDraw*</strong> calls. Once the render buffer is clean, it's time to draw your 3D objects. The next step is the drawing phase, but it is not one of the two render steps I told you before, it is just the drawing.
+
+<br/><a name="drawing"></a>  
+<h3>Drawing</h3><a href="#list_contents">top</a>  
+I've showed it several times before in this tutorial, but now is time to drill deep inside it. The triggers to drawing in OpenGL is composed by two functions:
+
+
+<table width="675">  
+<tr>  
+<th>Clearing the Render Buffers</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glDrawArrays(GLenum mode, GLint first, GLsizei count)</strong></h5><br/>  
+<ul>  
+    <li><strong>mode</strong>: This parameter specify which primitive will be rendered and how its structure is organized. This parameter can be:
+<ul>  
+    <li><strong>GL_POINTS</strong>: Draw points. Points are composed by single sequences of 3 values (x,y,z).</li>
+    <li><strong>GL_LINES</strong>: Draw Lines. Lines are composed by two sequences of 3 values (x,y,z / x,y,z).</li>
+    <li><strong>GL_LINE_STRIP</strong>: Draw Lines forming a strip. Lines are composed by two sequences of 3 values (x,y,z / x,y,z).</li>
+    <li><strong>GL_LINE_LOOP</strong>: Draw Lines closing a loop of them. Lines are composed by two sequences of 3 values (x,y,z / x,y,z).</li>
+    <li><strong>GL_TRIANGLES</strong>: Draw Triangles. Triangles are composed by three sequences of 3 values (x,y,z / x,y,z / x,y,z).</li>
+    <li><strong>GL_TRIANGLE_STRIP</strong>: Draw Triangles forming a strip. Triangles are composed by three sequences of 3 values (x,y,z / x,y,z / x,y,z).</li>
+    <li><strong>GL_TRIANGLE_FAN</strong>: Draw Triangles forming a fan. Triangles are composed by three sequences of 3 values (x,y,z / x,y,z / x,y,z).</li>
+</ul></li>  
+    <li><strong>first</strong>: Specifies the starting index in the enabled vertex arrays.</li>
+    <li><strong>count</strong>: Represents number of vertices to be draw. This is very important, it represents the number of vertices elements, not the number of the elements in the array of vertices, take care to don't confuse both. For example, if you are drawing a single triangle this should be 3, because a triangle is formed by 3 vertices. But if you are drawing a square (composed by two triangles) this should be 6, because is formed by two sequences of 3 vertices, a total of 6 elements, and so on.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid* indices)</strong></h5><br/>  
+<ul>  
+    <li><strong>mode</strong>: This parameter specify which primitive will be rendered and how its structure is organized. This parameter can be:
+<ul>  
+    <li><strong>GL_POINTS</strong>: Draw points. Points are composed by single sequences of 3 values (x,y,z).</li>
+    <li><strong>GL_LINES</strong>: Draw Lines. Lines are composed by two sequences of 3 values (x,y,z / x,y,z).</li>
+    <li><strong>GL_LINE_STRIP</strong>: Draw Lines forming a strip. Lines are composed by two sequences of 3 values (x,y,z / x,y,z).</li>
+    <li><strong>GL_LINE_LOOP</strong>: Draw Lines closing a loop of them. Lines are composed by two sequences of 3 values (x,y,z / x,y,z).</li>
+    <li><strong>GL_TRIANGLES</strong>: Draw Triangles. Triangles are composed by three sequences of 3 values (x,y,z / x,y,z / x,y,z).</li>
+    <li><strong>GL_TRIANGLE_STRIP</strong>: Draw Triangles forming a strip. Triangles are composed by three sequences of 3 values (x,y,z / x,y,z / x,y,z).</li>
+    <li><strong>GL_TRIANGLE_FAN</strong>: Draw Triangles forming a fan. Triangles are composed by three sequences of 3 values (x,y,z / x,y,z / x,y,z).</li>
+</ul></li>  
+    <li><strong>count</strong>: Represents number of vertices to be draw. This is very important, it represents the number of vertices elements, not the number of the elements in the array of vertices, take care to don't confuse both. For example, if you are drawing a single triangle this should be 3, because a triangle is formed by 3 vertices. But if you are drawing a square (composed by two triangles) this should be 6, because is formed by two sequences of 3 vertices, a total of 6 elements, and so on.</li>
+    <li><strong>type</strong>: Represent the OpenGL's data type which is used in the array of indices. This parameter can be:
+<ul>  
+    <li><strong>GL_UNSIGNED_BYTE</strong>: To indicate a GLubyte.</li>
+    <li><strong>GL_UNSIGNED_SHORT</strong>: To indicate a GLushort.</li>
+</ul></li>  
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Many questions, I know. First let me introduce how these functions work. One of the most important things in the programmable pipeline is defined here, the number of times which the VSH will be executed! This is done by the parameter <em>count</em>. So if you specify 128 to it, the currently program in use will process its VSH 128 times. Of course, the GPU will optimize this process so much as possible, but in general words, your VSH will be processed 128 times to process all your defined attributes and uniforms. And why I said to take care about the difference between number of vertices elements and number of the elements in the array of vertices? Is simple, you could have an array of vertices with 200 elements, but for some reason you want to construct just a triangle at this time, so <em>count</em> will be 3, instead 200. This is even more usefull if you are using an array of indices. You could have 8 elements in the array of vertices, but the array of indices specifies 24 elements, in this case the parameter <em>count</em> will be 24. In general words, it's the number of vertices elements you want to draw.
+
+If you are using the <strong>glDrawArrays</strong> the <em>first</em> parameter works like an initial stride to your per-vertex attributes. So if you set it to 2, for example, the values in the vertex shader will start by the index 2 in the array you specified in <strong>glVertexAttribPointer</strong>, instead start by 0 as default.
+
+If you are using the <strong>glDrawElements</strong> the <em>first</em> parameter will work like an initial stride to the array of indices, and not directly to your per-vertex values. The <em>type</em> identifies the data type, in really it's an optimization hint. If your array of indices has less than 255 elements is a very good idea to use <strong>GL_UNSIGNED_BYTE</strong>. Some implementations of OpenGL also support a third data type: <strong>GL_UNSIGNED_INT</strong>, but this is not very common.
+
+OK, now let's talk about the construction modes, defined in the <strong>mode</strong> parameter. It's a hint to use in the construction of your meshes. But the modes are not so useful to all kind of meshes. The following images could help you to understand:
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/primitives_lines_strip_example.jpg" alt="Line construction modes." title="primitives_lines_strip_example" width="600" height="400" class="size-full wp-image-1242"/>
+
+The image above shows what happens when we draw using one of the line drawing modes. All the drawing in the image above was made with the sequence of {v0,v1,v2,v3,v4,v5} as the array of vertices, supposing which each vertex has an unique values to x,y,z coordinates. As I told before, the unique mode which is compatible with any kind of draw is the GL_LINES, the others modes is for optimization in some specific situations. Optimize? Yes, look, using the GL_LINES the number of drawn lines was 3, using GL_LINE_STRIP the number of drawn lines was 5 and with GL_LINE_LOOP was 6, always using the same array of vertices and the same number of VSH loops.
+
+Now the drawing modes to triangles are similar, look:
+
+<img src="https://web.archive.org/web/20140302041553im_/http://db-in.com/images/primitives_strip_example.jpg" alt="Triangle construction mode." title="primitives_strip_example" width="600" height="400" class="size-full wp-image-1246"/>
+
+The image above shows what happens when we draw using one of the triangles drawing modes. All the indicated drawing in the image was made with the sequence of {v0,v1,v2,v3,v4,v5} as the array of vertices, supposing which each vertex has an unique values to x,y,z coordinates. Here again, the same thing, just the basic <strong>GL_TRIANGLES</strong> is useful to any kind of mesh, the others modes is for optimization in some specific situations. Using the <strong>GL_TRIANGLES_STRIP</strong> we need to reuse the last formed line, in the above example we must to draw using an array of index like {0,1,2,  0,2,3,  3,2,4,...}. Using the <strong>GL_TRIANGLES_FAN</strong> we must to always return to the first vertex, in the image we could use {0,1,2,  0,2,3,  0,3,4,...} as our array of indices.
+
+My advice here is to use <strong>GL_TRIANGLES</strong> and <strong>GL_LINES</strong> as much as possible. The optimization gain of <strong>STRIP</strong>, <strong>LOOP</strong> and <strong>FAN</strong> could be achieved by optimizing the OpenGL draw in other areas, with other techniques, like reducing the number of polygons into your meshes or optimizing your shaders processing.
+
+<br/><a name="render"></a>  
+<h3>Render</h3><a href="#list_contents">top</a>  
+This last step is just to present the final result of the frame buffer to the screen, even if you are not explicitely using a frame buffer. I've explained this on my EGL article. If you lost it, <a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/khronos-egl-and-apple-eagl/#rendering" target="_blank">click here to egl</a> or if you are using Objective-C <a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/khronos-egl-and-apple-eagl/#renderingeagl" target="_blank">click here to eagl</a>.
+
+So I will not repeat the same content here. But I want to remember for who of you which are working on EAGL API, before to call the <strong>presentRenderbuffer:GL_RENDERBUFFER</strong>, you must to bind the color render buffer and, obviously, you need to bind the frame buffer too. This is because the render buffer stay "inside" the frame buffer, you remember it, right? The final code will be something like this:
+
+
+<pre class="brush:csharp">  
+- (void) makeRender
+{
+    glBindFramebuffer(_framebuffer);
+    glBindRenderbuffer(_colorRenderbuffer);
+    [_context presentRenderbuffer:GL_RENDERBUFFER];
+}
+</pre>
+
+
+
+For who of you which are using the EGL API, the process is just swap the internal buffers, using the <strong>glSwapBufers</strong> function. At my EGL article I explain that too.
+
+OK guys! This is the basic about the render. OpenGL also provides something called Multisample, it's a special kind of render to produce anti-aliased images. But this is an advanced discussion. I'll let it to the next part.
+
+This tutorial is already long enough, so let's go to the conclusion and our final revision.
+
+<br><a name="conclusion"></a>  
+<h2><strong>Conclusion</strong></h2><a href="#list_contents">top</a>  
+Here we are! I don't know how many hours you spent reading this, but I have to admit, it's a big tiring reading. So I want thank you, thank you for reading. Now, as we are used, let's remember from everything:
+
+
+<ul>  
+    <li>First we saw the OpenGL's data types and the programmable pipeline.</li>
+    <li>Your meshes (primitives) data must be an array of informations. It should be optimized to form an Array of Structures.</li>
+    <li>The OpenGL works as a Port Crane which has multiple arms with hooks. Four great hooks: Frame Buffer Hook, Render Buffer Hook, Buffer Object Hook and Texture Hook.</li>
+    <li>The Frame Buffers holds 3 Render Buffers: Color, Depth and Stencil. They form an image coming from the OpenGL's render.</li>
+    <li>Textures must to have specific formats before be uploaded to OpenGL (a specific pixel order and color bytes per pixel). Once an OpenGL's texture was created, you need to activate a Texture Unit which will be processed in the shaders.</li>
+    <li>The Rasterize is a big process which includes several tests and per-fragment operations.</li>
+    <li>Shaders are used in pairs and must be inside a Program Object. Shaders use their own language called GLSL or GLSL ES.</li>
+    <li>You can define dynamic values only in Attributes into VSH (per-vertex values). The Uniforms are always constant and can be used in both shaders kind.</li>
+    <li>You need to clean the buffers before start to draw new things to it.</li>
+    <li>You will call a <strong>glDraw*</strong> function to each 3D object you want to render.</li>
+    <li>The final render step is made using EGL API (or EAGL API, in iOS cases).</li>
+</ul>
+
+
+My last advice is to you check again the most important points, if you have some doubt, just ask, let a comment bellow and if I could help I'll be glad.
+
+<br/>  
+<h2><strong>On the Next</strong></h2>  
+
+<p>All I showed here is an intermediate level about OpenGL. Using these knowledge you can create great 3D applications. I think this is around the half of the OpenGL study. In the next part, an advanced tutorial, I'll talk about everything I skipped here: the 3D textures, multisampling, render to off-screen surfaces, per-fragment operations in deeply and some best practices I've learned developing my 3D engine.</p>
+
+<p>Probably I'll make another two articles before the third part of this serie. One about the textures, the complexity of binary images and compressed formats like PVR textures. And another one about the ModelViewProjection Matrix, Quaternions and matrices operations, it's more a mathematical article, for who likes, will appreciate.</p>
+
+<p>Thanks again for reading and see you in the next part!</p>
+
+<p><strong>NEXT PART:</strong> <a href="https://web.archive.org/web/20140302041553/http://blog.db-in.com/all-about-opengl-es-2-x-part-3" target="_blank">Part 3 - Jedi skills in OpenGL ES 2.0 and 2D graphics (Advanced)</a></p>
+
+<iframe scrolling="no" src="https://web.archive.org/web/20140302041553if_/http://db-in.com/downloads/apple/tribute_to_jobs.html" width="100%" height="130px"></iframe>
+          </div>
+          <footer class="post-footer">
+            <div itemprop="author" itemscope itemtype="http://schema.org/Person" class="post-author">
+              
+              <div class="post-author-info">
+                <h4 class="post-footer-heading">Written By</h4>
+                <a href="" itemprop="url" class="post-author-name">
+                  <span itemprop="name">Diney Bomfim</span>
+                </a>
+                <p itemprop="description" class="post-author-bio"></p>
+                
+                
+                <p class="post-info">
+                  <b class="post-info-title">Published on</b>
+                  <time class="post-date">February 04, 2014</time>
+                </p>
+              </div>
+            </div>
+            <div class="post-social">
+              <h4 class="post-footer-heading">Spread the word</h4>
+              <a href="#" data-action="share-twitter"><i class="fa fa-fw fa-lg fa-twitter"></i></a>
+              <a href="#" data-action="share-facebook"><i class="fa fa-fw fa-lg fa-facebook"></i></a>
+              <a href="#" data-action="share-gplus"><i class="fa fa-fw fa-lg fa-google-plus"></i></a>
+            </div>
+          </footer>
+        </section>
+      
+      <section itemprop="comment" class="post-comments">
+        <div id="disqus_thread"></div>
+      </section>
+    </article>
+
+    <footer role="contentinfo" class="footer">
+  <p><small>© db-in 2014. All Rights Reserved.</small></p>
+</footer>
+
+  </div>
+</section>
+
+<script type="text/javascript">
+  
+var ga_ua = 'UA-11062449-8';
+
+
+var disqus_shortname = 'dineybomfim';
+
+
+  
+    var disqus_identifier = '7';
+  
+
+  if(typeof DISQUS !== 'object') {
+    (function () {
+    var s = document.createElement('script'); s.async = true;
+    s.type = 'text/javascript';
+    s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+    }());
+  }
+</script>
+
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script src="/web/20140302041553js_/http://blog.db-in.com/shared/vendor/jquery/jquery.js"></script>
+
+    <script src="/web/20140302041553js_/http://blog.db-in.com/assets/js/a8765325.foot-scripts.min.js"></script>
+
+    <script type="text/javascript">
+      
+var ga_ua = 'UA-11062449-8';
+
+
+var disqus_shortname = 'dineybomfim';
+
+
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','//web.archive.org/web/20140302041553/http://www.google-analytics.com/analytics.js','ga');
+      ga('create', ga_ua);
+      ga('send', 'pageview');
+
+      (function () {
+      var s = document.createElement('script'); s.async = true;
+      s.type = 'text/javascript';
+      s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+      (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+      }());
+    </script>
+  </body>
+</html>
+<!--
+     FILE ARCHIVED ON 04:15:53 Mar 02, 2014 AND RETRIEVED FROM THE
+     INTERNET ARCHIVE ON 23:20:10 Apr 14, 2026.
+     JAVASCRIPT APPENDED BY WAYBACK MACHINE, COPYRIGHT INTERNET ARCHIVE.
+
+     ALL OTHER CONTENT MAY ALSO BE PROTECTED BY COPYRIGHT (17 U.S.C.
+     SECTION 108(a)(3)).
+-->
+<!--
+playback timings (ms):
+  captures_list: 0.836
+  exclusion.robots: 0.062
+  exclusion.robots.policy: 0.046
+  esindex: 0.013
+  cdx.remote: 7.484
+  LoadShardBlock: 211.233 (6)
+  PetaboxLoader3.datanode: 188.938 (8)
+  load_resource: 174.053 (2)
+  PetaboxLoader3.resolve: 123.767
+  nav: 0.229 (6)
+-->
