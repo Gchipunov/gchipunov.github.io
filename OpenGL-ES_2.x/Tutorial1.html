@@ -1,0 +1,725 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head><script src="//archive.org/includes/athena.js" type="text/javascript"></script>
+<script type="text/javascript">window.addEventListener('DOMContentLoaded',function(){var v=archive_analytics.values;v.service='wb';v.server_name='wwwb-app254.us.archive.org';v.server_ms=570;archive_analytics.send_pageview({});});</script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/bundle-playback.js?v=2N_sDSC0" charset="utf-8"></script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/wombat.js?v=txqj7nKC" charset="utf-8"></script>
+<script>window.RufflePlayer=window.RufflePlayer||{};window.RufflePlayer.config={"autoplay":"on","unmuteOverlay":"hidden","showSwfDownload":true};</script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/ruffle/ruffle.js"></script>
+<script type="text/javascript">
+    __wm.init("https://web.archive.org/web");
+  __wm.wombat("http://blog.db-in.com:80/all-about-opengl-es-2-x-part-1/","20140302074424","https://web.archive.org/","web","https://web-static.archive.org/_static/",
+	      "1393746264");
+</script>
+<link rel="stylesheet" type="text/css" href="https://web-static.archive.org/_static/css/banner-styles.css?v=1utQkbB3" />
+<link rel="stylesheet" type="text/css" href="https://web-static.archive.org/_static/css/iconochive.css?v=3PDvdIFv" />
+<!-- End Wayback Rewrite JS Include -->
+
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>All about OpenGL ES 2.x - (part 1/3)</title>
+
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+    <meta name="description" content="">
+
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="All about OpenGL ES 2.x - (part 1/3)">
+    <meta name="twitter:description" content="">
+
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="All about OpenGL ES 2.x - (part 1/3)">
+    <meta property="og:description" content="">
+
+    
+<meta name="twitter:site" content="@dineybomfim">
+
+
+<meta name="twitter:creator" content="@dineybomfim2">
+
+
+<meta name="google-site-verification" content="">
+
+
+<meta property="fb:admins" content="">
+
+
+    <link href="/web/20140302074424im_/http://blog.db-in.com/favicon.ico" rel="shortcut icon" type="image/x-icon">
+    <link href="/web/20140302074424im_/http://blog.db-in.com/apple-touch-icon-precomposed.png" rel="apple-touch-icon">
+
+    <link href="//web.archive.org/web/20140302074424/http://fonts.googleapis.com/" rel="dns-prefetch">
+    <link href="//web.archive.org/web/20140302074424cs_/http://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic|Open+Sans:700,400&amp;subset=latin,latin-ext" rel="stylesheet">
+
+    <link rel="stylesheet" href="/web/20140302074424cs_/http://blog.db-in.com/assets/css/3c236dc6.main.min.css"/>
+
+    <script src="/web/20140302074424js_/http://blog.db-in.com/assets/js/b14267da.head-scripts.min.js"></script>
+
+    <meta name="generator" content="Ghost 0.3"/>
+<link rel="alternate" type="application/rss+xml" title="RSS" href="/web/20140302074424/http://blog.db-in.com/rss/">
+  </head>
+  <body class="post-template"><!-- BEGIN WAYBACK TOOLBAR INSERT -->
+<script>__wm.rw(0);</script>
+<div id="wm-ipp-base" lang="en" style="display:none;direction:ltr;" toolbar-mode="auto">
+<div id="wm-ipp" style="position:fixed;left:0;top:0;right:0;">
+<div id="donato" style="position:relative;width:100%;height:0;">
+  <div id="donato-base">
+    <iframe id="donato-if" src="https://archive.org/includes/donate.php?as_page=1&amp;platform=wb&amp;referer=https%3A//web.archive.org/web/20140302074424/http%3A//blog.db-in.com/all-about-opengl-es-2-x-part-1"
+	    scrolling="no" frameborder="0" style="width:100%; height:100%">
+    </iframe>
+  </div>
+</div><div id="wm-ipp-inside">
+  <div id="wm-toolbar" style="position:relative;display:flex;flex-flow:row nowrap;justify-content:space-between;" nav="async">
+    <div id="wm-logo" style="/*width:110px;*/padding-top:12px;">
+      <a href="/web/" title="Wayback Machine home page"><img src="https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-200.png" srcset="https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-100.png, https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-150.png 1.5x, https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-200.png 2x" alt="Wayback Machine" style="width:100px" border="0" /></a>
+    </div>
+    <div class="c" style="display:flex;flex-flow:column nowrap;justify-content:space-between;flex:1;">
+      <form class="u" style="display:flex;flex-direction:row;flex-wrap:nowrap;" target="_top" method="get" action="/web/submit" name="wmtb" id="wmtb"><input type="text" name="url" id="wmtbURL" value="http://blog.db-in.com/all-about-opengl-es-2-x-part-1" onfocus="this.focus();this.select();" style="flex:1;"/><input type="hidden" name="type" value="replay" /><input type="hidden" name="date" value="20140302074424" /><input type="submit" value="Go" />
+      </form>
+      <div style="display:flex;flex-flow:row nowrap;align-items:flex-end;">
+                <div class="s" id="wm-nav-captures" style="flex:1;">
+                    <a class="t" href="/web/20140302074424*/http://blog.db-in.com/all-about-opengl-es-2-x-part-1" title="See a list of every capture for this URL">178 captures</a>
+          <div class="r" title="Timespan for captures of this URL">15 Feb 2014 - 18 Apr 2021</div>
+          </div>
+        <div class="k">
+          <a href="" id="wm-graph-anchor">
+            <div id="wm-ipp-sparkline" title="Explore captures for this URL" style="position: relative">
+              <canvas id="wm-sparkline-canvas" width="775" height="27" border="0"></canvas>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="n">
+      <table>
+        <tbody>
+          <!-- NEXT/PREV MONTH NAV AND MONTH INDICATOR -->
+          <tr class="m">
+            <td class="b" nowrap="nowrap">Feb</td>
+            <td class="c" id="displayMonthEl" title="You are here: 07:44:24 Mar 02, 2014">MAR</td>
+            <td class="f" nowrap="nowrap">Apr</td>
+          </tr>
+          <!-- NEXT/PREV CAPTURE NAV AND DAY OF MONTH INDICATOR -->
+          <tr class="d">
+            <td class="b" nowrap="nowrap"><span class="ta"></span></td>
+            <td class="c" id="displayDayEl" style="width:34px;font-size:22px;white-space:nowrap;" title="You are here: 07:44:24 Mar 02, 2014">02</td>
+            <td class="f" nowrap="nowrap"><span class="ta"></span></td>
+          </tr>
+          <!-- NEXT/PREV YEAR NAV AND YEAR INDICATOR -->
+          <tr class="y">
+            <td class="b" nowrap="nowrap">2013</td>
+            <td class="c" id="displayYearEl" title="You are here: 07:44:24 Mar 02, 2014">2014</td>
+            <td class="f" nowrap="nowrap">2015</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="r" style="display:flex;flex-flow:column nowrap;align-items:flex-end;justify-content:space-between;">
+      <div id="wm-btns" style="text-align:right;height:23px;">
+                <span class="xxs">
+          <div id="wm-save-snapshot-success">success</div>
+          <div id="wm-save-snapshot-fail">fail</div>
+          <a id="wm-save-snapshot-open" href="#" title="Share via My Web Archive" >
+            <span class="iconochive-web"></span>
+          </a>
+          <a href="https://archive.org/account/login.php" title="Sign In" id="wm-sign-in">
+            <span class="iconochive-person"></span>
+          </a>
+          <span id="wm-save-snapshot-in-progress" class="iconochive-web"></span>
+        </span>
+                <a class="xxs" href="https://help.archive.org/help/category/the-wayback-machine/" title="Get some help using the Wayback Machine" style="top:-6px;"><span class="iconochive-question" style="color:rgb(87,186,244);font-size:160%;"></span></a>
+        <a id="wm-tb-close" href="#close" style="top:-2px;" title="Close the toolbar"><span class="iconochive-remove-circle" style="color:#888888;font-size:240%;"></span></a>
+      </div>
+      <div id="wm-share" class="xxs">
+        <a href="/web/20140302074424/http://web.archive.org/screenshot/http://blog.db-in.com/all-about-opengl-es-2-x-part-1"
+           id="wm-screenshot"
+           title="screenshot">
+          <span class="wm-icon-screen-shot"></span>
+        </a>
+        <a href="#" id="wm-video" title="video">
+          <span class="iconochive-movies"></span>
+        </a>
+        <a id="wm-share-facebook" href="#" data-url="https://web.archive.org/web/20140302074424/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-1/" title="Share on Facebook" style="margin-right:5px;" target="_blank"><span class="iconochive-facebook" style="color:#3b5998;font-size:160%;"></span></a>
+        <a id="wm-share-twitter" href="#" data-url="https://web.archive.org/web/20140302074424/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-1/" title="Share on Twitter" style="margin-right:5px;" target="_blank"><span class="iconochive-twitter" style="color:#1dcaff;font-size:160%;"></span></a>
+      </div>
+      <div style="padding-right:2px;text-align:right;white-space:nowrap;">
+        <a id="wm-expand" class="wm-btn wm-closed" href="#expand"><span id="wm-expand-icon" class="iconochive-down-solid"></span> <span class="xxs" style="font-size:80%;">About this capture</span></a>
+      </div>
+    </div>
+  </div>
+    <div id="wm-capinfo" style="border-top:1px solid #777;display:none; overflow: hidden">
+        <div id="wm-capinfo-notice" source="api"></div>
+                <div id="wm-capinfo-collected-by">
+    <div style="background-color:#666;color:#fff;font-weight:bold;text-align:center;padding:2px 0;">COLLECTED BY</div>
+    <div style="padding:3px;position:relative" id="wm-collected-by-content">
+            <div style="display:inline-block;vertical-align:top;width:50%;">
+			<span class="c-logo" style="background-image:url(https://archive.org/services/img/alexacrawls);"></span>
+		Organization: <a style="color:#33f;" href="https://archive.org/details/alexacrawls" target="_new"><span class="wm-title">Alexa Crawls</span></a>
+		<div style="max-height:75px;overflow:hidden;position:relative;">
+	  <div style="position:absolute;top:0;left:0;width:100%;height:75px;background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 90%,rgba(255,255,255,255) 100%);"></div>
+	  Starting in 1996, <a href="http://www.alexa.com/">Alexa Internet</a> has been donating their crawl data to the Internet Archive.  Flowing in every day, these data are added to the <a href="http://web.archive.org/">Wayback Machine</a> after an embargo period.
+	</div>
+	      </div>
+      <div style="display:inline-block;vertical-align:top;width:49%;">
+			<span class="c-logo" style="background-image:url(https://archive.org/services/img/alexacrawls)"></span>
+		<div>Collection: <a style="color:#33f;" href="https://archive.org/details/alexacrawls" target="_new"><span class="wm-title">Alexa Crawls</span></a></div>
+		<div style="max-height:75px;overflow:hidden;position:relative;">
+	  <div style="position:absolute;top:0;left:0;width:100%;height:75px;background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 90%,rgba(255,255,255,255) 100%);"></div>
+	  Starting in 1996, <a href="http://www.alexa.com/">Alexa Internet</a> has been donating their crawl data to the Internet Archive.  Flowing in every day, these data are added to the <a href="http://web.archive.org/">Wayback Machine</a> after an embargo period.
+	</div>
+	      </div>
+    </div>
+    </div>
+    <div id="wm-capinfo-timestamps">
+    <div style="background-color:#666;color:#fff;font-weight:bold;text-align:center;padding:2px 0;" title="Timestamps for the elements of this page">TIMESTAMPS</div>
+    <div>
+      <div id="wm-capresources" style="margin:0 5px 5px 5px;max-height:250px;overflow-y:scroll !important"></div>
+      <div id="wm-capresources-loading" style="text-align:left;margin:0 20px 5px 5px;display:none"><img src="https://web-static.archive.org/_static/images/loading.gif" alt="loading" /></div>
+    </div>
+    </div>
+  </div></div></div></div><div id="wm-ipp-print">The Wayback Machine - https://web.archive.org/web/20140302074424/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-1/</div>
+<script type="text/javascript">//<![CDATA[
+__wm.bt(775,27,25,2,"web","http://blog.db-in.com/all-about-opengl-es-2-x-part-1","20140302074424",1996,"https://web-static.archive.org/_static/",["https://web-static.archive.org/_static/css/banner-styles.css?v=1utQkbB3","https://web-static.archive.org/_static/css/iconochive.css?v=3PDvdIFv"], false);
+  __wm.rw(1);
+//]]></script>
+<!-- END WAYBACK TOOLBAR INSERT -->
+ 
+
+    <button data-action="open-drawer" id="drawer-button" class="drawer-button"><i class="fa fa-bars"></i></button>
+<nav tabindex="-1" class="drawer">
+  <div class="drawer-container">
+    <!--.drawer-search(role="search")-->
+    <ul role="navigation" class="drawer-list">
+      
+
+<li class="drawer-list-item">
+  <a href="/web/20140302074424/http://blog.db-in.com/" data-pjax>
+    <i class="fa fa-home"></i>Home
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="/web/20140302074424/http://blog.db-in.com/about" data-pjax>
+    <i class="fa fa-user"></i>About
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302074424/http://blog.db-in.com/rss/">
+    <i class="fa fa-rss"></i>Subscribe to Feed
+  </a>
+</li>
+<li class="drawer-list-divider"></li>
+<li class="drawer-list-item drawer-list-title">
+  Follow me
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302074424/http://twitter.com/dineybomfim" target="_blank">
+    <i class="fa fa-twitter"></i>Twitter
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302074424/http://github.com/dineybomfim" target="_blank">
+    <i class="fa fa-github"></i>Github
+  </a>
+</li>
+
+    </ul>
+  </div>
+</nav>
+
+
+    <div class="drawer-overlay"></div>
+    <main id="container" role="main" class="container">
+      <div class="surface">
+        <div class="surface-container">
+          <div data-pjax-container class="content">
+            
+
+<section class="wrapper wrapper-post">
+  <div class="wrapper-container">
+    <article itemscope itemtype="http://schema.org/BlogPosting" role="article" class="post post">
+      
+        <section class="post-container">
+          <header class="post-header">
+            <ul class="post-meta-list">
+              <li class="post-meta-item">
+                <time datetime="2014-02-04" itemprop="datePublished">
+                  a month ago
+                </time>
+              </li>
+              
+              <li class="post-meta-item">
+                <a href="#disqus_thread" data-disqus-identifier="6"></a>
+              </li>
+            </ul>
+            <h1 itemprop="name headline" class="post-title"><a href="/web/20140302074424/http://blog.db-in.com/all-about-opengl-es-2-x-part-1/" itemprop="url" data-pjax title="All about OpenGL ES 2.x - (part 1/3)">All about OpenGL ES 2.x - (part 1/3)</a></h1>
+            
+            <!--h2 itemprop="about" class="post-subtitle"></h2-->
+          </header>
+          <aside class="post-side">
+            <div class="post-author">
+              
+              <div class="post-author-info">
+                <a href="" class="post-author-name">
+                  Diney Bomfim
+                </a>
+                <p class="post-author-bio"></p>
+              </div>
+            </div>
+          </aside>
+          <div itemprop="articleBody" class="post-body">
+            <p><img src="https://web.archive.org/web/20140302074424im_/http://db-in.com/images/opengl_part1.png" alt="" title="opengl_part1" width="300" height="283" class="alignright size-medium wp-image-812"/> <br/>
+Hello everyone!</p>
+
+<p>Welcome again to a new serie of tutorial. This time let's talk about the magic of 3D world. Let's talk about OpenGL. I dedicated the last five months of my life entirely to go deep inside 3D world, I'm finishing my new 3D engine (seems one of the greatest work that I've done) and now is time to share with you what I know, all references, all books, tutorials, everything and, of course, learn more with your feedback.</p>
+
+<p>This serie is composed by 3 parts:  </p>
+
+<ul>  
+    <li>Part 1 - Basic concepts of 3D world and OpenGL (Beginners)</li>
+    <li><a href="https://web.archive.org/web/20140302074424/http://blog.db-in.com/all-about-opengl-es-2-x-part-1" target="_blank">Part 2 - OpenGL ES 2.0 in-depth (Intermediate)</a></li>
+    <li><a href="https://web.archive.org/web/20140302074424/http://blog.db-in.com/all-about-opengl-es-2-x-part-3" target="_blank">Part 3 - Jedi skills in OpenGL ES 2.0 and 2D graphics (Advanced)</a></li>
+</ul>  
+
+<!--more-->  
+
+<p>So if you are interested in some code, just jump to part 2/3, because in this first one I'll just talk about the concepts, nothing more.</p>
+
+<p>OK, let's start.</p>
+
+<p><br/>  </p>
+
+<h2><strong>At a glance</strong></h2>  
+
+<p>Who of you never hear about OpenGL? OpenGL means Open Graphics Library and it is used a lot today in computer languages. OpenGL is the closest point between the CPU (which we, developers, run our applications based on a language) and the GPU (the graphic's processor that exist in every Graphics Cards). So OpenGL need to be supported by the vendors of Graphics Cards (like NVidia) and be implemented by the OS's vendors (like Apple in his MacOS and iOS) and finally the OpenGL give to us, developers, an unified API to work with. This API is "Language Free" (or almost free). This is amazing, because if you use C, or C++, or Objective-C, or Perl, or C#, or JavaScript, wherever you use, the API always will be equivalent, will present the same behavior, the same functions, the same commands and is at this point that comes this tutorial serie! To deal with OpenGL's API to the developers.</p>
+
+<p>Before start talking about OpenGL API we need to have a good knowledge in 3D world. The history of 3D <br/>
+world in computer language is bound to OpenGL history. So let's take a little look at a bit of history.</p>
+
+<p><br/>  </p>
+
+<h2><strong>A short story</strong></h2>  
+
+<p><img class="alignleft size-full wp-image-689" title="opengl_logo" src="https://web.archive.org/web/20140302074424im_/http://db-in.com/images/opengl-logo.jpg" alt="OpenGL logo" width="204" height="75"/><img class="alignleft size-full wp-image-690" title="opengl-es-logo" src="https://web.archive.org/web/20140302074424im_/http://db-in.com/images/opengl-es-logo.jpg" alt="OpenGL ES logo" width="204" height="75"/> <br/>
+<br/><br/><br/><br/> <br/>
+About 20 years ago has a guy called Silicon Graphics (SGI) made a little kind of device. That device was able to show an illusion of reality. In a world of 2D images, that device dared to show 3D images, that simulate the perpective and depth of the human eye. That device was called IrisGL (probaly because it tries to simulate the eye's iris).</p>
+
+<p>Well, serious, that device was the first great Graphics Library. But it died fast, because to do what he did, he needed to control many things in computers like the graphical card, the windowing system, the basic language and even the front end. It's too much to just one company manages. So the SGI started to delegate some things like "create graphics cards", "manage the windowing", "make the front end" to other companies and get focus on the most important part of their Graphical Library. In 1992 was launch the first OpenGL.</p>
+
+<p>In 1995 Microsoft released the Direct3D, the main competitor of OpenGL. <br/>
+And only in 1997 OpenGL 1.1 was released. But OpenGL becomes really interesting to me only in 2004, which the  OpenGL 2.0 was released with a great change. The Shaders, the programmable pipeline. I love it! <br/>
+And finally in 2007 we meet the OpenGL ES 2.0 wich bring to us the power of Shader and programmable pipeline to the Embedded Systems.</p>
+
+<p>Today you can the see the OpenGL's logo (or OpenGL ES) in many games, 3D applications, 2D applications and a lot of graphical softwares (specially in 3D softwares). OpenGL ES is used by PlayStation, Android, Nintendo 3DS, Nokia, Samsung, Symbian and of course by Apple with MacOS and iOS.</p>
+
+<p><br/>  </p>
+
+<h2><strong>OpenGL's Greatest Rival</strong></h2>  
+
+<p>Talking about Microsoft Windows OS (Brugh!!) <br/>
+OK, do you remember I said that the first launch of  OpenGL was in 1992? So at that time, Microsoft has their shiny Windows 3.1. Well, as Microsoft always believe that "Nothing is created, everything is copied", Microsoft tries to copy OpenGL in what they called DirectX and introduced it in 1995 on Windows 95.</p>
+
+<p>One year later, in 1996, Microsoft introduced Direct3D which is a literal copy of OpenGL. The point is that Microsoft dominate the info market for years, and DirectX or (Direct3D) penetrated and grabbed like a plague in many computers (PCs) and when Microsoft started to deliver their OS to the mobiles and video games, DirectX goes together.</p>
+
+<p>Today DirectX is very similar in structure to OpenGL: has a Shader Language, has a programmable pipeline, has fixed pipeline too, even the names of the function in the API are similar. The difference is that OpenGL is OPEN, but DirectX is closed. OpenGL is for iOS, MacOS and Linux Systems while the DirectX is just for Microsoft OS.</p>
+
+<p>Great, now let's start our journey into 3D world!</p>
+
+<p><br/>  </p>
+
+<h2><strong>3D world</strong></h2>  
+
+<h3>First Point - The Eye</h3>  
+
+<p>Since I can remember, I was passionate by 3D world and 3D games. All that we, humans, know about simulate the real world in a 3D illusion comes from just one single place: our eye.</p>
+
+<p>The eye is the base of everything in 3D world. All that we do is to simulate the power, the beauty and the magic of the human's eye. I'm not a doctor (despite being the son of two) and don't want to talk about the eye in this tutorial, but will be good if you're used to some concepts like: field of view, binocular and monocular vision, eye's lens, concave and convex lens, and this kind of things, this can help you to understand some concepts.</p>
+
+<p>Everything we do in 3D world is to recreate the sensations from the human eye: the perpectives, the vanish points, the distortions, the depth of field, the focus, the field of view, in resume, everything is to simulate that sensations. <br/>
+<br/>  </p>
+
+<h3>Second Point - The Third Dimension</h3>  
+
+<p>This can seems stupid, but it's necessary to say: 3D world is 3D because has 3 dimensions. "WTF! This is so obviously!", calm down, dude, I'm speaking this because is important to say that an addition of one single dimension (compared to 2D world) led us into serious troubles. That does not create 1 or 3 little problems, but drive us into a pool of troubles.</p>
+
+<p>Look, in 2D world when we need to rotate a square is very simple, 45º degrees always will led our square to a specific rotation, but in 3D world, to rotate a simple square requires X, Y and Z rotation. Depending on which order we rotate first, the final result can be completely different. The things becomes worse when we make consecutive rotations, for example, rotate x = 25 and Y = 20 is one thing, but rotate x = 10, y = 20 and then x = 10 again is a completely new result.</p>
+
+<p>Well, the point here is to say that an addition of one another dimension makes our work be stupidly multiplied. <br/>
+<br/>  </p>
+
+<h3>Third Point - It's not 3D... it's often 4D.</h3>  
+
+<p>WTF! Another dimension? <br/>
+Yes dude, the last point that I need to say is it. Often we don't work just in a 3D world, we have a fourth dimension: the time. The things in 3D world need to interact, need to move, need to accelerate, need to collide itself, need to change their inertias. And as I told before, make consecutive changes in 3D world can drive us into multiple results.</p>
+
+<p>OK, until now we have a phrase to define the 3D world: "Is the simulation of the human eye and everything moves.".</p>
+
+<p><br/>  </p>
+
+<h2><strong>OpenGL into the 3D world</strong></h2>  
+
+<p>Now this tutorial starts to be a little more fun. Let's talk about the great engine OpenGL. First we need to thank to great mathematicians like  Leonhard Euler, William Rowan Hamilton, Pythagoras and so many others. Thanks to them, today we have so many formulas and techniques to work with 3D space. OpenGL used all this knowledge to construct a 3D world right on our face. Are thousands, maybe millions of operations per second using a lot of formulas to simulate the beauty of the human eyes.</p>
+
+<p>OpenGL is a great STATE MACHINE (this means that entire OpenGL works with the State Design Pattern). To illustrate what OpenGL is, let's imagine a great Port Crane in some port. There are so many containers with a lot of crates inside. OpenGL is like the whole port, which:  </p>
+
+<ul>  
+<li>The containers are the OpenGL's objects. (Textures, Shaders, Meshes and this kind of stuff)</li>  
+<li>The crates inside each containers is what we created in our applications using the OpenGL. Are our instances.</li>  
+<li>The port crane is the OpenGL API, which we have access.</li>  
+ </ul>
+
+So when we execute an OpenGL's function is like give an order to the Crane. The Crane takes the container in the port, raises it, hold it for a while, process what you want inside that container and finally brings the container down again and drop it at some place in the port.
+
+You don't have access directly to the port, you can't see or change the containers's contents, you can't reorganize it, you can't do anything directly to the containers in the port. All that you can is give instructions to the Crane. The Crane is the only that can manage the containers in the port. Remember this! Is the most important information about OpenGL until here. The Crane is the only one that can manage the containers in the port. 
+
+<img src="https://web.archive.org/web/20140302074424im_/http://db-in.com/images/opengl_port_crane_example.jpg" alt="OpenGL Port Crane example" title="opengl_port_crane_example" width="600" height="450" class="size-full wp-image-727"/>
+
+Well, OpenGL seems a very limited API at this way, but not is. The OpenGL's Crane is a very very powerful one. It can repeat the process of hold and drop the containers thousand or millions of times per a single second. Another great advantage of OpenGL uses a State Machine pattern is we don't have to hold any instance, we don't need to create any object directly, we just need to hold on the ids, or in the illustration's words, we just need to know the container's identification.
+
+<br/>  
+<h2><strong>How OpenGL works</strong></h2>  
+Deeply into the OpenGL's core the calculations are done directly in the GPU using the hardware acceleration to floating points. Hugh?
+
+CPU (Central Processing Unit) is the Processor of a computer or device. GPU (Graphics Processing Unit) is the graphics card of a computer or device. The Graphics Card comes to relieve the Processor's life because it can make a lot of computations to deal with images before present the content to the screen.
+
+So in deeply, what OpenGL does is let all the mass computations to the GPU, instead to calculate all in the CPU. The GPU is much much faster to deal with floating point numbers than the CPU. This is the fundamental reason to a 3D game run faster with better Graphics Cards. This is even the reason because 3D professional softwares give to you an option to work with "Software's Render" (CPU processing) or "Graphics Card's Render" (CPU processing). Some softwares also give you an option of "OpenGL", well, now you know. That option is GPU processing!
+
+So, is OpenGL working entirely in the GPU?
+
+Not quite.  
+Just a hard image processing and few other things. OpenGL gives to us a lot of features to store images, datas and informations in an optimized format. These optimized data will be processed later directly by the GPU.
+
+So, is OpenGL hardware dependent?
+
+Unfortunately yes! If the hardware (Graphics Card) doesn't support the OpenGL, we can't use it.  
+New OpenGL's version often needs new GPU features.  
+This is something to know, but not to worry. As OpenGL always needs a vendor's implementations, we (developers) will work on new OpenGL's version just when the devices was prepared to it.
+
+In practice, all Graphics Card Chips today has an implementation of OpenGL. So you can use OpenGL in many languages and devices. Even in the Microsoft Windows. (Brugh)
+
+<br/>  
+<h2><strong>OpenGL's Logic</strong></h2>  
+OpenGL is a Graphics Library very concise and focused.  
+What you see in professional 3D softwares is a super ultra complex work above the OpenGL. Because in deeply, OpenGL's logic is aware about some few things:  
+<ul>  
+    <li>Primitives</li>
+    <li>Buffers</li>
+    <li>Rasterize</li>
+</ul>
+
+<p>Just it? 3 little things? <br/>
+Believe, OpenGL works around these 3 concepts. Let's see each concept independently and how the three can join to create the most advanced 3D Graphics Library (also you can use OpenGL to 2D graphics. 2D images to OpenGL is just a 3D working all in the Z depth 0, we'll talk about later on).</p>
+
+<p><br/>  </p>
+
+<h3>Primitives</h3>  
+
+<p>OpenGL's primitives is limited to 3 little kind of objects:  </p>
+
+<ul>  
+    <li>About a 3D Point in space (x,y,z)</li>
+    <li>About a 3D Line in space (composed by two 3D Points)</li>
+    <li>About a 3D Triangle in space (composed by three 3D Points)</li>
+</ul>
+
+<p>A 3D Point can be used as a particle in the space. <br/>
+A 3D Line is always a single line and can be used as a 3D vector. <br/>
+A 3D Triangle could be one face of a mesh which has thousands, maybe millions faces. <br/>
+Some OpenGL's versions also support quads (quadrangles), which is merely an offshoot of triangles. But as OpenGL ES was made to achieve the maximum performance, quads are not supported.</p>
+
+<p><br/><a name="Buffers"></a>  </p>
+
+<h3>Buffers</h3>  
+
+<p>Now let's talk about the buffers. In simple words, buffer is a temporary optimized storage. Storage for what? For a lot of stuffs. <br/>
+OpenGL works with 3 kind of buffers:  </p>
+
+<ul>  
+    <li><strong>Frame Buffers</strong></li>
+    <li><strong>Render Buffers</strong></li>
+    <li><strong>Buffer Object</strong>s</li>
+</ul>
+
+<p><strong>Frame Buffers</strong> is the most abstract of the three. When you make an OpenGL's render you can send the final image directly to the device's screen or to a Frame Buffer. So Frame Buffer is a temporary image data, right? <br/>
+Not exactly. You can image it as an output from an OpenGL's render and this can means a set of images, not just one. What kind of images? Images about the 3D objects, about the depth of objects in space, the intersection of objects and about the visible part of objects. So the Frame Buffer is like a collection of images. All of these stored as a binary array of pixel's information.</p>
+
+<p><strong>Render Buffer</strong> is a temporary storage of one single image. Now you can see more clearly that a Frame Buffer is a collection of Render Buffers. Exist few kinds of Render Buffer: Color, Depth and Stencil.  </p>
+
+<ul>  
+    <li>Color Render Buffer stores the final colored image generated by OpenGL's render. Color Render Buffer is a colored (RGB) image.</li>
+    <li>Depth Render Buffer stores the final Z depth information of the objects. If you are familiar to the 3D softwares, you know what is a Z depth image. It's a grey scale image about the Z position of the objects in 3D space, in which the full white represent most near visible object and black represent the most far object (the full black is invisible)</li>
+    <li>Stencil Render Buffer is aware about the visible part of the object. Like a mask of the visible parts. Stencil Render Buffer is a black and white image.</li>
+</ul>
+
+<p><a name="buffer_objects"></a> <br/>
+<strong>Buffer Objects</strong> is a storage which OpenGL calls "server-side" (or server’s address space). The Buffer Objects is also a temporary storage, but not so temporary like the others. A Buffer Object can persist throughout the application execution. Buffer Objects can hold informations about your 3D objects in an optimized format. These information can be of two type: Structures or Indices.</p>
+
+<p>Structures is the array which describe your 3D object, like an array of vertices, an array of texture coordinates or an array of whatever you want. The Indices are more specifics. The array of indices is to be used to indicate how the faces of your mesh will be constructed based on an array of structures.</p>
+
+<p>Seems confused?</p>
+
+<p>OK, let's see an example. <br/>
+Think about a 3D cube. This cube has 6 faces composed by 8 vertices, right?</p>
+
+<p><img src="https://web.archive.org/web/20140302074424im_/http://db-in.com/images/cube_example.gif" alt="3D cube made with OpenGL" title="cube_example" width="600" height="549" class="size-full wp-image-773"/></p>
+
+<p>Each of these 6 faces are quads, but do you remember that OpenGL just knows about triangles? So we need to transform that quads into triangles to work with OpenGL. When we do this, the 6 faces become 12 faces! <br/>
+The above image was made with Modo, look at the down right corner. That are informations given by Modo about this mesh. As you can see, 8 vertices and 12 faces (GL: 12). <br/>
+Now, let's think.</p>
+
+<p>Triangles in OpenGL is a combination of three 3D vertices. So to construct the cube's front face we need to instruct OpenGL at this way: {vertex 1, vertex2, vertex 3}, {vertex 1, vertex 3, vertex 4}. Right?</p>
+
+<p>In other words, we need to repeat the 2 vertices at each cube's face. This could be worst if our mesh has pentangle we need to repeat 4 vertices informations, if was an hexangle we need to repeat 6 vertices informations, a septangle, 8 vertices informations and so on. <br/>
+This is much much expansive.</p>
+
+<p>So OpenGL give us a way to do that more easily. Called Array of Indices! <br/>
+In the above cube's example, we could has an array of the 8 vertices: {vertex 1, vertex 2, vertex 3, vertex 4, ...} and instead to rewrite these informations at each cube's faces, we construct an array of indices: {0,1,2,0,2,3,2,6,3,2,5,6...}. Each combination of 3 elements in this array  of indices (0,1,2 - 0,2,3 - 6,3,2) represent a triangle face. With this feature we can write vertex's information once and reuse it many times in the array of indices.</p>
+
+<p>Now, returning to the Buffer Objects, the first kind is an array of structures, as {vertex 1, vertex 2, vertex 3, vertex 4, ...} and the second kind is an array of indices, as {0,1,2,0,2,3,2,6,3,2,5,6...}.</p>
+
+<p>The great advantages of Buffer Objects is they are optimized to work directly in the GPU processing and you don't need hold the array in your application any more after create a Buffer Object.</p>
+
+<p><br/>  </p>
+
+<h3>Rasterize</h3>  
+
+<p>The rasterize is the process by which OpenGL takes all informations about 3D objects (all that coordinates, vertices, maths, etc) to create a 2D image. This image will suffer some changes and then it will be presented on the device's screen (commonly).</p>
+
+<p>But this last step, the bridge between pixel informations and the device's screen, it's a vendor's responsibility. The Khronos group provide another API called EGL, but here the vendors can interfere. We, developers, don't work directly with Khronos EGL, but with the vendor's modified version.</p>
+
+<p>So, when you make an OpenGL render you can choose to render directly to the screen, using the vendor's EGL implementation, or render to a Frame Buffer. Rendering to a Frame Buffer, you still in the OpenGL API, but the content will not be showed onto device's screen yet. Rendering directly to the device's screen, you go out the OpenGL API and enter in the EGL API. So at the render time, you can choose one of both outputs.</p>
+
+<p>But don't worry about this now, as I said, each vendor make their own implementation of EGL API. The Apple, for example, doesn't let you render directly to the device's screen, you always need to render to a Frame Buffer and then use EGL's implementation by Apple to present the content on the device's screen.</p>
+
+<p><br/>  </p>
+
+<h2><strong>OpenGL's pipelines</strong></h2>  
+
+<p>I said before about "programmable pipeline" and "fixed pipeline". But what the hell is a programmable pipeline? In simple words?</p>
+
+<p>The programmable pipeline is the Graphics Libraries delegating to us, developers, the responsibility by everything related to Cameras, Lights, Materials  and Effects. And we can do this working with the famous Shaders. So every time you hear about "programmable pipeline" think in Shaders!</p>
+
+<p>But now, what the hell is Shaders?</p>
+
+<p>Shaders is like little pieces of codes, just like little programs, working directly in the GPU to make complex calculations. Complex like: the final color of a surface's point which has a T texture, modified by a TB bump texture, using a specular color SC with specular level SL, under a light L with light's power LP with a incidence angle LA from distance Z with falloff F and all this seeing by the eyes of the camera C located on P position with the projections lens T.</p>
+
+<p>Whatever this means, it's much complex to be processed by the CPU and is so much complex to Graphics Libraries continue to care about. So the programmable pipeline is just us managing that kind of thing.</p>
+
+<p>And the fixed pipeline?</p>
+
+<p>It's the inverse! The fixed pipeline is the Graphics Library caring about all that kind of things and giving to us an API to set the Cameras, Materials, Lights and Effects.</p>
+
+<p>To create shaders we use a language similar to C, we use the OpenGL Shader Language (GLSL). OpenGL ES use a little more strict version called OpenGL ES Shader Language (also known as GLSL ES or ESSL). The difference is that you have more fixed functions and could write more variables in GLSL than in GLSL ES, but the sintax is the same.</p>
+
+<p>Well, but how did works these shaders?</p>
+
+<p>You create them in a separated files or write directly in your code, whatever, the important thing is that the final string containing the SL will be sent to the OpenGL's core and the core will compile the Shaders to you (you even can use a pre-compiled binary shaders, but this is for another part of this serie).</p>
+
+<p>The shaders works in pairs: Vertex Shader and Fragment Shader. This topic needs more attention, so let's look closely to the Vertex and Fragment shaders. To understand what each shader does, let's back to the cube example.</p>
+
+<p><img src="https://web.archive.org/web/20140302074424im_/http://db-in.com/images/shaders_example.gif" alt="3D cube to illustrate VSH and FSH" title="shaders_example" width="600" height="549" class="size-full wp-image-779"/></p>
+
+<p><br/>  </p>
+
+<h3>Vertex Shader</h3>  
+
+<p>Vertex Shader, also known as VS or VSH is a little program which will be executed at each Vertex of a mesh. <br/>
+Look at the cube above, as I said early, this cube needs 8 vertices (now in this image the vertex 5 is invisible, you will understand why shortly). <br/>
+So this cube's VSH will be processed 8 times by the GPU.</p>
+
+<p>What Vertex Shader will do is define the final position of a Vertex. Do you remember that programmable pipeline has left us the responsible by the camera? So now is it's time!</p>
+
+<p>The position and the lens of a camera can interfere in the final position of a vertex. Vertex Shader is also responsible to prepare and output some variables to the Fragment Shader. In OpenGL we can define variable to the Vertex Shader, but not to the Fragment Shader directly. Because that, our Fragment's variables must pass through the Vertex Shader.</p>
+
+<p>But why we don't have access to the Fragment Shader directly? <br/>
+Well, let's see the FSH and you will understand.</p>
+
+<p><br/>  </p>
+
+<h3>Fragment Shader</h3>  
+
+<p>Look at the cube image again. <br/>
+Did you notice vertex 5 is invisible? This is because at this specific position and specific rotation, we just can see 3 faces and these 3 faces are composed by 7 vertices.</p>
+
+<p>This is what Fragment Shader does! FSH will be processed at each VISIBLE fragment of the final image. Here you can understand a fragment as a pixel. But normally is not exactly a pixel, because between the OpenGL's render and the presentation of the final image on the device's screen has stretches. So a fragment can result in less than a real pixel or more than a real pixel, depending on the device and the render's configurations. In the cube above, the Fragment Shader will be processed at each pixel of that three visible faces formed by 7 vertices.</p>
+
+<p>Inside the Fragment Shader we will work with everything related to the mesh' surface, like materials, bump effects, shadow and light effects, reflections, refractions, textures and any other kind of effects we want. The final output to the Fragment Shader is a pixel color in the format RGBA.</p>
+
+<p>Now, the last thing you need to know is about how the VSH and FSH works together. It's mandatory ONE Vertex Shader to ONE Fragment Shader, no more or less, must be exactly one to one. To ensure we'll not make mistakes, OpenGL has something called <strong>Program</strong>. A Program in OpenGL is just the compiled pair of VSH and FSH. Just it, nothing more.</p>
+
+<p><br/>  </p>
+
+<h2><strong>Conclusion</strong></h2>  
+
+<p>Very well!</p>
+
+<p>This is all about the OpenGL's concepts. Let's remember of everything.</p>
+
+<ol>  
+    <li>OpenGL's logic is composed by just 3 simple concepts: Primitives, Buffers and Rasterize.
+<ul>  
+    <li>Primitives are points, lines and triangles.</li>
+    <li>Buffers can be Frame Buffer, Render Buffer or Buffer Objects.</li>
+    <li>Rasterize is the process which transform OpenGL mathematics in the pixels data.</li>
+</ul>  
+</li>  
+    <li>OpenGL works with fixed or programmable pipeline.
+<ul>  
+    <li>The fixed pipeline is old, slow and large. Has a lot of fixed functions to deal with Cameras, Lights, Materials and Effects.</li>
+    <li>The programmable pipeline is more easy, fast and clean than fixed pipeline, because in the programmable way OpenGL let to us, developers, the task to deal with Cameras, Lights, Materials and Effects.</li>
+</ul>  
+</li>  
+    <li>Programmable pipeline is synonymous of Shaders: Vertex Shader, at each vertex of a mesh, and Fragment Shader, at each VISIBLE fragment of a mesh. Each pair of Vertex Shader and Fragment Shader are compiled inside one object called Program.</li>
+</ol>
+
+<p>Looking at these 3 topics, OpenGL seems very simple to understand and learn. Yes! It is very simple to understand... but to learn... hmmm... <br/>
+The 3 little topics has numerous ramifications and to learn all about can take months or more.</p>
+
+<p>What I'll try to do in the next two parts of this serie is give to you all what I've learned in 6 immersive months of deeply hard OpenGL's study. In the next one, I'll will show you the basic functions and structures of a 3D application using the OpenGL, independently of which programming language you are using or which is your final device.</p>
+
+<p>But before it, I want to introduce you one more OpenGL's concept.</p>
+
+<p><br/>  </p>
+
+<h2><strong>OpenGL's Error API</strong></h2>  
+
+<p>OpenGL is a great State Machine working as a Port Crane and you don't have access to what happen inside it. So if an error occurs inside it, nothing will happens with your application, because OpenGL is a completely extern core.</p>
+
+<p>But, how to know if just one of your shaders has a little error? How to know if one of your render buffers is not properly configured?</p>
+
+<p>To deal with all the errors, OpenGL gives to us an Error API. This API is very very simple, it has few fixed function in pairs. One is a simple check, Yes or Not, just to know if something was done with successful or not. The other pair is to retrieve the error message. So is very simple. First you check, very fast, and if has an error then you get the message.</p>
+
+<p>Generally we place some checks in critical points, like the compilations of the shaders or buffers configurations, to stay aware about the most communs errors.</p>
+
+<p><br/>  </p>
+
+<h2><strong>On the Next</strong></h2>
+
+<p>OK, dude, now we are ready to go. <br/>
+At next tutorial let's see some real code, prepare your self to write a lot.</p>
+
+<p>Thanks for reading and see you in the next part!</p>
+
+<p><strong>NEXT PART:</strong> <a href="https://web.archive.org/web/20140302074424/http://blog.db-in.com/all-about-opengl-es-2-x-part-2" target="_blank">Part 2 - OpenGL ES 2.0 in deeply (Intermediate)</a></p>
+
+<iframe scrolling="no" src="https://web.archive.org/web/20140302074424if_/http://db-in.com/downloads/apple/tribute_to_jobs.html" width="100%" height="130px"></iframe>
+          </div>
+          <footer class="post-footer">
+            <div itemprop="author" itemscope itemtype="http://schema.org/Person" class="post-author">
+              
+              <div class="post-author-info">
+                <h4 class="post-footer-heading">Written By</h4>
+                <a href="" itemprop="url" class="post-author-name">
+                  <span itemprop="name">Diney Bomfim</span>
+                </a>
+                <p itemprop="description" class="post-author-bio"></p>
+                
+                
+                <p class="post-info">
+                  <b class="post-info-title">Published on</b>
+                  <time class="post-date">February 04, 2014</time>
+                </p>
+              </div>
+            </div>
+            <div class="post-social">
+              <h4 class="post-footer-heading">Spread the word</h4>
+              <a href="#" data-action="share-twitter"><i class="fa fa-fw fa-lg fa-twitter"></i></a>
+              <a href="#" data-action="share-facebook"><i class="fa fa-fw fa-lg fa-facebook"></i></a>
+              <a href="#" data-action="share-gplus"><i class="fa fa-fw fa-lg fa-google-plus"></i></a>
+            </div>
+          </footer>
+        </section>
+      
+      <section itemprop="comment" class="post-comments">
+        <div id="disqus_thread"></div>
+      </section>
+    </article>
+
+    <footer role="contentinfo" class="footer">
+  <p><small>© db-in 2014. All Rights Reserved.</small></p>
+</footer>
+
+  </div>
+</section>
+
+<script type="text/javascript">
+  
+var ga_ua = 'UA-11062449-8';
+
+
+var disqus_shortname = 'dineybomfim';
+
+
+  
+    var disqus_identifier = '6';
+  
+
+  if(typeof DISQUS !== 'object') {
+    (function () {
+    var s = document.createElement('script'); s.async = true;
+    s.type = 'text/javascript';
+    s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+    }());
+  }
+</script>
+
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script src="/web/20140302074424js_/http://blog.db-in.com/shared/vendor/jquery/jquery.js"></script>
+
+    <script src="/web/20140302074424js_/http://blog.db-in.com/assets/js/a8765325.foot-scripts.min.js"></script>
+
+    <script type="text/javascript">
+      
+var ga_ua = 'UA-11062449-8';
+
+
+var disqus_shortname = 'dineybomfim';
+
+
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','//web.archive.org/web/20140302074424/http://www.google-analytics.com/analytics.js','ga');
+      ga('create', ga_ua);
+      ga('send', 'pageview');
+
+      (function () {
+      var s = document.createElement('script'); s.async = true;
+      s.type = 'text/javascript';
+      s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+      (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+      }());
+    </script>
+  </body>
+</html>
+<!--
+     FILE ARCHIVED ON 07:44:24 Mar 02, 2014 AND RETRIEVED FROM THE
+     INTERNET ARCHIVE ON 23:22:56 Apr 14, 2026.
+     JAVASCRIPT APPENDED BY WAYBACK MACHINE, COPYRIGHT INTERNET ARCHIVE.
+
+     ALL OTHER CONTENT MAY ALSO BE PROTECTED BY COPYRIGHT (17 U.S.C.
+     SECTION 108(a)(3)).
+-->
+<!--
+playback timings (ms):
+  captures_list: 0.788
+  exclusion.robots: 0.064
+  exclusion.robots.policy: 0.049
+  esindex: 0.014
+  cdx.remote: 18.081
+  LoadShardBlock: 140.27 (3)
+  PetaboxLoader3.datanode: 174.409 (5)
+  PetaboxLoader3.resolve: 272.598 (2)
+  load_resource: 369.795 (2)
+  nav: 0.244 (6)
+-->
