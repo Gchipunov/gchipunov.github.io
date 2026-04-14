@@ -1,0 +1,1217 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head><script src="//archive.org/includes/athena.js" type="text/javascript"></script>
+<script type="text/javascript">window.addEventListener('DOMContentLoaded',function(){var v=archive_analytics.values;v.service='wb';v.server_name='wwwb-app254.us.archive.org';v.server_ms=203;archive_analytics.send_pageview({});});</script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/bundle-playback.js?v=2N_sDSC0" charset="utf-8"></script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/wombat.js?v=txqj7nKC" charset="utf-8"></script>
+<script>window.RufflePlayer=window.RufflePlayer||{};window.RufflePlayer.config={"autoplay":"on","unmuteOverlay":"hidden","showSwfDownload":true};</script>
+<script type="text/javascript" src="https://web-static.archive.org/_static/js/ruffle/ruffle.js"></script>
+<script type="text/javascript">
+    __wm.init("https://web.archive.org/web");
+  __wm.wombat("http://blog.db-in.com:80/all-about-opengl-es-2-x-part-3/","20140302041558","https://web.archive.org/","web","https://web-static.archive.org/_static/",
+	      "1393733758");
+</script>
+<link rel="stylesheet" type="text/css" href="https://web-static.archive.org/_static/css/banner-styles.css?v=1utQkbB3" />
+<link rel="stylesheet" type="text/css" href="https://web-static.archive.org/_static/css/iconochive.css?v=3PDvdIFv" />
+<!-- End Wayback Rewrite JS Include -->
+
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+
+    <title>All about OpenGL ES 2.x - (part 3/3)</title>
+
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+    <meta name="description" content="">
+
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="All about OpenGL ES 2.x - (part 3/3)">
+    <meta name="twitter:description" content="">
+
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="All about OpenGL ES 2.x - (part 3/3)">
+    <meta property="og:description" content="">
+
+    
+<meta name="twitter:site" content="@dineybomfim">
+
+
+<meta name="twitter:creator" content="@dineybomfim2">
+
+
+<meta name="google-site-verification" content="">
+
+
+<meta property="fb:admins" content="">
+
+
+    <link href="/web/20140302041558im_/http://blog.db-in.com/favicon.ico" rel="shortcut icon" type="image/x-icon">
+    <link href="/web/20140302041558im_/http://blog.db-in.com/apple-touch-icon-precomposed.png" rel="apple-touch-icon">
+
+    <link href="//web.archive.org/web/20140302041558/http://fonts.googleapis.com/" rel="dns-prefetch">
+    <link href="//web.archive.org/web/20140302041558cs_/http://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic|Open+Sans:700,400&amp;subset=latin,latin-ext" rel="stylesheet">
+
+    <link rel="stylesheet" href="/web/20140302041558cs_/http://blog.db-in.com/assets/css/3c236dc6.main.min.css"/>
+
+    <script src="/web/20140302041558js_/http://blog.db-in.com/assets/js/b14267da.head-scripts.min.js"></script>
+
+    <meta name="generator" content="Ghost 0.3"/>
+<link rel="alternate" type="application/rss+xml" title="RSS" href="/web/20140302041558/http://blog.db-in.com/rss/">
+  </head>
+  <body class="post-template"><!-- BEGIN WAYBACK TOOLBAR INSERT -->
+<script>__wm.rw(0);</script>
+<div id="wm-ipp-base" lang="en" style="display:none;direction:ltr;" toolbar-mode="auto">
+<div id="wm-ipp" style="position:fixed;left:0;top:0;right:0;">
+<div id="donato" style="position:relative;width:100%;height:0;">
+  <div id="donato-base">
+    <iframe id="donato-if" src="https://archive.org/includes/donate.php?as_page=1&amp;platform=wb&amp;referer=https%3A//web.archive.org/web/20140302041558/http%3A//blog.db-in.com/all-about-opengl-es-2-x-part-3/"
+	    scrolling="no" frameborder="0" style="width:100%; height:100%">
+    </iframe>
+  </div>
+</div><div id="wm-ipp-inside">
+  <div id="wm-toolbar" style="position:relative;display:flex;flex-flow:row nowrap;justify-content:space-between;" nav="async">
+    <div id="wm-logo" style="/*width:110px;*/padding-top:12px;">
+      <a href="/web/" title="Wayback Machine home page"><img src="https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-200.png" srcset="https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-100.png, https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-150.png 1.5x, https://web-static.archive.org/_static/images/toolbar/wayback-toolbar-logo-200.png 2x" alt="Wayback Machine" style="width:100px" border="0" /></a>
+    </div>
+    <div class="c" style="display:flex;flex-flow:column nowrap;justify-content:space-between;flex:1;">
+      <form class="u" style="display:flex;flex-direction:row;flex-wrap:nowrap;" target="_top" method="get" action="/web/submit" name="wmtb" id="wmtb"><input type="text" name="url" id="wmtbURL" value="http://blog.db-in.com/all-about-opengl-es-2-x-part-3/" onfocus="this.focus();this.select();" style="flex:1;"/><input type="hidden" name="type" value="replay" /><input type="hidden" name="date" value="20140302041558" /><input type="submit" value="Go" />
+      </form>
+      <div style="display:flex;flex-flow:row nowrap;align-items:flex-end;">
+                <div class="s" id="wm-nav-captures" style="flex:1;">
+                    <a class="t" href="/web/20140302041558*/http://blog.db-in.com/all-about-opengl-es-2-x-part-3/" title="See a list of every capture for this URL">157 captures</a>
+          <div class="r" title="Timespan for captures of this URL">16 Feb 2014 - 10 May 2021</div>
+          </div>
+        <div class="k">
+          <a href="" id="wm-graph-anchor">
+            <div id="wm-ipp-sparkline" title="Explore captures for this URL" style="position: relative">
+              <canvas id="wm-sparkline-canvas" width="775" height="27" border="0"></canvas>
+            </div>
+          </a>
+        </div>
+      </div>
+    </div>
+    <div class="n">
+      <table>
+        <tbody>
+          <!-- NEXT/PREV MONTH NAV AND MONTH INDICATOR -->
+          <tr class="m">
+            <td class="b" nowrap="nowrap">Feb</td>
+            <td class="c" id="displayMonthEl" title="You are here: 04:15:58 Mar 02, 2014">MAR</td>
+            <td class="f" nowrap="nowrap">Apr</td>
+          </tr>
+          <!-- NEXT/PREV CAPTURE NAV AND DAY OF MONTH INDICATOR -->
+          <tr class="d">
+            <td class="b" nowrap="nowrap"><span class="ta"></span></td>
+            <td class="c" id="displayDayEl" style="width:34px;font-size:22px;white-space:nowrap;" title="You are here: 04:15:58 Mar 02, 2014">02</td>
+            <td class="f" nowrap="nowrap"><span class="ta"></span></td>
+          </tr>
+          <!-- NEXT/PREV YEAR NAV AND YEAR INDICATOR -->
+          <tr class="y">
+            <td class="b" nowrap="nowrap">2013</td>
+            <td class="c" id="displayYearEl" title="You are here: 04:15:58 Mar 02, 2014">2014</td>
+            <td class="f" nowrap="nowrap">2015</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="r" style="display:flex;flex-flow:column nowrap;align-items:flex-end;justify-content:space-between;">
+      <div id="wm-btns" style="text-align:right;height:23px;">
+                <span class="xxs">
+          <div id="wm-save-snapshot-success">success</div>
+          <div id="wm-save-snapshot-fail">fail</div>
+          <a id="wm-save-snapshot-open" href="#" title="Share via My Web Archive" >
+            <span class="iconochive-web"></span>
+          </a>
+          <a href="https://archive.org/account/login.php" title="Sign In" id="wm-sign-in">
+            <span class="iconochive-person"></span>
+          </a>
+          <span id="wm-save-snapshot-in-progress" class="iconochive-web"></span>
+        </span>
+                <a class="xxs" href="https://help.archive.org/help/category/the-wayback-machine/" title="Get some help using the Wayback Machine" style="top:-6px;"><span class="iconochive-question" style="color:rgb(87,186,244);font-size:160%;"></span></a>
+        <a id="wm-tb-close" href="#close" style="top:-2px;" title="Close the toolbar"><span class="iconochive-remove-circle" style="color:#888888;font-size:240%;"></span></a>
+      </div>
+      <div id="wm-share" class="xxs">
+        <a href="/web/20140302041558/http://web.archive.org/screenshot/http://blog.db-in.com/all-about-opengl-es-2-x-part-3/"
+           id="wm-screenshot"
+           title="screenshot">
+          <span class="wm-icon-screen-shot"></span>
+        </a>
+        <a href="#" id="wm-video" title="video">
+          <span class="iconochive-movies"></span>
+        </a>
+        <a id="wm-share-facebook" href="#" data-url="https://web.archive.org/web/20140302041558/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-3/" title="Share on Facebook" style="margin-right:5px;" target="_blank"><span class="iconochive-facebook" style="color:#3b5998;font-size:160%;"></span></a>
+        <a id="wm-share-twitter" href="#" data-url="https://web.archive.org/web/20140302041558/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-3/" title="Share on Twitter" style="margin-right:5px;" target="_blank"><span class="iconochive-twitter" style="color:#1dcaff;font-size:160%;"></span></a>
+      </div>
+      <div style="padding-right:2px;text-align:right;white-space:nowrap;">
+        <a id="wm-expand" class="wm-btn wm-closed" href="#expand"><span id="wm-expand-icon" class="iconochive-down-solid"></span> <span class="xxs" style="font-size:80%;">About this capture</span></a>
+      </div>
+    </div>
+  </div>
+    <div id="wm-capinfo" style="border-top:1px solid #777;display:none; overflow: hidden">
+        <div id="wm-capinfo-notice" source="api"></div>
+                <div id="wm-capinfo-collected-by">
+    <div style="background-color:#666;color:#fff;font-weight:bold;text-align:center;padding:2px 0;">COLLECTED BY</div>
+    <div style="padding:3px;position:relative" id="wm-collected-by-content">
+            <div style="display:inline-block;vertical-align:top;width:50%;">
+			<span class="c-logo" style="background-image:url(https://archive.org/services/img/alexacrawls);"></span>
+		Organization: <a style="color:#33f;" href="https://archive.org/details/alexacrawls" target="_new"><span class="wm-title">Alexa Crawls</span></a>
+		<div style="max-height:75px;overflow:hidden;position:relative;">
+	  <div style="position:absolute;top:0;left:0;width:100%;height:75px;background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 90%,rgba(255,255,255,255) 100%);"></div>
+	  Starting in 1996, <a href="http://www.alexa.com/">Alexa Internet</a> has been donating their crawl data to the Internet Archive.  Flowing in every day, these data are added to the <a href="http://web.archive.org/">Wayback Machine</a> after an embargo period.
+	</div>
+	      </div>
+      <div style="display:inline-block;vertical-align:top;width:49%;">
+			<span class="c-logo" style="background-image:url(https://archive.org/services/img/alexacrawls)"></span>
+		<div>Collection: <a style="color:#33f;" href="https://archive.org/details/alexacrawls" target="_new"><span class="wm-title">Alexa Crawls</span></a></div>
+		<div style="max-height:75px;overflow:hidden;position:relative;">
+	  <div style="position:absolute;top:0;left:0;width:100%;height:75px;background:linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0) 90%,rgba(255,255,255,255) 100%);"></div>
+	  Starting in 1996, <a href="http://www.alexa.com/">Alexa Internet</a> has been donating their crawl data to the Internet Archive.  Flowing in every day, these data are added to the <a href="http://web.archive.org/">Wayback Machine</a> after an embargo period.
+	</div>
+	      </div>
+    </div>
+    </div>
+    <div id="wm-capinfo-timestamps">
+    <div style="background-color:#666;color:#fff;font-weight:bold;text-align:center;padding:2px 0;" title="Timestamps for the elements of this page">TIMESTAMPS</div>
+    <div>
+      <div id="wm-capresources" style="margin:0 5px 5px 5px;max-height:250px;overflow-y:scroll !important"></div>
+      <div id="wm-capresources-loading" style="text-align:left;margin:0 20px 5px 5px;display:none"><img src="https://web-static.archive.org/_static/images/loading.gif" alt="loading" /></div>
+    </div>
+    </div>
+  </div></div></div></div><div id="wm-ipp-print">The Wayback Machine - https://web.archive.org/web/20140302041558/http://blog.db-in.com:80/all-about-opengl-es-2-x-part-3/</div>
+<script type="text/javascript">//<![CDATA[
+__wm.bt(775,27,25,2,"web","http://blog.db-in.com/all-about-opengl-es-2-x-part-3/","20140302041558",1996,"https://web-static.archive.org/_static/",["https://web-static.archive.org/_static/css/banner-styles.css?v=1utQkbB3","https://web-static.archive.org/_static/css/iconochive.css?v=3PDvdIFv"], false);
+  __wm.rw(1);
+//]]></script>
+<!-- END WAYBACK TOOLBAR INSERT -->
+ 
+
+    <button data-action="open-drawer" id="drawer-button" class="drawer-button"><i class="fa fa-bars"></i></button>
+<nav tabindex="-1" class="drawer">
+  <div class="drawer-container">
+    <!--.drawer-search(role="search")-->
+    <ul role="navigation" class="drawer-list">
+      
+
+<li class="drawer-list-item">
+  <a href="/web/20140302041558/http://blog.db-in.com/" data-pjax>
+    <i class="fa fa-home"></i>Home
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="/web/20140302041558/http://blog.db-in.com/about" data-pjax>
+    <i class="fa fa-user"></i>About
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/rss/">
+    <i class="fa fa-rss"></i>Subscribe to Feed
+  </a>
+</li>
+<li class="drawer-list-divider"></li>
+<li class="drawer-list-item drawer-list-title">
+  Follow me
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302041558/http://twitter.com/dineybomfim" target="_blank">
+    <i class="fa fa-twitter"></i>Twitter
+  </a>
+</li>
+<li class="drawer-list-item">
+  <a href="https://web.archive.org/web/20140302041558/http://github.com/dineybomfim" target="_blank">
+    <i class="fa fa-github"></i>Github
+  </a>
+</li>
+
+    </ul>
+  </div>
+</nav>
+
+
+    <div class="drawer-overlay"></div>
+    <main id="container" role="main" class="container">
+      <div class="surface">
+        <div class="surface-container">
+          <div data-pjax-container class="content">
+            
+
+<section class="wrapper wrapper-post">
+  <div class="wrapper-container">
+    <article itemscope itemtype="http://schema.org/BlogPosting" role="article" class="post post">
+      
+        <section class="post-container">
+          <header class="post-header">
+            <ul class="post-meta-list">
+              <li class="post-meta-item">
+                <time datetime="2014-02-04" itemprop="datePublished">
+                  a month ago
+                </time>
+              </li>
+              
+              <li class="post-meta-item">
+                <a href="#disqus_thread" data-disqus-identifier="8"></a>
+              </li>
+            </ul>
+            <h1 itemprop="name headline" class="post-title"><a href="/web/20140302041558/http://blog.db-in.com/all-about-opengl-es-2-x-part-3/" itemprop="url" data-pjax title="All about OpenGL ES 2.x - (part 3/3)">All about OpenGL ES 2.x - (part 3/3)</a></h1>
+            
+            <!--h2 itemprop="about" class="post-subtitle"></h2-->
+          </header>
+          <aside class="post-side">
+            <div class="post-author">
+              
+              <div class="post-author-info">
+                <a href="" class="post-author-name">
+                  Diney Bomfim
+                </a>
+                <p class="post-author-bio"></p>
+              </div>
+            </div>
+          </aside>
+          <div itemprop="articleBody" class="post-body">
+            <p><img src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/opengl_part3.png" alt="" title="opengl_part3" width="300" height="352" class="alignright size-full"/> <br/>
+Here we are for the final part of this serie of tutorial! <br/>
+Welcome back, my friends.</p>
+
+<p>Is time to dive in advanced knowledges about OpenGL and 3D world. In this tutorial we'll see many things about the 2D graphics, multisampling, textures, render to off-screen surfaces and let's try to optimize at maximum our applications' performance.</p>
+
+<p>Is very important to you already know about all the concepts covered in the other 2 parts of this serie, if you miss something, here is a list:</p>
+
+<p>This serie is composed by 3 parts:  </p>
+
+<ul>  
+    <li><a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/all-about-opengl-es-2-x-part-1" target="_blank">Part 1 - Basic concepts of 3D world and OpenGL (Beginners)</a></li>
+    <li><a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/all-about-opengl-es-2-x-part-2" target="_blank">Part 2 - OpenGL ES 2.0 in-depth (Intermediate)</a></li>
+    <li>Part 3 - Jedi skills in OpenGL ES 2.0 and 2D graphics (Advanced)</li>
+</ul>  
+
+<!--more-->
+
+<p>At this time I imagine you know a lot of things about OpenGL and 3D world. You probably already created some applications using OpenGL, discovered many cool things, found some problems, even maybe your own engine/framework is under construction and I'm very glad in see you coming back.</p>
+
+<p>As I've read once in a book: "One day you didn't know to walk. Then you learned how to stand up and walk. Now is time to run, jump and swim!"... and why not "to fly". With OpenGL our imagination has no limits, we can fly.</p>
+
+<p>Let's start.</p>
+
+<p><a name="list_contents"></a> <br/>
+Here is a little list of contents to orient your reading:  </p>
+
+<table width="675">  
+<tr>  
+<th colspan="2">List of Contents to this Tutorial</th>  
+</tr>  
+<tr><td valign="top">  
+<ul>  
+    <li><a href="#2d_graphics">2D graphics with OpenGL</a></li>
+    <li><a href="#grid">The Grid Concept</a></li>
+    <li><a href="#depth_buffer_2d">The Depth Render Buffer in 2D</a></li>
+    <li><a href="#cameras_2d">The Cameras with 2D</a></li>
+    <li><a href="#multisampling">The Multisampling</a></li>
+    <li><a href="#more_texture">More About Textures</a>
+        <ul>
+            <li><a href="#bpp">Bytes per Pixel</a></li>
+            <li><a href="#pvrtc"> PVRTC</a></li>
+        </ul></li>
+    <li><a href="#tips_tricks">Tips and Tricks</a>
+        <ul>
+            <li><a href="#cache">The Cache</a></li>
+            <li><a href="#store_values"> Store the Values</a></li>
+            <li><a href="#c_fastest"> C is Always the Fastest Language</a></li>
+        </ul></li>
+    <li><a href="#conclusion"> Conclusion</a></li>
+</ul>  
+</td></tr>  
+</table>
+
+<p><br/><h2><strong>At a glance</strong></h2> <br/>
+Remembering everything until here:  </p>
+
+<ol>  
+    <li>OpenGL’s logic is composed by just 3 simple concepts: Primitives, Buffers and Rasterize.</li>
+    <li>OpenGL ES 2.x works with programmable pipeline, which is synonymous of Shaders.</li>
+    <li>OpenGL isn't aware of the output device, platform or output surface. To make the bridge between OpenGL's core and our devices, we must use EGL (or EAGL in iOS).</li>
+    <li>The textures are crucial and should have a specific pixel format and order to fit within OpenGL.</li>
+    <li>We start the render process by calling <strong>glDraw*</strong>. The first steps will pass through the Vertex Shader, several checks will conclude if the processed vertex could enter in the Fragment Shader.</li>
+    <li>The original structure of our meshes should never change. We just create transformations matrices to produce the desired results.</li>
+</ol>
+
+<p>First I'll talk about 2D graphics, then let's see what is the multisampling/antialias filter, personally I don't like the cost x benefit of this kind of technique. Many times an application could run nicely without multisampling, but a simple multisampling filter can completely destroy the performance of that application. Anyway, sometimes, it's really necessary to make temporary multisampling to produce smooth images.</p>
+
+<p>Later I'll talk about textures in deep and its optimization 2 bytes per pixel data format. Also let's see PVRTC and how to place it in an OpenGL's texture, besides render to an off-screen surface.</p>
+
+<p>And finally I'll talk a briefly about some performances gains that I discovered by my self. Some tips and tricks which really help me a lot today and I want to share this with you.</p>
+
+<p>Let's go!</p>
+
+<p><br/><a name="2d_graphics"></a>  </p>
+
+<h2><strong>2D graphics with OpenGL</strong></h2><a href="#list_contents">top</a>  
+Using 2D graphics with OpenGL is not necessary limited to the use of lines or points primitives. The three primitives (triangles, lines and points) are good to use with 3D and 2D. The first thing about 2D graphics is the Z depth. All our work becomes two dimensions, excluding the Z axis to translations and scales and also excluding X and Y to rotations. It implies that we don't need to use the Depth Render Buffer anymore, because everything we draw will be made on the same Z position (usually the 0.0).
+
+A question comes up: "So how the OpenGL will know which object should be drawn on the front (or top) of the other ones?" It's very simple, by drawing the objects in the order that we want (objects at the background should be drawn first). OpenGL also offers a feature called Polygon Offset, but it's more like an adjustment than a real ordering.
+
+OK, now we can think in 2D graphics at three ways:  
+
+<ol>  
+    <li>Many squares on the same Z position.</li>
+    <li>Many points on the same Z position.</li>
+    <li>All above.</li>
+</ol>  
+
+<img class="size-full wp-image-1372" title="2d_orthographic_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/2d_orthographic_example.jpg" alt="This is how a 2D graphics looks like for OpenGL using squares." width="600" height="497"/>
+
+<img class="size-full wp-image-1373" title="2d_scene_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/2d_scene_example.jpg" alt="How a 2D scene will appear on the screen." width="600" height="497"/>
+
+You could imagine how easy it's to OpenGL, a state machine prepared to work with millions of triangles, to deal with those few triangles. In extreme situations, 2D graphics  works with hundreds of triangles.
+
+With simple words, everything will be textures. So most of our work with 2D will be on the textures. Many people feel compelled to create an API to work with texture Non-POT, that means, work with texture of dimensions like 36 x 18, 51 x 39, etc. My advice here is: "Don't do that!". It's not a good idea to work with 2D graphics using Non-POT textures. As you've seen in the last image above, it's always a good idea work with a imaginary grid, which should be POT, a good choice could be 16x16 or 32x32.
+
+If you are planing to use PVRTC compressed image files, could be good to use a grid of 8x8, because PVRTC minimum size is 8. I don't advice make grids less than 8x8, because it's unnecessary precise and could increase your work developing, also it compromise your application's performance. Grids with 8x8 size are very precise, we'll see soon the diferences between the grids and when and how to use them. Let's talk a little bit more about the grid.
+
+<br/><a name="grid"></a>  
+<h2><strong>The Grid Concept</strong></h2><a href="#list_contents">top</a>  
+I think this is the most important part in the planing of a 2D application. In a 3D game, for example, to determine where a character can walk we must create a collision detector. This detector could be a box (bounding box) or a mesh (bounding mesh, a simple copy from the original). In both cases, the calculations are very important and expensive. But in a 2D application it's very very easy to find the collisions areas if you are using a grid, because you have only a square area using X and Y coordinates!
+
+This is just one reason because the grid is so important. I know you can come up with many other advantages of the grid, like the organization, the precision on the calculations, the precision of the objects on the screen, etc. About 10 year ago (or maybe more) I worked with a tiny program to produce RPG games with 2D graphics. The idea of grid was very well stablished there. The following images show how everything can be fitted into the grid:
+
+<img class="size-medium wp-image-1374" title="rpg_maker_example1" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/rpg_maker_example1.jpg" alt="Grid in the RPG Maker. (click to enlarge)" width="300" height="227"/>
+
+I know, I know... it's the "Fuckwindons" system, sorry for that... as I told you, it was a decade ago... OK, let's understand the important features about the grid. You can click on the side image to enlarge it. The first thing I want you notice is the about the overlap of the images. Notice that the left side of the window is reserved to a kind of library. At the top of this library you can see little square images (32x32 in this case). Those squares are reserved to the floor of the scenario (in our OpenGL language, it would be the background). The other images in that library are transparent images (PNG) wich can be placed on top of the floor squares. You can see this difference looking at the big trees placed on the grid.
+
+Now find the "hero" on the grid. He's at the right side near a tree, it shows a little face with redhead inside a box. This is the second important point about the grid. That hero doesn't occupies only one little square on the grid, he could be bigger, but to the grid, the action delimitator represents only one square. Confused? Well, it's always a good idea to use only one grid's square to deal with the actions, because it let your code much more organized than other approaches. To create areas of actions you can duplicate the action square, just like the exit of the the village on the right top area of the grid in this side image.
+
+I'm sure you can imagine how easy is to create a control class to deal with the actions in your 2D application and then create view classes referencing the control classes, so you can prepare the view classes to get the collision detection on many squares on the grid. So you have 1 action - N grid squares detectors. At this way you can take all advantages of the grid and also an incredible boost in your application's performance.
+
+By using the grid you can easy define the collision areas which are impossible to the character pass through, like the walls. Another great advantage of using the grid is define "top areas", that means, areas which always will be drawn on top, like the up side of the trees. So if the character pass through these areas, he will be displayed behind.
+
+The following image shows a final scene which uses all these concepts of the grid. Notice how many images can be overlapped by others, pay attention of how the character deals with the action square and its own top areas. And notice the most top effects overlapping everything, like the clouds shadows or the yellow light coming from the sun.
+
+<img class="size-full wp-image-1375" title="rpg_maker_example2" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/rpg_maker_example2.jpg" alt="RPG Maker final scene." width="600" height="450"/>
+
+Summarizing the points taken, the grid is really the most important part of planning a 2D application. The grid is not a real thing in OpenGL, so you have to be careful about using this concept, because everything will be imaginary. Well, just to let you know, an extra information: the grid concept is so important that the OpenGL internally works with a grid concept to construct the Fragments.
+
+Great, this is everything about the grid. Now you would say: "OK, but this is not what I wanted, I want a game with a projection like Diablo, Sin City or even the We Rule does!". Oh right, so let's make things more complex and bring back the Depth Render Buffer and Cameras to our 2D application.
+
+<br/><a name="depth_buffer_2d"></a>  
+<h2><strong>The Depth Render Buffer in 2D</strong></h2><a href="#list_contents">top</a>  
+Knowing how the 2D graphics goes with OpenGL, we can think in more refined approach, like use the Depth Buffer even in 2D applications.
+
+<img class="size-medium wp-image-1376" title="grid_depth_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/grid_depth_example.jpg" alt="&quot;2D game&quot; using OpenGL with Depth Render Buffer. (click to enlarge)" width="310" height="205"/>
+
+<img class="size-medium wp-image-1377" title="grid_normal_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/grid_normal_example.jpg" alt="&quot;2D game&quot; using OpenGL without Depth Render Buffer. (click to enlarge)" width="310" height="205"/>
+
+By clicking on the images above, you can notice the difference between them. Both screenshot are from famous games from iOS, both use OpenGL and both are known as 2D games. Although they use OpenGL ES 1.1, we can understand the concept of Grid + Depth Render Buffer. The game on the left (<em>Gun Bros</em>) makes use of a very small grid, exactly 8x8 pixels, this kind of grid gives to the game a incredible precision to place the objects on the grid, but to improve the user experience you need to make a set of grid squares to deal with the actions, in this case a good choice could be arranging 4 ou 8 grid squares to each action detector. Now the game on the right, it's called <em>Inotia</em>, by the way, Inotia is today in its 3th edition. Since the first edition, Inotia always used a big grid, 32x32 pixels. As Gun Bros, Inotia uses OpenGL ES 1.1.
+
+There are many differences between those two grid types (8x8 and 32x32). The first one (8x8) is much more precisely and could seem to be the best choice, but remember that this choice will increase too much your processing. The Inotia game has a light processing demand, something absolutely unimpressive to the iOS' hardwares. You need to make the best choice to fit within the application you are planning to use.
+
+Now, talking about the Depth Render Buffer, the great thing about it is that you can use 3D models in your application. Look, without Depth Render Buffer you must use only squares, or another primitive geometric form, with textures. By doing this you must create one different texture to each position of your animation, specially to characters animation, obviously a great idea is make use of texture atlas:
+
+<img class="size-medium wp-image-1378" title="texture_atlas_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/texture_atlas_example.png" alt="Character texture atlas from Ragnarok." width="169" height="300"/>
+
+The image of Inotia game above has a similar texture altas to each character that appear in the game. Looking at that image you can see that the three character on the screen can turn just to four directions. Now, take another look to the Gun Bros image above.
+
+Notice that the characters can turn to all directions. Why? Well, by using a Depth Render Buffer you are free to use 3D models in your 2D application. So you can rotate, scale and translate the 3D models respecting the grid and the 2D concepts (no Z translate). The result is much much better, but as any improvements, it has a great cost for performance compared to 2D squares, of couse.
+
+But there is another important thing about mixing 3D and 2D concepts: the use of cameras. Instead of creating a single plane right in front of the screen, locking the Z translations, you can create a great plane along the Z axis, place your objects just as in a 3D application and create a camera with orthographic projection. You remember what it is and how to do it, right? (<a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/cameras-on-opengl-es-2-x/#projections" target="_blank">click here to check the article about cameras</a>).
+
+Before going further into the cameras and Depth Render Buffer with 2D graphics, it's important to know that at this point it has no real difference, at the code level, between 2D and 3D graphics since everything comes from your own planning and organization. So the code to use the Depth buffer is the same we saw in the last part (<a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/all-about-opengl-es-2-x-part-2/#render_buffers" target="_blank">click here to see the last tutorial</a>).
+
+Now let's talk about the cameras with 2D graphics.
+
+<br/><a name="cameras_2d"></a>  
+<h2><strong>The Cameras with 2D</strong></h2><a href="#list_contents">top</a>  
+OK, I'm sure you know how to create a camera and an orthographic projection now, as you've seen it at the tutorial about cameras, right? (<a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/cameras-on-opengl-es-2-x/#projections" target="_blank">click here to check the cameras tutorial</a>). Now a question comes up: "Where is the best place and approach to use cameras and depth render buffer in the 2D graphics?". The following image could help more than 1.000 words:
+
+<img class="size-medium wp-image-1379" title="cameras_projection_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/cameras_projection_example.jpg" alt="Same camera in both projections. (click to enlarge)" width="300" height="240"/>
+
+This image shows a scene like Diablo Game style, with a camera in the similar position. You can notice clearly the difference between both projections. Notice the red lines across the picture, with the Orthographic projection those lines are parallels, but with the Perspective projection those lines are not really parallels and can touch at the infinity.
+
+Now focus on the grey scale picture at the bottom right. That is the scene with the objects. As you can see, they are really 3D objects, but with an orthographic projection you can create scenes like Diablo, Sim City, Starcraft and other best sellers, giving a 2D look to your 3D application.
+
+If you take another look at that image of Gun Bros game, you can see that it's exactly what they do, there is a camera with orthographic projection and real 3D objects placed on the scene.
+
+So the best approach is to create a camera in your desired position, construct all your scene in a 3D world, set the camera to use orthographic projection and guide your space changes by using the grid concept.
+
+<img class="size-full wp-image-1380" title="cameras_grid_example" src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/cameras_grid_example.jpg" alt="The grid concept is very important even with cameras and Depth Render Buffer." width="600" height="447"/>
+
+I have one last advice about this subject, well... it's not really an advice, it's more like a warning. Perspective and Orthographic projections are completely different. So the same configuration of focal point, angle of view, near and far produces completely different results. So you need to find a configuration to the Orthographic projection different of that you were using with Perspective projection. Probably if you have a perspective projection which is working, when you change to orthographic projection you won't see anything. This is not a bug, it's just the differences between perspective and orthographic calculations.
+
+OK, these are the most important concepts about 2D graphics with OpenGL. Let's make a little review of them.  
+
+<ul>  
+    <li>There are two ways of using 2D graphics with OpenGL: by using or not the Depth Render Buffer.</li>
+    <li>Without Depth Render Buffer you can construct everything like a rectangle on the screen, forget the Z axis position at this way. Your job here will be laborious on textures. Although, by this way, you can have the best performance with OpenGL.</li>
+    <li>By using the Depth Render Buffer you can use real 3D objects and probably you will want to use a camera with orthographic projection.</li>
+    <li>Independent of the way you choose, always use the Grid concept when working on 2D graphics. It's the best way to organize your world and optimize your application performance.</li>
+</ul>  
+
+Now is time to go back into the 3D world and talk a little about the multisampling and antialias filter.
+
+<br/><a name="multisampling"></a>  
+<h2><strong>The Multisampling</strong></h2><a href="#list_contents">top</a>  
+I'm sure you already noticed that every 3D application, which have a real time render, have their objects' edges aliased. I'm talking about 3D world in general, like 3D softwares or games, whatever... the edges always (I mean, in majority of the cases) looks like it's kind aliased. That doesn't happen due a lack of well developed techniques to fit that but rather it's because our hardwares are not so powerful yet to deal with pixel blend in real time too fast.
+
+So, the first thing I want to say about the Anti-Alias filter is: "it's expensive!". In the majority of cases this little problem (aliased edges) doesn't matter. But there are some situations that your 3D application needs to looks better. The most simple and common example is the render in 3D softwares. When we hit the render button on our 3D software we expect to see gorgeous images, not jagged edges.
+
+With simple words, the OpenGL primitives get rasterized onto a grid (yes, like our grid concept), and their edges may become deformed. OpenGL ES 2.0 supports something called <em>multisampling</em>. It's a technique of Anti-Alias filter which each pixel is divided into few samples, each of these samples are treated like a mini-pixel in the rasterization process. Each sample has its own information about color, depth and stencil. When you ask the OpenGL for the final image on the Frame Buffer, it will resolve and mix all the samples. This process produces more smooth edges. OpenGL ES 2.0 is always configured to multisampling technique, even if the number of samples is equal 1, that means 1 pixel = 1 sample. Looks very simple in theory, but remember that OpenGL doesn't know anything about the device's surface, consequently, anything about device's pixel and color.
+
+The bridge between OpenGL and the device is made by the EGL. So the device color informations, pixel informations and surface informations are responsibility of EGL and consequentially the multisampling could not be implemented only by the OpenGL, it needs a plugin, which is responsibility of the vendors. Each vendors must create a plugin to EGL instructing about the necessary information, by doing this the OpenGL can really resolve the multi samples. The default EGL API offers a multisampling configuration, but commonly the vendors make some changes on it.
+
+In the case of Apple, this plugin is called "Multisample APPLE" and it's located at the OpenGL Extensions Header (glext.h). To correctly implement the Apple Multisample you need 2 Frame Buffer and 4 Render Buffer! 1 Frame Buffer is the normal provided by OpenGL, the another one is the Multisample Framebuffer. The Render Buffers are Color and Depth.
+
+There are three new functions in the glext.h to deal with Multisample APPLE:
+
+
+<table width="675">  
+<tr>  
+<th>Multisample APPLE</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glRenderbufferStorageMultisampleAPPLE(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be <strong>GL_RENDERBUFFER</strong>, this is just an internal convention for OpenGL.</li>
+    <li><strong>samples</strong>: This is the number of samples which the Multisample filter will make.</li>
+    <li><strong>internalformat</strong>: This specifies what kind of render buffer we want and what color format this temporary image will use. This parameter can be:
+<ul>  
+    <li><strong>GL_RGBA4</strong>, <strong>GL_RGB5_A1</strong>, <strong>GL_RGB56</strong>, <strong>GL_RGB8_OES</strong> or <strong>GL_RGBA8_OES</strong> to a render buffer with final colors.</li>
+    <li><strong>GL_DEPTH_COMPONENT16</strong> or <strong>GL_DEPTH_COMPONENT24_OES</strong> to a render buffer with Z depth.</li>
+</ul></li>  
+    <li><strong>width</strong>: The final width of a render buffer.</li>
+    <li><strong>height</strong>: The final height of a render buffer.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glResolveMultisampleFramebufferAPPLE(void)</strong></h5><br/>  
+<ul>  
+    <li>This function doesn't need any parameter. This function will just resolve the last two frame buffer bound to <strong>GL_DRAW_FRAMEBUFFER_APPLE</strong> and <strong>GL_READ_FRAMEBUFFER_APPLE</strong>, respectively.</li>
+</ul>  
+</td>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glDiscardFramebufferEXT(GLenum target, GLsizei numAttachments, const GLenum *attachments)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: Usually the target will be <strong>GL_READ_FRAMEBUFFER_APPLE</strong>.</li>
+    <li><strong>numAttachments</strong>: The number of Render Buffer attachments to discard in the target Frame Buffer. Usually this will be 2, to discard the Color and Depth Render Buffers.</li>
+    <li><strong>attachments</strong>: A pointer to an array containing the type of Render Buffer to discard. Usually that array will be <strong>{GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT}</strong>.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+
+Before checking the code, let's understand a little bit more about these new functions. The first function (<strong>glRenderbufferStorageMultisampleAPPLE</strong>) is intended to replace that function that set the properties to the Render Buffer, the <strong>glRenderbufferStorage</strong>. The big new in this function is the number of samples, it will define how many samples each pixel will has.
+
+The second one (<strong>glResolveMultisampleFramebufferAPPLE</strong>) is used to take the informations from the original frame buffer, place it in the Multisample Frame Buffer, resolve the samples of each pixel and then draw the resulting image to our original Frame Buffer again. In simple words, this is the core of Multisample APPLE, this is the function which makes all the job.
+
+The last one (<strong>glDiscardFramebufferEXT</strong>) is another clearing function. As you imagine, after the <strong>glResolveMultisampleFramebufferAPPLE</strong> makes all the processing, the Multisample Frame Buffer will be with many informations in it, so it's time to clear all that memory. To do that, we call the <strong>glDiscardFramebufferEXT</strong> informing what we want to clear from where.
+
+Now, here is the full code to use Multisample APPLE:
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Multisample Framebuffer APPLE</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+// EAGL
+// Assume that _eaglLayer is a CAEAGLLayer data type and was already defined.
+// Assume that _context is an EAGLContext data type and was already defined.
+
+// Dimensions
+int _width, _height;
+
+// Normal Buffers
+GLuint _frameBuffer, _colorBuffer, _depthBuffer;
+
+// Multisample Buffers
+GLuint _msaaFrameBuffer, _msaaColorBuffer, _msaaDepthBuffer;  
+int _sample = 4; // This represents the number of samples.
+
+// Normal Frame Buffer
+glGenFramebuffers(1, &amp;_frameBuffer);  
+glBindFramebuffer(GL_FRAMEBUFFER, _frameBuffer);
+
+// Normal Color Render Buffer
+glGenRenderbuffers(1, &amp;_colorBuffer);  
+glBindRenderbuffer(GL_RENDERBUFFER, _colorBuffer);  
+[_context renderbufferStorage:GL_RENDERBUFFER fromDrawable:_eaglLayer];
+glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _colorBuffer);
+
+// Retrieves the width and height to the EAGL Layer, just necessary if the width and height was not informed.
+glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &amp; _width);  
+glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &amp; _height);
+
+// Normal Depth Render Buffer
+glGenRenderbuffers(1, &amp;_depthBuffer);  
+glBindRenderbuffer(GL_RENDERBUFFER, _depthBuffer);  
+glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, _width, _height);  
+glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, _depthBuffer);  
+glEnable(GL_DEPTH_TEST);
+
+// Multisample Frame Buffer
+glGenFramebuffers(1, &amp;_msaaFrameBuffer);  
+glBindFramebuffer(GL_FRAMEBUFFER, _msaaFrameBuffer);
+
+// Multisample  Color Render Buffer
+glGenRenderbuffers(1, &amp;_msaaColorBuffer);  
+glBindRenderbuffer(GL_RENDERBUFFER, _msaaColorBuffer);  
+glRenderbufferStorageMultisampleAPPLE(GL_RENDERBUFFER, _samples, GL_RGBA8_OES, _width, _height);  
+glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _msaaColorBuffer);
+
+// Multisample Depth Render Buffer
+glGenRenderbuffers(1, &amp;_msaaDepthBuffer);  
+glBindRenderbuffer(GL_RENDERBUFFER, _msaaDepthBuffer);  
+glRenderbufferStorageMultisampleAPPLE(GL_RENDERBUFFER, _samples, GL_DEPTH_COMPONENT16, _width, _height);  
+glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, _msaaDepthBuffer);  
+.</pre>
+
+Yes, many lines to a basic configuration. Once all those 6 buffers have been defined, we also need to make the render by a different approach. Here is the necessary code:
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Rendering with Multisample APPLE</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+//-------------------------
+//    Pre-Render
+//-------------------------
+// Clears normal Frame Buffer
+glBindFramebuffer(GL_FRAMEBUFFER, _frameBuffer);  
+glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+// Clears multisample Frame Buffer
+glBindFramebuffer(GL_FRAMEBUFFER, _msaaFrameBuffer);  
+glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+//-------------------------
+//    Drawing
+//-------------------------
+//...
+// Draw all your content.
+//...
+
+//-------------------------
+//    Render
+//-------------------------
+// Resolving Multisample Frame Buffer.
+glBindFramebuffer(GL_DRAW_FRAMEBUFFER_APPLE, _frameBuffer);  
+glBindFramebuffer(GL_READ_FRAMEBUFFER_APPLE, _msaaFrameBuffer);  
+glResolveMultisampleFramebufferAPPLE();
+
+// Apple (and the khronos group) encourages you to discard
+// render buffer contents whenever is possible.
+GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT};  
+glDiscardFramebufferEXT(GL_READ_FRAMEBUFFER_APPLE, 2, attachments);
+
+// Presents the final result at the screen.
+glBindRenderbuffer(GL_RENDERBUFFER, _colorBuffer);  
+[_context presentRenderbuffer:GL_RENDERBUFFER];
+.</pre>
+
+If you want to remember something about the EAGL (the EGL implementation by Apple), check it here: <a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/khronos-egl-and-apple-eagl/" target="_blank">article about EGL and EAGL</a>. OpenGL also offers some configurations to multisampling, <strong>glSampleCoverage</strong> and few configurations with <strong>glEnable</strong>. I'll not talk in deep about these configurations here, because I don't believe multisampling is a good thing to spend our time on. As I told you, the result is not a big deal, it's just a little bit more refined. In my opinion, the performance cost is too much compared to the final result:
+
+<img src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/multisample_result_example.jpg" alt="Same 3D model rendered without and with Anti-Alias filter." title="multisample_result_example" width="600" height="470" class="size-full wp-image-1392"/>
+
+OK, now it's time to talk more about the textures in OpenGL.
+
+<br/><a name="more_texture"></a>  
+<h2><strong>More About Textures</strong></h2><a href="#list_contents">top</a>  
+We already know many things about textures from the second part of this serie (<a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/all-about-opengl-es-2-x-part-2/#textures" target="_blank">All About OpenGL ES 2.x - Textures</a>).  First, let's talk about the optimized types. It's a great boost on our application's performance and is very easy to implement. I'm talking about the bytes per pixel of our images.
+
+<br/><a name="bpp"></a>  
+<h2>Bytes per Pixel</h2><a href="#list_contents">top</a>  
+Usually the images has 4 bytes per pixel, one byte for each channel, RGBA. Some images without alpha, like JPG file format, has only 3 bytes per pixel (RGB). Each byte could be represented by an hexadecimal color in the format 0xFF, it's called hexadecimal because each decimal house has the range 0 - F (0,1,2,3,4,5,6,7,8,9,A,B,C,D,E,F), so when you make a combination of two hexadecimal numbers you get one byte (16 x 16 = 256). As a convention, we describe a hexadecimal color as 0xFFFFFF, where each set of two number represent one color channel (RGB). For images with alpha channel, like PNG format, we are used to say 0xFFFFFF + 0xFF, that means (RGB + A).
+
+My next article will be about binary programming, so I'll not talk in deep about binaries here. All that we need for now is to know that 1 byte = 1 color channel. The OpenGL can also work with more compressed format, which uses only 2 bytes per pixel. What that means? It means that each byte will store two color channels, including alpha. In very simple words, let's reduce the color's range of the image.
+
+The OpenGL offers to us 3 compressed data types: <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong>, <strong>GL_UNSIGNED_SHORT_5_5_5_1</strong>, <strong>GL_UNSIGNED_SHORT_5_6_5</strong>. The first two should be used when you have alpha channel and the last one it's only for situations without alpha. These 3 names tell us something about the pixel data. The numbers at the right instruct us about the number of bits (not bytes) that must be used in each channel (RGBA). Oh, and just to make it clear, each byte is composed by 8 bits. So in the first case 4 bits per channel with a total of 2 bytes per pixel. The second one, 5 bits to RGB channels and 1 bit to alpha with a total of 2 bytes per pixel. And the last one, 5 bits to R, 6 bits to G and 5 bits to B with a total of 2 bytes per pixel.
+
+Here I want to make a warning: The type <strong>GL_UNSIGNED_SHORT_5_5_5_1</strong> is not really useful, because only 1 bit to alpha is the same as give it a Boolean data type, I mean, 1 bit to alpha means visible YES or NOT, just it. So this type is not really useful, it has less bits on Green channel than <strong>GL_UNSIGNED_SHORT_5_6_5</strong> and even can't produce real transparent effects like <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong>. So if you need the alpha channel, make use of <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong>, if not, make use of <strong>GL_UNSIGNED_SHORT_5_6_5</strong>.
+
+A little thing to know about the <strong>GL_UNSIGNED_SHORT_5_6_5</strong>. As the human eye has more sensibility to the green colors, the channel with more bits is exactly the Green channel. At this way, even with a less color range, the resulting image to the final user will not seem to be that different.
+
+Now let's take a look at the difference between both compressions.  
+<img src="https://web.archive.org/web/20140302041558im_/http://db-in.com/images/texture_compression_example.jpg" alt="OpenGL optimized 2 bytes per pixel (bpp) data types." title="texture_compression_example" width="600" height="470" class="size-full wp-image-1393"/>
+
+As you saw, by using <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong> could really be ugly in some situations. But the <strong>GL_UNSIGNED_SHORT_5_6_5</strong> looks very nice. Why? I'll explain in details at the next article about binaries, but in very simple words, by using <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong> we have only 16 tonalities for each channel, including 16 tonalities to alpha. But with <strong>GL_UNSIGNED_SHORT_5_6_5</strong> we have 32 tonalities to Red and Blue and 96 tonalities of Green spectrum. It still far from the human eye's capacity, but remember that by using these optimizations we reduce 2 bytes per pixel in all our images, this represents much more performance to our renders.
+
+Now it's time to learn how to convert our traditional images to these formats. Normally, when you extract the binary informations from an image you get it pixel by pixel, so probably each pixel will be composed by an "unsigned int" data type, which has 4 bytes. Each programming language provides a method(s) to extract the binary information from the pixels. Once you have your array of pixel data (array of unsigned int) you can use the following code to convert that data to the <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong> or <strong>GL_UNSIGNED_SHORT_5_6_5</strong>.
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Converting 4bpp to 2bpp</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+typedef enum  
+{
+    ColorFormatRGB565,
+    ColorFormatRGBA4444,
+} ColorFormat;
+
+static void optimizePixelData(ColorFormat color, int pixelDataLength, void *pixelData)  
+{
+    int i;
+    int length = pixelDataLength;
+
+    void *newData;
+
+    // Pointer to pixel information of 32 bits (R8 + G8 + B8 + A8).
+    // 4 bytes per pixel.
+    unsigned int *inPixel32;
+
+    // Pointer to new pixel information of 16 bits (R5 + G6 + B5)
+    // or (R4 + G4 + B4 + A4).
+    // 2 bytes per pixel.
+    unsigned short *outPixel16;
+
+    newData = malloc(length * sizeof(unsigned short));
+    inPixel32 = (unsigned int *)pixelData;
+    outPixel16 = (unsigned short *)newData;
+
+    if(color == ColorFormatRGB565)
+    {
+        // Using pointer arithmetic, move the pointer over the original data.
+        for(i = 0; i &lt; length; ++i, ++inPixel32)
+        {
+            // Makes the convertion, ignoring the alpha channel, as following:
+            // 1 -  Isolates the Red channel, discards 3 bits (8 - 3), then pushes to the final position.
+            // 2 -  Isolates the Green channel, discards 2 bits (8 - 2), then pushes to the final position.
+            // 3 -  Isolates the Blue channel, discards 3 bits (8 - 3), then pushes to the final position.
+            *outPixel16++ = (((( *inPixel32 &gt;&gt; 0 ) &amp; 0xFF ) &gt;&gt; 3 ) &lt;&lt; 11 ) |
+                            (((( *inPixel32 &gt;&gt; 8 ) &amp; 0xFF ) &gt;&gt; 2 ) &lt;&lt; 5 ) |
+                            (((( *inPixel32 &gt;&gt; 16 ) &amp; 0xFF ) &gt;&gt; 3 ) &lt;&lt; 0 );
+        }
+    }
+    else if(color == ColorFormatRGBA4444)
+    {
+        // Using pointer arithmetic, move the pointer over the original data.
+        for(i = 0; i &lt; length; ++i, ++inPixel32)
+        {
+            // Makes the convertion, as following:
+            // 1 -  Isolates the Red channel, discards 4 bits (8 - 4), then pushes to the final position.
+            // 2 -  Isolates the Green channel, discards 4 bits (8 - 4), then pushes to the final position.
+            // 3 -  Isolates the Blue channel, discards 4 bits (8 - 4), then pushes to the final position.
+            // 4 -  Isolates the Alpha channel, discards 4 bits (8 - 4), then pushes to the final position.
+            *outPixel16++ = (((( *inPixel32 &gt;&gt; 0 ) &amp; 0xFF ) &gt;&gt; 4 ) &lt;&lt; 12 ) |
+                            (((( *inPixel32 &gt;&gt; 8 ) &amp; 0xFF ) &gt;&gt; 4 ) &lt;&lt; 8 ) |
+                            (((( *inPixel32 &gt;&gt; 16 ) &amp; 0xFF ) &gt;&gt; 4 ) &lt;&lt; 4 ) |
+                            (((( *inPixel32 &gt;&gt; 24 ) &amp; 0xFF ) &gt;&gt; 4 ) &lt;&lt; 0 );
+        }
+    }
+
+    free(pixelData);
+
+    pixelData = newData;
+}
+.</pre>
+
+The routine above assumes the channel order as RGBA. Although is not common, your image could have the pixels composed by another channel order, like ARGB or BGR. In these cases you must change the routine above or change the channel order at when extracting binary informations from each pixel. Another important thing is about the binary order. I don't want to confuse your mind if you don't know too much about binaries, but just as an advice: you probably will get the pixel data in little endian format, the traditional, but if your programming language get the binary informations as a big endian, the above routine will not work properly, so make sure your pixel data is in little endian format.
+
+<br/><a name="pvrtc"></a>  
+<h2>PVRTC</h2><a href="#list_contents">top</a>  
+I sure you've heard about the texture compression format PVRTC, if you already feel confortable about this topic, just skip to the next one. PVRTC is a binary format created by "<a href="https://web.archive.org/web/20140302041558/http://www.imgtec.com/" target="_blank">Imagination Technology</a>", also called "<em>Imgtec</em>". This format uses the channel order as ARGB instead the traditional RGBA. To say the truth, its optimization is not about the file's size, if we look only to the size, any JPG is more compressed or even a PNG can be lighter. The PVRTC is optimized about its processing, its pixels can be already in the format 2 bytes per pixel (2bpp) or 4 bytes per pixel (4bpp). The data  inside PVRTC is OpenGL friendly and also can store Mipmap levels. So, could it be a good idea to always make use of PVRTC? Well, not exactly... let's see why.
+
+The PVRTC format is not supported by default in OpenGL ES 2.0, there are informations that OpenGL ES 2.1 will come with native support to PVRTC textures, but what we have for now is just the OpenGL ES 2.0. To use PVRTC on it, just as the Multisampling, you need a vendors plug-in. In the case of Apple, this plugin has four new constant values. OpenGL provides a function to upload pixel data from the compressed formats, like PVRTC:
+
+
+<table width="675">  
+<tr>  
+<th>Uploading PVRTC</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glCompressedTexImage2D (GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid* data)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be GL_TEXTURE_2D, this is just an internal convention for OpenGL.</li>
+    <li><strong>level</strong>: The number of Mipmap levels in the file.</li>
+    <li><strong>internalformat</strong>: The format of the PVRTC. This parameter can be:
+<ul>  
+    <li><strong>GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG</strong>: Files using 2bpp without the alpha channel.</li>
+    <li><strong>GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG</strong>: Files using 2bpp and the alpha channel.</li>
+    <li><strong>GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG</strong>: Files using the 4bpp without the alpha channel.</li>
+    <li><strong>GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG</strong>: Files using 4bpp and the alpha channel.</li>
+</ul></li>  
+    <li><strong>width</strong>: The width of the image.</li>
+    <li><strong>height</strong>: The height of the image.</li>
+    <li><strong>border</strong>: This parameter is ignored in OpenGL ES. Always use the value 0. This is just an internal constant to conserve the compatibly with the desktop versions.</li>
+    <li><strong>imageSize</strong>: The number of the bytes in the binary data.</li>
+    <li><strong>data</strong>: The binary data for the image.</li>
+</td>  
+</tr>  
+</table>
+
+
+As you can imagine, the data format <strong>GL_UNSIGNED_SHORT_4_4_4_4</strong> or <strong>GL_UNSIGNED_SHORT_5_6_5</strong> is chosen based on the file format, RGB or RGBA with 2bpp or 4bpp, depends on.
+
+To generate the PVRTC you have many options. The two most common is the Imgtec Tools or the Apple's Texture Tool. Here you can find the <a href="https://web.archive.org/web/20140302041558/http://www.imgtec.com/powervr/insider/powervr-utilities.asp" target="_blank">Imgtec Tools</a>.  The Apple tool comes with iPhone SDK, it's located at the path "<em><xcode folder>/iPhoneOS.platform/Developer/usr/bin</em>" the name is "<em>texturetool</em>", you can find all informations about it at <a href="https://web.archive.org/web/20140302041558/http://developer.apple.com/library/ios/#documentation/3DDrawing/Conceptual/OpenGLES_ProgrammingGuide/TextureTool/TextureTool.html" target="_blank">Apple Texture Tool</a>.
+
+I'll explain how to use the Apple tool here. Follow these steps:  
+
+<ul>  
+    <li>Open the Terminal.app (usually it is in /Applications/Utilities/Terminal.app)</li>
+    <li>Click on <strong>texturetool</strong> in Finder and drag &amp; drop it on Terminal window. Well, you also can write the full path "<em><xcode folder>/iPhoneOS.platform/Developer/usr/bin/texturetool</em>", I preffer drag &amp; drop.</li>
+    <li>Write in front of texture tool path: " -e PVRTC --channel-weighting-linear --bits-per-pixel-2 -o "</li>
+    <li>Now you should write the output path, again, I prefer drag &amp; drop the file from the Finder to the Terminal window and rename its extension. The extension really doesn't matter, but my advice is to write something that let you identify the file format, like pvrl2 for Channel Weighting Linear with 2bpp.</li>
+    <li>Finally, add an space and write the input file. Guess... I prefer to drag &amp; drop from the Finder. The input files must be PNG or JPG files only.</li>
+    <li>Hit "Enter"</li>
+</ul>
+
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Terminal Script to Generate PVRTC with Texturetool</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/texturetool
+ -e PVRTC --channel-weighting-linear --bits-per-pixel-2 -o 
+/Texture/Output/Path/Texture.pvrl2 /Texture/Intput/Path/Texture.jpg
+.</pre>
+
+Good, now you have a PVRTC file. The problem with the Apple tool is that it doesn't generate the traditional PVRTC binary header. It's composed by 52 bytes at the beginning of the file and gives instructions about the height and width of the image, number of Mipmaps on it, bpp, channels order, alpha, etc. In the traditional PVRTC files, this is the header format:  
+
+<ul>  
+    <li><strong>unsigned int (4 bytes)</strong>: Header Length in Bytes. Old PVRTC has a header of 44 bytes instead 52.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Height of the image. PVRTC only accepts squared images (width = height) and POT sizes (Power of Two)</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Width of the image. PVRTC only accepts squared images (width = height) and POT sizes (Power of Two).</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Number of Mipmaps.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Flags.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Data Length of the image.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: The bpp.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Bitmask Red.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Bitmask Green.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Bitmask Blue.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Bitmask Alpha.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: The PVR Tag.</li>
+    <li><strong>unsigned int (4 bytes)</strong>: Number of Surfaces.</li>
+</ul>
+
+
+But, using the Apple Texture Tool we don't have the file header and without that header we can't find neither the width nor height of the file from our code. So to use PVRTC from Apple tool you should know about bpp, width, height and alpha. Kind of annoying, no?
+
+Well... I have good news for you. I found a way, a trick, to extract informations from the PVRTC generated by Apple tool. This trick works fine, but it can't identify informations about the Mipmap, but this is not a problem, because Apple tool doesn't generate Mipmaps anyway.
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Extracting Infos From PVRTC Without Header</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+// Supposing the bpp of the image is 4, calculates its squared size.
+float size = sqrtf([data length] * 8 / 4);
+
+// Checks if the bpp is really 4 by comparing the rest of division by 8,
+// the minimum size of PVRTC, if the rest is zero then this image really
+// has 4 bpp, otherwise, it has 2 bpp.
+bpp = ((int)size % 8 == 0) ? 4 : 2;
+
+// Knowing the bpp, calculates the width and height
+// based on the data size.
+width = sqrtf([data length] * 8 / bpp);  
+height = sqrtf([data length] * 8 / bpp);  
+length = [data length];  
+.</pre>
+
+The PVRTC files made from Texturetool doesn't have any header, so its image data starts in the first byte of the file. And what about the alpha? Could you ask. Well, the alpha will be more dependent of your EAGL context configuration. If you are using RGBA8, assume the alpha exist and use the <strong>GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG</strong> or <strong>GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG</strong>, based on the informations that you extract from the code above. If your EAGL context uses RGB565, so assume <strong>GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG</strong> or <strong>GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG</strong>.
+
+Now to use your PVRTC on OpenGL ES 2.0, it's very simple, you don't need to change almost anything, you will create your texture normally, just replace the call to <strong>glTexImage2D</strong> by <strong>glCompressedTexImage2D</strong> function.
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Uploading PVRTC to OpenGL</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+// format = one of the GL_COMPRESSED_RGB* constants.
+// width = width extract from the code above.
+// height = height extract from the code above.
+// length = length extract from the code above.
+// data = the array of pixel data loaded via NSData or any other binary class.
+
+// You probably will use NSData to load the PVRTC file.
+// By using "dataWithContentsOfFile" or similar NSData methods.
+
+glCompressedTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, length, data);  
+.</pre>
+
+Well done, this is all about PVRTC. But my last advice about this topic is, always avoid to use PVRTC. The cost X benefit is not so good. Remember you just need to parse an image file once to OpenGL, so PVRTC doesn't offers a great optimization.
+
+<br/><a name="off-screen"></a>  
+<h2><strong>The Off-Screen Render</strong></h2>  
+
+<p>Until now we've just talked about render to the screen, "on the screen", "on the device", but we also have another surface to render, the off-screen surfaces. You remember it from the EGL article, right? (<a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/khronos-egl-and-apple-eagl/" target="_blank">EGL and EAGL article</a>).</p>
+
+<p>What is the utility of  an off-screen render? We can take a snapshot from the current frame and save it as an image file, but the most important thing about off-screen renders is to create an OpenGL texture with the current frame and then use this new internal texture to make a reflection map, a real-time reflection. I'll not talk about the reflections here, this subject is more appropriated to a tutorial specific about the shaders and lights, let's focus only about how to render to an off-screen surface. We'll need to know a new function:</p>
+
+<table width="675">  
+<tr>  
+<th>Off-Screen Render</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level)</strong></h5><br/>  
+<ul>  
+    <li><strong>target</strong>: The target always will be <strong>GL_FRAMEBUFFER</strong>, this is just an internal convention for OpenGL.</li>
+    <li><strong>attachment</strong>: This specifies what kind of render buffer we want to render for This parameter can be:
+<ul>  
+    <li><strong>GL_COLOR_ATTACHMENT0</strong> to the Color Render Buffer.</li>
+    <li><strong>GL_DEPTH_ATTACHMENT</strong> to a Depth Render Buffer.</li>
+</ul></li>  
+    <li><strong>textarget</strong>: The type of texture, to 2D texture this parameter always will be <strong>GL_TEXTURE_2D</strong>. If your texture is a 3D texture (Cube Map), you can use one of its faces as this parameter: GL_TEXTURE_CUBE_MAP_POSITIVE_X, GL_TEXTURE_CUBE_MAP_POSITIVE_Y, GL_TEXTURE_CUBE_MAP_POSITIVE_Z, GL_TEXTURE_CUBE_MAP_NEGATIVE_X, GL_TEXTURE_CUBE_MAP_NEGATIVE_Y or GL_TEXTURE_CUBE_MAP_NEGATIVE_Z.</li>
+    <li><strong>texture</strong>: The texture object target.</li>
+    <li><strong>level</strong>: Specifies the Mipmap level for the texture.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+<p>To use this function we need to first create the target texture. We can do it just as before (<a href="https://web.archive.org/web/20140302041558/http://blog.db-in.com/all-about-opengl-es-2-x-part-2/#textures" target="_blank">check out the texture functions here</a>). Then we call <strong>glFramebufferTexture2D</strong> and proceed normally with our render routine. After drawing something (glDraw* callings) that texture object will be filled and you can use it for anything you want. Here is an example:</p>
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Drawing to Off-Screen Surface</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+// Create and bind the Frame Buffer.
+// Create and attach the Render Buffers, except the render buffer which will
+// receive the texture as attachment.
+
+GLuint _texture;  
+glGenTextures(1, &amp;_texture);  
+glBindTexture(GL_TEXTURE_2D, _texture);  
+glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,  textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);  
+glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _texture, 0);  
+.</pre>
+
+<p>Differently than creating a texture for a pixel data, at this time you set the texture data to <strong>NULL</strong>. Because they will be filled up dynamically later on. If you intend to use the output image as a texture for another draw, remember first to draw the objects that will fill the output texture.</p>
+
+<p>Well, as any Frame Buffer operation, it's a good idea to check <strong>glCheckFramebufferStatus</strong> to see if everything was attached OK. A new question comes up: "If I want to save the resulting texture to a file, how could I retrieve the pixel data from the texture?", OpenGL is a good mother, she gives us this function:</p>
+
+<table width="675">  
+<tr>  
+<th>Getting Pixel Data from Texture</th>  
+</tr>  
+<tr>  
+<td><h5><strong>GLvoid glReadPixels (GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid* pixels)</strong></h5><br/>  
+<ul>  
+    <li><strong>x</strong>: The X position to start getting pixel data. Remember that the pixel order in the OpenGL starts in the lower left corner and goes to up right corner.</li>
+    <li><strong>y</strong>: The Y position to start getting pixel data.  Remember that the pixel order in the OpenGL starts in the lower left corner and goes to up right corner.</li>
+    <li><strong>width</strong>: The Width to get the pixel data. Can't be greater than the original render buffer.</li>
+    <li><strong>height</strong>: The Width to get the pixel data. Can't be greater than the original render buffer.</li>
+    <li><strong>format</strong>: Always use <strong>GL_RGB</strong>, there are other formats, but it is implementation dependent and can vary depending on your vendors. For example, to get Alpha information, it depends on your EGL context configuration, which is vendors dependent.</li>
+    <li><strong>type</strong>: Always use <strong>GL_UNSIGNED_BYTE,</strong>, there are other formats, but it is implementation dependent and can vary depending on your vendors.</li>
+    <li><strong>pixels</strong>: A pointer to return the pixel data.</li>
+</ul>  
+</td>  
+</tr>  
+</table>
+
+<p>As you've saw, the function is very easy, you can call it any time you want. Just remember a very important thing: "OpenGL Pixel Order!", it starts in the lower left corner and goes to the up right corner. To a traditional image file, that means the image is flipped vertically, so if you want to save to a file, take care with it.</p>
+
+<p>Now you must to do the invert path you are used to when import a texture. Now you have the pixel data and want to construct a file. Fortunately many languages offers a simple way to construct an imagem from pixel data. For example, with Cocoa Touch (Objective-C), we can use NSData + UIImage, at this way:</p>
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Drawing to Off-Screen Surface</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+// The pixelData variable is a "void *" initialized with memory allocated.
+
+glReadPixels (0, 0, 256, 256, GL_RGB, GL_UNSIGNED_BYTE, pixelData);  
+UIImage *image = [UIImage imageWithData:[NSData dataWithBytes:pixelData length:256 * 256]];
+
+// Now you can save the image as JPG or PNG.
+[UIImageJPEGRepresentation(image, 100) writeToFile:@"A path to save the file" atomically:YES];
+.</pre>
+
+<p>Just a little question, <strong> glReadPixels </strong> will read from where? OpenGL State Machine, do you remember? <strong> glReadPixels </strong> will read the pixels from the "last Frame Buffer bound".</p>
+
+<p>Now it's time to talk more about optimization.</p>
+
+<p><br/><a name="tips_tricks"></a>  </p>
+
+<h2><strong>Tips and Tricks</strong></h2><a href="#list_contents">top</a>  
+I want to talk now about some tips and tricks to boost your application. I don't want to talk about little optimizations which make you gain 0.001 secs, no. I want to talk about real optimizations. That ones which can boost 0.5 secs or even increase your render frame rate.
+
+<br/><a name="cache"></a>  
+<h3>The Cache</h3><a href="#list_contents">top</a>  
+This is very important, I really love it, I'm used to use it on everything, it's great! Imagine this situation, the user touch the objects on the screen to make a rotation. Now the user touch another object, but the first doesn't change anything. So it would be great to make the first object's transformation matrix a cached matrix, instead to recalculating the first object's matrix at each frame.
+
+The cached concept extends even to other areas, like cameras, lights and quaternions. Instead to recalculate something at each frame, use a little BOOL data type to check if a matrix or even a value is cached or not. The following pseudo-code shows how is simple to work with cache concept.
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Cache Concept</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+bool _matrixCached;  
+float _changeValue;  
+float *_matrix;
+
+float *matrix(void)  
+{
+    if (!_matrixCached)
+    {
+        // Do changes into _matrix.
+
+        _matrixCached = TRUE;
+    }
+
+    return _matrix;
+}
+
+void setChange(float value)  
+{
+    // Change the _changeValue which will affect the matrix.
+
+    _matrixCached = FALSE;
+}
+.</pre>
+
+<br/><a name="store_values"></a>  
+<h3>Store the Values</h3><a href="#list_contents">top</a>  
+We are used to change the matrix (or the quaternion) every time that occurs transformation. For example, if our code make the changes: translate X - we change the resulting matrix, translate Y - we change the matrix, rotate Z - change the matrix and scale Y - change the matrix. Some 3D engines and people do not even hold on a value to those transformations, so if the code need to retrieve those values, they extract the values directly from the resulting matrix. But this is not the best approach. A great optimization could be reached if we store the values independently, like translations X,Y and Z, rotations X,Y and Z and scales X,Y and Z.
+
+By storing the values you can make a single change into the resulting matrix, making the calculations once per frame instead of making the calculus at every transformation. The following pseudo-code can help you to understand the Store concept better:
+
+
+<table width="675">  
+<tbody>  
+<tr>  
+<th>Store Concept</th>  
+</tr>  
+</tbody>  
+</table>  
+
+<pre class="brush:cpp">.  
+float _x;  
+float _y;  
+float _z;
+
+float x(void) { return _x; }  
+float setX(float value)  
+{
+    _x = value;
+}
+
+float y(void) { return _y; }  
+float setY(float value)  
+{
+    _y = value;
+}
+
+float z(void) { return _z; }  
+float setZ(float value)  
+{
+    _z = value;
+}
+
+float *matrix(void)  
+{
+    // This function will be called once per frame.
+    // Make the changes to the matrix based on _x, _y and _z.
+}
+.</pre>
+
+<br/><a name="c_fastest"></a>  
+<h3>C is always the fast language</h3><a href="#list_contents">top</a>  
+This tip is just something to remember. You probably know that, but it's very important to reinforce. C is always the fastest language. No other language can be faster than C. It's the most basic language and it's the great father of almost all computer languages. So always try to use C in the most critical parts of the code. Specially for render routines.
+
+String comparisons with C is around 4x faster than Objective-C comparisons. So if you need to check some string value at the render time, prefer to convert it from NSString to C string (char *) and make the comparison, even if you need re-convert from C string to NSString again, even in these cases C string is faster. To compare C strings you know, just use <strong>if (strcmp(string1, string2) == 0)</strong>.
+
+Specially for numbers, always use basic C data types (<strong>float</strong>, <strong>int</strong>, <strong>short</strong>, <strong>char</strong> and their unsigned versions). Besides, avoid at maximum value that use 64 bits, like <strong>long</strong> or <strong>double</strong> data type. Remember that OpenGL ES doesn't support, by default, 64 bits data types.
+
+<br><a name="conclusion"></a>  
+<h2><strong>Conclusion</strong></h2><a href="#list_contents">top</a>  
+OK dudes, we're at the end of our objective with this serie. I'm sure now you know a lot of things about OpenGL and 3D world. I have covered almost all about the OpenGL in those 3 tutorials of this serie. I hope you learned all the concepts about the subjects covered in these tutorials.
+
+Now, as we are used, let's remember everything:
+
+
+<ul>  
+    <li>2D graphics with OpenGL can be done by two ways: with or without Depth Render Buffer.</li>
+    <li>When using Depth Render Buffer, it could also be good to make use of a camera with Orthographic projection.</li>
+    <li>Independent of the way you choose, always use the Grid concept with 2D graphics.</li>
+    <li>The Multisampling filter is a plug-in that depends the vendors implementation. Multisampling always has a big cost on performance, use it only in special situations.</li>
+    <li>Always try to optimize your textures to a 2bpp data format.</li>
+    <li>You can use PVRTC in your application to save some time when creating an OpenGL texture from a file.</li>
+    <li>Always try to use the Cache concept when working with matrices.</li>
+    <li>Make use of the Store Values concept to save CPU processing.</li>
+    <li>Prefer basic C language on the critical render routines.</li>
+</ul>
+
+
+Well, you know, if you have some doubt, just ask me, let a comment bellow and if I can help I'll be glad.
+
+<br/>  
+<h2><strong>From here and beyond</strong></h2>  
+
+<p>Well, and now? Is this all? No. It will never be enough! The points and lines deserve a special article. With points in can make particles and some cool effects. As I told at the beginning of this tutorial, you can use points with 2D graphics instead squares, in case of no Depth Render Buffer.</p>
+
+<p>And about the shaders? In deep? The Programmable Pipeline gives us a whole new world of programming. We should talk about the Surface Normals VS Vertex Normals, about the tangent space, the normal bump effect, the reflection and refraction effect. To say the truth... I think we need a new serie of tutorial called "All About OpenGL Shaders". Well, this could be my next serie.</p>
+
+<p>But I want to hear from you, tell me here or on Twitter what you want to know more about. <br/>
+Just Tweet me: <br/>
+<a href="https://web.archive.org/web/20140302041558/http://twitter.com/share" class="twitter-share-button" data-text="Hey @dineybomfim talk more about: " data-count="none" data-url="none">Tweet</a><script type="text/javascript" src="https://web.archive.org/web/20140302041558js_/http://platform.twitter.com/widgets.js"></script></p>
+
+<p>Thanks again for reading. <br/>
+See you in the next tutorial!</p>
+
+<iframe scrolling="no" src="https://web.archive.org/web/20140302041558if_/http://db-in.com/downloads/apple/tribute_to_jobs.html" width="100%" height="130px"></iframe>
+          </div>
+          <footer class="post-footer">
+            <div itemprop="author" itemscope itemtype="http://schema.org/Person" class="post-author">
+              
+              <div class="post-author-info">
+                <h4 class="post-footer-heading">Written By</h4>
+                <a href="" itemprop="url" class="post-author-name">
+                  <span itemprop="name">Diney Bomfim</span>
+                </a>
+                <p itemprop="description" class="post-author-bio"></p>
+                
+                
+                <p class="post-info">
+                  <b class="post-info-title">Published on</b>
+                  <time class="post-date">February 04, 2014</time>
+                </p>
+              </div>
+            </div>
+            <div class="post-social">
+              <h4 class="post-footer-heading">Spread the word</h4>
+              <a href="#" data-action="share-twitter"><i class="fa fa-fw fa-lg fa-twitter"></i></a>
+              <a href="#" data-action="share-facebook"><i class="fa fa-fw fa-lg fa-facebook"></i></a>
+              <a href="#" data-action="share-gplus"><i class="fa fa-fw fa-lg fa-google-plus"></i></a>
+            </div>
+          </footer>
+        </section>
+      
+      <section itemprop="comment" class="post-comments">
+        <div id="disqus_thread"></div>
+      </section>
+    </article>
+
+    <footer role="contentinfo" class="footer">
+  <p><small>© db-in 2014. All Rights Reserved.</small></p>
+</footer>
+
+  </div>
+</section>
+
+<script type="text/javascript">
+  
+var ga_ua = 'UA-11062449-8';
+
+
+var disqus_shortname = 'dineybomfim';
+
+
+  
+    var disqus_identifier = '8';
+  
+
+  if(typeof DISQUS !== 'object') {
+    (function () {
+    var s = document.createElement('script'); s.async = true;
+    s.type = 'text/javascript';
+    s.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+    }());
+  }
+</script>
+
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script src="/web/20140302041558js_/http://blog.db-in.com/shared/vendor/jquery/jquery.js"></script>
+
+    <script src="/web/20140302041558js_/http://blog.db-in.com/assets/js/a8765325.foot-scripts.min.js"></script>
+
+    <script type="text/javascript">
+      
+var ga_ua = 'UA-11062449-8';
+
+
+var disqus_shortname = 'dineybomfim';
+
+
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','//web.archive.org/web/20140302041558/http://www.google-analytics.com/analytics.js','ga');
+      ga('create', ga_ua);
+      ga('send', 'pageview');
+
+      (function () {
+      var s = document.createElement('script'); s.async = true;
+      s.type = 'text/javascript';
+      s.src = '//' + disqus_shortname + '.disqus.com/count.js';
+      (document.getElementsByTagName('HEAD')[0] || document.getElementsByTagName('BODY')[0]).appendChild(s);
+      }());
+    </script>
+  </body>
+</html>
+<!--
+     FILE ARCHIVED ON 04:15:58 Mar 02, 2014 AND RETRIEVED FROM THE
+     INTERNET ARCHIVE ON 23:23:44 Apr 14, 2026.
+     JAVASCRIPT APPENDED BY WAYBACK MACHINE, COPYRIGHT INTERNET ARCHIVE.
+
+     ALL OTHER CONTENT MAY ALSO BE PROTECTED BY COPYRIGHT (17 U.S.C.
+     SECTION 108(a)(3)).
+-->
+<!--
+playback timings (ms):
+  captures_list: 0.766
+  exclusion.robots: 0.061
+  exclusion.robots.policy: 0.046
+  esindex: 0.015
+  cdx.remote: 24.178
+  LoadShardBlock: 60.144 (3)
+  PetaboxLoader3.datanode: 95.361 (5)
+  load_resource: 84.03 (2)
+  PetaboxLoader3.resolve: 36.27
+  nav: 0.2 (6)
+-->
