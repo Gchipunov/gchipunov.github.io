@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS - Fixed Render</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; color: white; z-index: 10; }
+        .btn { 
+            pointer-events: auto; background: #333; border: 1px solid #777; 
+            color: white; padding: 15px; margin-bottom: 10px; cursor: pointer; display: block; border-radius: 8px;
+        }
+        #select-box {
+            position: absolute; border: 2px solid #0f0; background: rgba(0, 255, 0, 0.2);
+            pointer-events: none; display: none; z-index: 5;
+        }
+        #debug { position: absolute; bottom: 10px; left: 10px; color: red; font-size: 12px; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="status">Units: 0 | Selected: 0</div>
+        <button class="btn" onclick="setMode('build')">🔨 Build Barracks</button>
+        <button class="btn" onclick="spawnUnit()">👤 Spawn Soldier</button>
+    </div>
+    <div id="debug"></div>
+    <div id="select-box"></div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+const log = (msg) => document.getElementById('debug').innerText += msg + "\n";
+
+/** --- COMPACT MATH LIBRARY --- **/
+const m4 = {
+    projection: (fov, aspect, near, far) => {
+        const f = Math.tan(Math.PI * 0.5 - 0.5 * fov);
+        const rangeInv = 1.0 / (near - far);
+        return [f/aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (near+far)*rangeInv, -1, 0, 0, near*far*rangeInv*2, 0];
+    },
+    lookAt: (eye, target, up) => {
+        const normalize = v => { const l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); return [v[0]/l, v[1]/l, v[2]/l]; };
+        const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+        const z = normalize([eye[0]-target[0], eye[1]-target[1], eye[2]-target[2]]);
+        const x = normalize(cross(up, z));
+        const y = normalize(cross(z, x));
+        return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, 
+               -(x[0]*eye[0]+x[1]*eye[1]+x[2]*eye[2]), -(y[0]*eye[0]+y[1]*eye[1]+y[2]*eye[2]), -(z[0]*eye[0]+z[1]*eye[1]+z[2]*eye[2]), 1];
+    },
+    multiply: (a, b) => {
+        let c = new Array(16).fill(0);
+        for(let i=0; i<4; i++) for(let j=0; j<4; j++) for(let k=0; k<4; k++) c[i*4+j] += a[i*4+k] * b[k*4+j];
+        return c;
+    },
+    translate: (m, x, y, z) => m4.multiply(m, [1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]),
+    scale: (m, x, y, z) => m4.multiply(m, [x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1])
+};
+
+/** --- SHADERS --- **/
+const vs = `attribute vec4 a_pos; attribute vec3 a_norm; uniform mat4 u_mvp; varying vec3 v_n; void main() { gl_Position = u_mvp * a_pos; v_n = a_norm; }`;
+const fs = `precision mediump float; uniform vec4 u_col; varying vec3 v_n; void main() { vec3 l = normalize(vec3(0.5, 1, 0.4)); float d = dot(v_n, l)*0.4+0.6; gl_FragColor = vec4(u_col.rgb * d, 1); }`;
+
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+if(!gl) log("WebGL context failed!");
+
+let prog, posLoc, normLoc, mvpLoc, colLoc, cubeBuf;
+let units = [], buildings = [], mode = 'select';
+let input = { down: false, s: [0,0], e: [0,0] };
+
+function init() {
+    const create = (t, s) => {
+        const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh);
+        if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) log(gl.getShaderInfoLog(sh));
+        return sh;
+    };
+    prog = gl.createProgram();
+    gl.attachShader(prog, create(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, create(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+
+    posLoc = gl.getAttribLocation(prog, "a_pos");
+    normLoc = gl.getAttribLocation(prog, "a_norm");
+    mvpLoc = gl.getUniformLocation(prog, "u_mvp");
+    colLoc = gl.getUniformLocation(prog, "u_col");
+
+    // Unit Cube (Positions + Normals)
+    const verts = new Float32Array([
+        -1,-1, 1, 0,0,1, 1,-1, 1, 0,0,1, 1, 1, 1, 0,0,1, -1,-1, 1, 0,0,1, 1, 1, 1, 0,0,1, -1, 1, 1, 0,0,1, // Front
+        -1,-1,-1, 0,0,-1, -1, 1,-1, 0,0,-1, 1, 1,-1, 0,0,-1, -1,-1,-1, 0,0,-1, 1, 1,-1, 0,0,-1, 1,-1,-1, 0,0,-1, // Back
+         1, 1, 1, 1,0,0, 1,-1, 1, 1,0,0, 1,-1,-1, 1,0,0, 1, 1, 1, 1,0,0, 1,-1,-1, 1, 1,-1, 1,0,0, // Right
+        -1, 1, 1,-1,0,0, -1, 1,-1,-1,0,0, -1,-1,-1,-1,0,0, -1, 1, 1,-1,0,0, -1,-1,-1,-1,0,0, -1,-1, 1,-1,0,0, // Left
+        -1, 1, 1, 0,1,0, 1, 1, 1, 0,1,0, 1, 1,-1, 0,1,0, -1, 1, 1, 0,1,0, 1, 1,-1, 0,1,0, -1, 1,-1, 0,1,0, // Top
+        -1,-1,-1, 0,-1,0, 1,-1,-1, 0,-1,0, 1,-1, 1, 0,-1,0, -1,-1,-1, 0,-1,0, 1,-1, 1, 0,-1,0, -1,-1, 1, 0,-1,0  // Bottom
+    ]);
+    cubeBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+}
+
+function setMode(m) { mode = m; }
+function spawnUnit() {
+    if(buildings.length === 0) return alert("Place a barracks first!");
+    const b = buildings[0];
+    units.push({ x: b.x+3, z: b.z, tx: b.x+3, tz: b.z, s: false });
+}
+
+function render() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    const view = m4.lookAt([0, 30, 30], [0, 0, 0], [0, 1, 0]);
+    const proj = m4.projection(45 * Math.PI/180, canvas.width/canvas.height, 0.1, 200);
+    const vp = m4.multiply(proj, view);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuf);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 24, 12);
+    gl.enableVertexAttribArray(normLoc);
+
+    // Render Ground
+    let gMvp = m4.multiply(vp, m4.scale(m4.translate(m4.identity(), 0,-0.5,0), 40, 0.1, 40));
+    gl.uniformMatrix4fv(mvpLoc, false, new Float32Array(gMvp));
+    gl.uniform4f(colLoc, 0.2, 0.25, 0.2, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 36);
+
+    // Buildings
+    buildings.forEach(b => {
+        let m = m4.multiply(vp, m4.scale(m4.translate(m4.identity(), b.x, 1, b.z), 2, 1.5, 2));
+        gl.uniformMatrix4fv(mvpLoc, false, new Float32Array(m));
+        gl.uniform4f(colLoc, 0.3, 0.4, 0.8, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 36);
+    });
+
+    // Units
+    let selCount = 0;
+    units.forEach(u => {
+        u.x += (u.tx-u.x)*0.08; u.z += (u.tz-u.z)*0.08;
+        let m = m4.multiply(vp, m4.scale(m4.translate(m4.identity(), u.x, 0.5, u.z), 0.6, 0.6, 0.6));
+        gl.uniformMatrix4fv(mvpLoc, false, new Float32Array(m));
+        gl.uniform4f(colLoc, u.s ? 0 : 0.4, u.s ? 1 : 0.8, 0.4, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 36);
+        if(u.s) selCount++;
+    });
+
+    document.getElementById('status').innerText = `Units: ${units.length} | Selected: ${selCount}`;
+
+    if(input.down && mode === 'select') {
+        const x1=Math.min(input.s[0], input.e[0]), x2=Math.max(input.s[0], input.e[0]);
+        const y1=Math.min(input.s[1], input.e[1]), y2=Math.max(input.s[1], input.e[1]);
+        units.forEach(u => {
+            // Projection for selection
+            const wp = [u.x, 0.5, u.z, 1];
+            const cp = [wp[0]*vp[0]+wp[1]*vp[4]+wp[2]*vp[8]+vp[12], wp[0]*vp[1]+wp[1]*vp[5]+wp[2]*vp[9]+vp[13], 0, wp[0]*vp[3]+wp[1]*vp[7]+wp[2]*vp[11]+vp[15]];
+            const sx = (cp[0]/cp[3]+1)*canvas.width/2;
+            const sy = (1-cp[1]/cp[3])*canvas.height/2;
+            u.s = (sx >= x1 && sx <= x2 && sy >= y1 && sy <= y2);
+        });
+    }
+    requestAnimationFrame(render);
+}
+
+/** --- INTERACTION --- **/
+const getXY = e => {
+    const t = e.touches ? e.touches[0] : e;
+    const r = canvas.getBoundingClientRect();
+    return [t.clientX - r.left, t.clientY - r.top];
+};
+
+canvas.addEventListener('mousedown', e => {
+    input.down = true; input.s = getXY(e); input.e = input.s;
+    if(mode === 'build') {
+        buildings.push({ x: (input.s[0]/canvas.width-0.5)*60, z: (input.s[1]/canvas.height-0.5)*60 });
+        mode = 'select';
+    }
+});
+
+window.addEventListener('mousemove', e => {
+    if(!input.down) return;
+    input.e = getXY(e);
+    if(mode === 'select') {
+        const sel = document.getElementById('select-box');
+        sel.style.display = 'block';
+        sel.style.left = Math.min(input.s[0], input.e[0]) + 'px';
+        sel.style.top = Math.min(input.s[1], input.e[1]) + 'px';
+        sel.style.width = Math.abs(input.e[0] - input.s[0]) + 'px';
+        sel.style.height = Math.abs(input.e[1] - input.s[1]) + 'px';
+    }
+});
+
+window.addEventListener('mouseup', () => { 
+    input.down = false; 
+    document.getElementById('select-box').style.display = 'none'; 
+});
+
+canvas.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const pos = getXY(e);
+    const tx = (pos[0]/canvas.width-0.5)*60;
+    const tz = (pos[1]/canvas.height-0.5)*60;
+    units.filter(u => u.s).forEach(u => { u.tx = tx; u.tz = tz; });
+});
+
+// Mobile Touch support
+canvas.addEventListener('touchstart', e => { e.preventDefault(); canvas.dispatchEvent(new MouseEvent('mousedown', e)); });
+window.addEventListener('touchmove', e => { canvas.dispatchEvent(new MouseEvent('mousemove', e)); });
+window.addEventListener('touchend', () => { window.dispatchEvent(new MouseEvent('mouseup', {})); });
+
+init();
+render();
+</script>
+</body>
+</html>
