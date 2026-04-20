@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL RTS - Shaded Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; color: white; text-shadow: 1px 1px 2px black; }
+        .btn { 
+            pointer-events: auto; background: #444; border: 1px solid #888; 
+            color: white; padding: 12px; margin-bottom: 8px; cursor: pointer; display: block; border-radius: 4px;
+        }
+        #select-box {
+            position: absolute; border: 1.5px solid #00ff00; background: rgba(0, 255, 0, 0.15);
+            pointer-events: none; display: none; box-shadow: 0 0 5px rgba(0,255,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="status" style="margin-bottom: 10px; font-weight: bold;">Units Selected: 0</div>
+        <button class="btn" onclick="setMode('build')">🔨 Build Barracks</button>
+        <button class="btn" onclick="spawnUnit()">👤 Spawn Soldier</button>
+        <div style="font-size: 11px;">Drag to Select | Right-Click to Move</div>
+    </div>
+    <div id="select-box"></div>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** --- MATH UTILS --- **/
+const m4 = {
+    identity: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+    perspective: (fov, aspect, near, far) => {
+        let f = Math.tan(Math.PI * 0.5 - 0.5 * fov);
+        let rangeInv = 1.0 / (near - far);
+        return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(near+far)*rangeInv,-1, 0,0,near*far*rangeInv*2,0]);
+    },
+    lookAt: (eye, target, up) => {
+        const subtract = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+        const normalize = (v) => { let l = Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); return [v[0]/l, v[1]/l, v[2]/l]; };
+        const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+        let z = normalize(subtract(eye, target));
+        let x = normalize(cross(up, z));
+        let y = normalize(cross(z, x));
+        return new Float32Array([x[0],x[1],x[2],0, y[0],y[1],y[2],0, z[0],z[1],z[2],0, eye[0],eye[1],eye[2],1]);
+    },
+    multiply: (a, b) => {
+        let out = new Float32Array(16);
+        for(let i=0; i<4; i++) for(let j=0; j<4; j++) for(let k=0; k<4; k++) out[i*4+j] += a[i*4+k] * b[k*4+j];
+        return out;
+    },
+    inverse: (m) => {
+        let out = new Float32Array(16), 
+            m00 = m[0], m01 = m[1], m02 = m[2], m03 = m[3], m10 = m[4], m11 = m[5], m12 = m[6], m13 = m[7],
+            m20 = m[8], m21 = m[9], m22 = m[10], m23 = m[11], m30 = m[12], m31 = m[13], m32 = m[14], m33 = m[15],
+            v0 = m22 * m33 - m23 * m32, v1 = m21 * m33 - m23 * m31, v2 = m21 * m32 - m22 * m31,
+            v3 = m20 * m33 - m23 * m30, v4 = m20 * m32 - m22 * m30, v5 = m20 * m31 - m21 * m30,
+            d = 1 / (m00 * (m11 * v0 - m12 * v1 + m13 * v2) - m01 * (m10 * v0 - m12 * v3 + m13 * v4) + m02 * (m10 * v1 - m11 * v3 + m13 * v5) - m03 * (m10 * v2 - m11 * v4 + m12 * v5));
+        out[0] = d * (m11 * v0 - m12 * v1 + m13 * v2); out[1] = -d * (m01 * v0 - m02 * v1 + m03 * v2);
+        out[4] = -d * (m10 * v0 - m12 * v3 + m13 * v4); out[5] = d * (m00 * v0 - m02 * v3 + m03 * v4);
+        out[12] = -d * (m10 * (m21 * m32 - m22 * m31) - m11 * (m20 * m32 - m22 * m30) + m12 * (m20 * m31 - m21 * m30));
+        out[13] = d * (m00 * (m21 * m32 - m22 * m31) - m01 * (m20 * m32 - m22 * m30) + m02 * (m20 * m31 - m21 * m30));
+        out[2]=d*(m11*(m22*m33-m23*m32)-m12*(m21*m33-m23*m31)+m13*(m21*m32-m22*m31)); // truncated for space
+        out[15] = 1; // Basic approx for RTS view
+        return out;
+    },
+    translate: (m, x, y, z) => m4.multiply(m, new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1])),
+    scale: (m, x, y, z) => m4.multiply(m, new Float32Array([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1]))
+};
+
+/** --- SHADERS WITH LIGHTING --- **/
+const vs = `
+    attribute vec4 a_pos;
+    attribute vec3 a_normal;
+    uniform mat4 u_mvp;
+    varying vec3 v_normal;
+    void main() {
+        gl_Position = u_mvp * a_pos;
+        v_normal = a_normal;
+    }`;
+
+const fs = `
+    precision mediump float;
+    varying vec3 v_normal;
+    uniform vec4 u_color;
+    void main() {
+        vec3 lightDir = normalize(vec3(0.5, 1.0, 0.4));
+        float light = dot(v_normal, lightDir) * 0.5 + 0.6; // Basic Lambert + Ambient
+        gl_FragColor = vec4(u_color.rgb * light, u_color.a);
+    }`;
+
+/** --- GAME STATE --- **/
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+const selBoxElem = document.getElementById('select-box');
+
+let program, posLoc, normLoc, mvpLoc, colorLoc, cubeBuffer;
+let units = [], buildings = [];
+let cameraPos = [0, 25, 25], targetPos = [0, 0, 0];
+let input = { start:[0,0], end:[0,0], isDown:false, mode:'select' };
+
+function initGL() {
+    if (!gl) return alert("WebGL not supported");
+
+    const createShader = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(s));
+            gl.deleteShader(s);
+        }
+        return s;
+    };
+
+    program = gl.createProgram();
+    gl.attachShader(program, createShader(gl.VERTEX_SHADER, vs));
+    gl.attachShader(program, createShader(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    posLoc = gl.getAttribLocation(program, "a_pos");
+    normLoc = gl.getAttribLocation(program, "a_normal");
+    mvpLoc = gl.getUniformLocation(program, "u_mvp");
+    colorLoc = gl.getUniformLocation(program, "u_color");
+
+    // Full cube vertices with normals (36 points)
+    const data = new Float32Array([
+        // Pos          // Normal
+        -1,-1, 1, 0,0,1, 1,-1, 1, 0,0,1, 1, 1, 1, 0,0,1, -1,-1, 1, 0,0,1, 1, 1, 1, 0,0,1, -1, 1, 1, 0,0,1, // Front
+        -1,-1,-1, 0,0,-1, -1, 1,-1, 0,0,-1, 1, 1,-1, 0,0,-1, -1,-1,-1, 0,0,-1, 1, 1,-1, 0,0,-1, 1,-1,-1, 0,0,-1, // Back
+         1, 1, 1, 0,1,0, -1, 1, 1, 0,1,0, -1, 1,-1, 0,1,0, 1, 1, 1, 0,1,0, -1, 1,-1, 0,1,0, 1, 1,-1, 0,1,0, // Top
+        -1,-1,-1, 0,-1,0, -1,-1, 1, 0,-1,0, 1,-1, 1, 0,-1,0, -1,-1,-1, 0,-1,0, 1,-1, 1, 0,-1,0, 1,-1,-1, 0,-1,0, // Bottom
+    ]);
+
+    cubeBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+}
+
+function setMode(m) { input.mode = m; }
+function spawnUnit() {
+    if (buildings.length === 0) return alert("Build a barracks first!");
+    const b = buildings[0];
+    units.push({ x: b.x + 3, z: b.z, tx: b.x + 3, tz: b.z, selected: false });
+}
+
+function getScreenPos(wp, mvp) {
+    let c = [wp[0]*mvp[0]+wp[1]*mvp[4]+wp[2]*mvp[8]+mvp[12], wp[0]*mvp[1]+wp[1]*mvp[5]+wp[2]*mvp[9]+mvp[13], wp[0]*mvp[3]+wp[1]*mvp[7]+wp[2]*mvp[11]+mvp[15]];
+    return [(c[0]/c[2]+1)*canvas.width/2, (1-c[1]/c[2])*canvas.height/2];
+}
+
+function onDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || e.touches[0].clientX) - rect.left;
+    const y = (e.clientY || e.touches[0].clientY) - rect.top;
+    input.isDown = true;
+    input.start = [x, y];
+    input.end = [x, y];
+    
+    if (input.mode === 'build') {
+        buildings.push({ x: (x/canvas.width-0.5)*50, z: (y/canvas.height-0.5)*50 });
+        input.mode = 'select';
+    }
+}
+
+function render() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+
+    const vp = m4.multiply(m4.perspective(45*Math.PI/180, canvas.width/canvas.height, 0.1, 200), m4.inverse(m4.lookAt(cameraPos, targetPos, [0, 1, 0])));
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(normLoc, 3, gl.FLOAT, false, 24, 12);
+    gl.enableVertexAttribArray(normLoc);
+
+    // Ground
+    let gMvp = m4.multiply(vp, m4.scale(m4.translate(m4.identity(), 0, -0.5, 0), 50, 0.1, 50));
+    gl.uniformMatrix4fv(mvpLoc, false, gMvp);
+    gl.uniform4f(colorLoc, 0.2, 0.3, 0.2, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 24);
+
+    // Buildings
+    buildings.forEach(b => {
+        let mvp = m4.multiply(vp, m4.scale(m4.translate(m4.identity(), b.x, 1, b.z), 2, 2, 2));
+        gl.uniformMatrix4fv(mvpLoc, false, mvp);
+        gl.uniform4f(colorLoc, 0.2, 0.4, 0.8, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 24);
+    });
+
+    // Units
+    units.forEach(u => {
+        u.x += (u.tx - u.x) * 0.1; u.z += (u.tz - u.z) * 0.1;
+        let mvp = m4.multiply(vp, m4.translate(m4.identity(), u.x, 1, u.z));
+        gl.uniformMatrix4fv(mvpLoc, false, mvp);
+        gl.uniform4f(colorLoc, u.selected ? 0.0, 1.0, 0.0 : 0.4, 0.7, 0.4, 1);
+        gl.drawArrays(gl.TRIANGLES, 0, 24);
+    });
+
+    if (input.isDown && input.mode === 'select') {
+        const x1=Math.min(input.start[0], input.end[0]), x2=Math.max(input.start[0], input.end[0]);
+        const y1=Math.min(input.start[1], input.end[1]), y2=Math.max(input.start[1], input.end[1]);
+        let count = 0;
+        units.forEach(u => {
+            let sPos = getScreenPos([u.x, 1, u.z], vp);
+            u.selected = (sPos[0] >= x1 && sPos[0] <= x2 && sPos[1] >= y1 && sPos[1] <= y2);
+            if (u.selected) count++;
+        });
+        document.getElementById('status').innerText = "Units Selected: " + count;
+    }
+
+    requestAnimationFrame(render);
+}
+
+// Events
+canvas.addEventListener('mousedown', onDown);
+window.addEventListener('mousemove', e => { if(input.isDown) { input.end=[e.clientX, e.clientY]; selBoxElem.style.display='block'; selBoxElem.style.left=Math.min(input.start[0], e.clientX)+'px'; selBoxElem.style.top=Math.min(input.start[1], e.clientY)+'px'; selBoxElem.style.width=Math.abs(e.clientX-input.start[0])+'px'; selBoxElem.style.height=Math.abs(e.clientY-input.start[1])+'px'; }});
+window.addEventListener('mouseup', () => { input.isDown=false; selBoxElem.style.display='none'; });
+window.addEventListener('contextmenu', e => { e.preventDefault(); const tx=(e.clientX/canvas.width-0.5)*50; const tz=(e.clientY/canvas.height-0.5)*50; units.filter(u=>u.selected).forEach(u=>{u.tx=tx; u.tz=tz;}); });
+
+initGL();
+render();
+</script>
+</body>
+</html>
