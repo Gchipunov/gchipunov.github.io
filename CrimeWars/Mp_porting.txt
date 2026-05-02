@@ -1,0 +1,42 @@
+Porting SecobMod (specifically the mp or Multiplayer branch) to the modern TF2 SDK (often referred to as the "Source SDK 2013 Multiplayer - TF2 Branch") is a significant undertaking because SecobMod is based on the older Source 2013/Orange Box code, while the modern TF2 SDK introduces 64-bit support, VScript, and structural changes to how player classes and networking are handled.
+Here are the key recommendations and a roadmap for the porting process:
+1. Set Up the "TF2 Branch" Environment
+The modern TF2 SDK is distinct from the standard Source SDK 2013.
+Repository: Clone the latest code from the ValveSoftware/source-sdk-2013 repository, ensuring you are on the tf2_src or main branch (which Valve updated in 2024/2025 for 64-bit).
+Compiler: You must use Visual Studio 2022. The older 2013-based projects used VS 2010/2013, which are no longer compatible with the modern TF2 engine's 64-bit requirements.
+VPC (Valve Project Creator): Do not manually add files to the solution. Edit the .vpc files to include the SecobMod files and then run createallprojects.bat to generate the .sln.
+2. Strategic "Diffing" (The Merge Approach)
+Do not try to copy the SecobMod folder over the TF2 SDK. Instead, treat the TF2 SDK as your base and "cherry-pick" SecobMod features.
+Shared Definitions: Start with secobmod_shareddefs.h. This file contains the toggles for features (Iron Sights, Stamina, etc.). Porting this first allows you to conditionally compile features as you add them.
+Player Classes: SecobMod has a custom class system. The modern TF2 SDK already has a robust CTFPlayer class system. You will need to decide whether to:
+Rewrite SecobMod’s class logic to inherit from TF2’s class system.
+Strip out TF2’s class logic and port SecobMod’s generic system (harder due to engine-level expectations in the TF2 branch).
+3. Critical Code Changes (64-bit & C++17)
+The modern SDK uses 64-bit binaries and more modern C++ standards.
+Pointer Math: Check for any code in SecobMod that assumes int and pointer are the same size (4 bytes). Use intptr_t or uintptr_t for compatibility.
+Assembly: If SecobMod uses any __asm blocks (rare for this mod but possible in low-level fixes), these will fail in 64-bit. You must replace them with C++ equivalents or intrinsic functions.
+Steam Networking: The modern TF2 SDK uses SteamNetworkingSockets (SDR). Ensure any low-level networking fixes in SecobMod don't conflict with the updated inetchannel logic.
+4. Key Feature Porting Tips
+SecobMod Feature
+Porting Recommendation
+Co-op Transitions
+The TF2 branch is optimized for round-based play. You will need to carefully port the CChangeLevel and CPointServerCommand logic to ensure the server doesn't shut down between maps.
+Iron Sights
+This is usually handled in weapon_base.cpp/h. The TF2 branch has different FOV handling; ensure you update the GetViewModelFOV overrides.
+NPC in MP
+SecobMod includes Winston’s AI patch. The modern TF2 SDK has better NPC support than the old HL2DM base, but you still need to ensure the NPC schedules are properly ticked on the server.
+Vehicles
+SecobMod fixed the "camera judder." Check if the modern SDK's C_PropVehicleDriveable has already implemented these fixes (many 2013-era bugs were fixed in the 64-bit update).
+
+5. Managing VScript
+The modern TF2 SDK supports VScript (Squirrel).
+Recommendation: Many of SecobMod's logic-based features (like map briefings or specific level rules) might be easier to implement via VScript rather than hard-coding them into the C++. This makes the mod more flexible for mappers.
+6. Common Roadblocks
+Linker Errors: You will likely encounter "unresolved external symbol" errors for engine interfaces. The modern SDK has renamed or moved some interfaces (e.g., IVEngineClient013 vs 015).
+VGUI Issues: The TF2 branch uses a scaled HUD system. SecobMod’s custom HUD elements will likely need to be updated in their .res files to support wide-screen and high-resolution scaling.
+Workflow Summary:
+Clean compile the TF2 SDK (64-bit) first.
+Port SecobMod constants and shared headers.
+Port Base Class modifications (Player/Weapon).
+Port Specific Systems (AI, Vehicles, Co-op logic) one by one.
+Use developer 1 and cl_showfps 1 to monitor for the performance impacts of old AI code on the new engine branch.
