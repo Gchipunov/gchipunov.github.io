@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chow Hall RPG - Mobile Ready</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: 'Courier New', Courier, monospace; touch-action: none; }
+        canvas { display: block; image-rendering: pixelated; }
+        
+        #ui {
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 15px;
+            border: 2px solid #555;
+            display: none;
+            z-index: 10;
+        }
+
+        #stats {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            text-shadow: 2px 2px #000;
+            z-index: 10;
+        }
+
+        /* Mobile Controls */
+        .controls {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            user-select: none;
+            z-index: 20;
+        }
+
+        .btn-group { display: flex; gap: 15px; }
+
+        .btn {
+            width: 70px;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid #fff;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 20px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .btn:active { background: rgba(255, 255, 255, 0.5); }
+    </style>
+</head>
+<body>
+
+<div id="stats">LVL: 1 | HP: 100/100</div>
+<div id="ui">
+    <strong id="speaker"></strong>: <span id="text"></span>
+    <div style="font-size: 10px; margin-top: 5px; color: #888;">(Tap 'E' to talk)</div>
+</div>
+
+<canvas id="glCanvas"></canvas>
+
+<div class="controls">
+    <div class="btn-group">
+        <div class="btn" id="btnLeft">←</div>
+        <div class="btn" id="btnRight">→</div>
+    </div>
+    <div class="btn-group">
+        <div class="btn" id="btnE">E</div>
+        <div class="btn" id="btnJump">▲</div>
+    </div>
+</div>
+
+<script>
+/** WEBGL SHADERS **/
+const vsSource = `attribute vec2 aPosition; uniform vec2 uResolution; uniform vec2 uTranslation; uniform vec2 uScale; void main() { vec2 position = aPosition * uScale + uTranslation; vec2 zeroToOne = position / uResolution; vec2 zeroToTwo = zeroToOne * 2.0; vec2 clipSpace = zeroToTwo - 1.0; gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1); }`;
+const fsSource = `precision mediump float; uniform vec4 uColor; void main() { gl_FragColor = uColor; }`;
+
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const program = gl.createProgram();
+gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 0,1, 1,0, 1,1]), gl.STATIC_DRAW);
+
+const positionLoc = gl.getAttribLocation(program, "aPosition");
+gl.enableVertexAttribArray(positionLoc);
+gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+const resLoc = gl.getUniformLocation(program, "uResolution");
+const transLoc = gl.getUniformLocation(program, "uTranslation");
+const scaleLoc = gl.getUniformLocation(program, "uScale");
+const colorLoc = gl.getUniformLocation(program, "uColor");
+
+// Game State
+const world = {
+    gravity: 0.5,
+    player: { x: 50, y: 300, w: 30, h: 50, vx: 0, vy: 0, speed: 6, jump: -12, color: [0, 0.8, 1, 1] },
+    npc: { x: 350, y: 310, w: 30, h: 40, color: [0.8, 0.2, 0.2, 1], name: "Colo enfermo mental" },
+    npc2: { x: 450, y: 310, w: 35, h: 40, color: [0.5, 0.5, 0, 1], name: "Colo2 FatUglyTeeth" },
+    ground: 350,
+    dialogueStep: 0
+};
+
+// Controls State
+const keys = { Left: false, Right: false, Jump: false, Talk: false };
+
+// Input Listeners
+window.onkeydown = e => {
+    if(e.code === 'ArrowLeft') keys.Left = true;
+    if(e.code === 'ArrowRight') keys.Right = true;
+    if(e.code === 'Space') keys.Jump = true;
+    if(e.code === 'KeyE') keys.Talk = true;
+};
+window.onkeyup = e => {
+    if(e.code === 'ArrowLeft') keys.Left = false;
+    if(e.code === 'ArrowRight') keys.Right = false;
+    if(e.code === 'Space') keys.Jump = false;
+    if(e.code === 'KeyE') keys.Talk = false;
+};
+
+// Helper for Touch
+function bindTouch(id, key) {
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+    el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
+}
+
+bindTouch('btnLeft', 'Left');
+bindTouch('btnRight', 'Right');
+bindTouch('btnJump', 'Jump');
+bindTouch('btnE', 'Talk');
+
+function drawRect(x, y, w, h, color) {
+    gl.uniform2f(resLoc, canvas.width, canvas.height);
+    gl.uniform2f(transLoc, x, y);
+    gl.uniform2f(scaleLoc, w, h);
+    gl.uniform4fv(colorLoc, color);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function update() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Movement logic
+    if (keys.Left) world.player.vx = -world.player.speed;
+    else if (keys.Right) world.player.vx = world.player.speed;
+    else world.player.vx *= 0.8;
+
+    if (keys.Jump && world.player.y >= world.ground - world.player.h) {
+        world.player.vy = world.player.jump;
+    }
+
+    world.player.vy += world.gravity;
+    world.player.x += world.player.vx;
+    world.player.y += world.player.vy;
+
+    if (world.player.y > world.ground - world.player.h) {
+        world.player.y = world.ground - world.player.h;
+        world.player.vy = 0;
+    }
+
+    // Dialogue Logic
+    const dist = Math.abs(world.player.x - world.npc.x);
+    const ui = document.getElementById('ui');
+    if (dist < 120) {
+        ui.style.display = 'block';
+        if (world.dialogueStep === 0) {
+            document.getElementById('speaker').innerText = world.npc.name;
+            document.getElementById('text').innerText = "“ your Colo made it smell like fart dead “";
+            if (keys.Talk) { world.dialogueStep = 1; keys.Talk = false; }
+        } else {
+            document.getElementById('speaker').innerText = world.npc2.name;
+            document.getElementById('text').innerText = "“ it’s the best dinner in the chow hall “";
+            if (keys.Talk) { world.dialogueStep = 0; keys.Talk = false; }
+        }
+    } else {
+        ui.style.display = 'none';
+    }
+
+    // Render
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.05, 0.05, 0.05, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    drawRect(0, world.ground, canvas.width, 200, [0.2, 0.2, 0.2, 1]); // Floor
+    drawRect(world.npc.x, world.npc.y, world.npc.w, world.npc.h, world.npc.color);
+    drawRect(world.npc2.x, world.npc2.y, world.npc2.w, world.npc2.h, world.npc2.color);
+    drawRect(world.player.x, world.player.y, world.player.w, world.player.h, world.player.color);
+
+    requestAnimationFrame(update);
+}
+
+update();
+</script>
+</body>
+</html>
