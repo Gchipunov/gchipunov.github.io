@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL: Glass, Liquid, and Smoke Cubes</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050508; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('glCanvas');
+const gl = canvas.getContext('webgl');
+
+if (!gl) alert('WebGL not supported');
+
+// --- Shaders ---
+const vsSource = `
+    attribute vec4 aPosition;
+    attribute vec3 aNormal;
+    uniform mat4 uProjectionMatrix;
+    uniform mat4 uModelViewMatrix;
+    uniform mat3 uNormalMatrix;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    void main(void) {
+        vec4 eyePosition = uModelViewMatrix * aPosition;
+        gl_Position = uProjectionMatrix * eyePosition;
+        vNormal = normalize(uNormalMatrix * aNormal);
+        vViewDir = normalize(-eyePosition.xyz);
+    }
+`;
+
+const fsSource = `
+    precision mediump float;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    uniform int uType; // 0: Glass, 1: Liquid, 2: Smoke
+    uniform float uTime;
+
+    void main(void) {
+        float dotNV = max(dot(vNormal, vViewDir), 0.0);
+        float fresnel = pow(1.0 - dotNV, 3.0); // Edge highlight
+        
+        vec4 color;
+        
+        if (uType == 0) { 
+            // GLASS: High transparency, bright edges
+            color = vec4(0.8, 0.9, 1.0, 0.2 + fresnel * 0.5);
+        } else if (uType == 1) { 
+            // LIQUID: More saturated blue, slightly more opaque
+            float ripple = sin(uTime * 2.0) * 0.1;
+            color = vec4(0.1, 0.4, 0.8, 0.4 + fresnel * 0.4 + ripple);
+        } else { 
+            // SMOKE: Low contrast, very soft edges, fading
+            float drift = sin(uTime + vNormal.y * 5.0) * 0.1;
+            color = vec4(0.7, 0.7, 0.7, (0.1 + drift) * dotNV);
+        }
+        
+        gl_FragColor = color;
+    }
+`;
+
+// --- Init Program ---
+function loadShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+}
+
+const shaderProgram = gl.createProgram();
+gl.attachShader(shaderProgram, loadShader(gl, gl.VERTEX_SHADER, vsSource));
+gl.attachShader(shaderProgram, loadShader(gl, gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(shaderProgram);
+
+const programInfo = {
+    program: shaderProgram,
+    attribLocations: {
+        pos: gl.getAttribLocation(shaderProgram, 'aPosition'),
+        norm: gl.getAttribLocation(shaderProgram, 'aNormal'),
+    },
+    uniformLocations: {
+        proj: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+        mv: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+        normMat: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'),
+        type: gl.getUniformLocation(shaderProgram, 'uType'),
+        time: gl.getUniformLocation(shaderProgram, 'uTime'),
+    },
+};
+
+// --- Geometry ---
+const positions = [
+    -1,-1,1, 1,-1,1, 1,1,1, -1,1,1,   -1,-1,-1, -1,1,-1, 1,1,-1, 1,-1,-1,
+    -1,1,-1, -1,1,1, 1,1,1, 1,1,-1,   -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1,
+     1,-1,-1, 1,1,-1, 1,1,1, 1,-1,1,  -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1
+];
+const normals = positions.map((v, i) => {
+    const s = Math.floor(i/3)*3;
+    const len = Math.sqrt(positions[s]**2 + positions[s+1]**2 + positions[s+2]**2);
+    return v/len;
+});
+const indices = [
+    0,1,2,0,2,3, 4,5,6,4,6,7, 8,9,10,8,10,11, 12,13,14,12,14,15, 16,17,18,16,18,19, 20,21,22,20,22,23
+];
+
+const buffers = {
+    pos: gl.createBuffer(),
+    norm: gl.createBuffer(),
+    idx: gl.createBuffer()
+};
+gl.bindBuffer(gl.ARRAY_BUFFER, buffers.pos);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+gl.bindBuffer(gl.ARRAY_BUFFER, buffers.norm);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.idx);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+// --- State ---
+const cubes = Array.from({length: 10}, () => ({
+    pos: [(Math.random()-0.5)*12, (Math.random()-0.5)*12, (Math.random()-0.5)*10 - 15],
+    type: Math.floor(Math.random() * 3), // 0, 1, or 2
+    rot: [Math.random(), Math.random(), Math.random()]
+}));
+
+// --- Matrix Math ---
+const Mat4 = {
+    perspective: (fov, asp, n, f) => {
+        const iF = 1/Math.tan(fov/2);
+        return new Float32Array([iF/asp,0,0,0, 0,iF,0,0, 0,0,(f+n)/(n-f),-1, 0,0,(2*f*n)/(n-f),0]);
+    },
+    identity: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+    translate: (m, v) => { m[12]+=v[0]; m[13]+=v[1]; m[14]+=v[2]; },
+    rotate: (m, rad, axis) => {
+        let x=axis[0], y=axis[1], z=axis[2], s=Math.sin(rad), c=Math.cos(rad), t=1-c;
+        const r = [x*x*t+c, y*x*t+z*s, z*x*t-y*s, x*y*t-z*s, y*y*t+c, z*y*t+x*s, x*z*t+y*s, y*z*t-x*s, z*z*t+c];
+        let a0=m[0], a1=m[1], a2=m[2], a4=m[4], a5=m[5], a6=m[6], a8=m[8], a9=m[9], a10=m[10];
+        m[0]=a0*r[0]+a4*r[1]+a8*r[2]; m[1]=a1*r[0]+a5*r[1]+a9*r[2];
+        m[4]=a0*r[3]+a4*r[4]+a8*r[5]; m[5]=a1*r[3]+a5*r[4]+a9*r[5];
+        m[8]=a0*r[6]+a4*r[7]+a8*r[8]; m[9]=a1*r[6]+a5*r[7]+a9*r[8];
+    }
+};
+
+function render(time) {
+    time *= 0.001;
+    gl.clearColor(0.02, 0.02, 0.05, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    
+    // Enable Transparency
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.DEPTH_TEST);
+
+    const pMat = Mat4.perspective(45*Math.PI/180, canvas.width/canvas.height, 0.1, 100);
+
+    cubes.forEach(c => {
+        const mvMat = Mat4.identity();
+        Mat4.translate(mvMat, c.pos);
+        Mat4.rotate(mvMat, time * 0.5, c.rot);
+
+        const nMat = new Float32Array([mvMat[0],mvMat[1],mvMat[2], mvMat[4],mvMat[5],mvMat[6], mvMat[8],mvMat[9],mvMat[10]]);
+
+        gl.useProgram(programInfo.program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.pos);
+        gl.vertexAttribPointer(programInfo.attribLocations.pos, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.pos);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.norm);
+        gl.vertexAttribPointer(programInfo.attribLocations.norm, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(programInfo.attribLocations.norm);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.idx);
+
+        gl.uniformMatrix4fv(programInfo.uniformLocations.proj, false, pMat);
+        gl.uniformMatrix4fv(programInfo.uniformLocations.mv, false, mvMat);
+        gl.uniformMatrix3fv(programInfo.uniformLocations.normMat, false, nMat);
+        gl.uniform1i(programInfo.uniformLocations.type, c.type);
+        gl.uniform1f(programInfo.uniformLocations.time, time);
+
+        gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+    });
+    requestAnimationFrame(render);
+}
+
+window.onresize = () => {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+};
+window.onresize();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
