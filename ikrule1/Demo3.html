@@ -164,7 +164,7 @@ const m4 = {
         const ik = solveIK(shoulder, handGoal, 60, 50);
 
         const draw = (x, y, w, h, r, col) => {
-            let m = m3.projection(gl.canvas.width, gl.canvas.height);
+            let m = m4.projection(gl.canvas.width, gl.canvas.height);
             m = m3.translate(m, x, y);
             m = m3.rotate(m, r);
             m = m3.scale(m, w, h);
