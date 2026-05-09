@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL IK Climbing Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: sans-serif; }
+        canvas { width: 100vw; height: 100vh; display: block; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <b>IK Climbing Sequence:</b> Right hand attaches to surface.<br>
+        Move Mouse to position character.
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+<script type="module">
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+
+    // --- Shaders ---
+    const vs = `
+        attribute vec4 a_position;
+        uniform mat4 u_matrix;
+        void main() { gl_Position = u_matrix * a_position; }
+    `;
+    const fs = `
+        precision mediump float;
+        uniform vec4 u_color;
+        void main() { gl_FragColor = u_color; }
+    `;
+
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vs));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    // --- Geometry ---
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    // Unit cube vertices
+    const vertices = new Float32Array([
+        -0.5,-0.5,-0.5,  0.5,-0.5,-0.5,  0.5,0.5,-0.5, -0.5,0.5,-0.5,
+        -0.5,-0.5,0.5,   0.5,-0.5,0.5,   0.5,0.5,0.5,  -0.5,0.5,0.5
+    ]);
+    const indices = new Uint16Array([
+        0,1,1,2,2,3,3,0, 4,5,5,6,6,7,7,4, 0,4,1,5,2,6,3,7
+    ]);
+    const indexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    const posLoc = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+    const matrixLoc = gl.getUniformLocation(program, "u_matrix");
+    const colorLoc = gl.getUniformLocation(program, "u_color");
+
+    // --- Math Utils ---
+    const m4 = {
+        identity: () => [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
+        projection: (w, h, d) => [2/w,0,0,0, 0,-2/h,0,0, 0,0,2/d,0, -1,1,0,1],
+        translate: (m, x, y, z) => {
+            m[12] += x; m[13] += y; m[14] += z; return m;
+        },
+        scale: (m, x, y, z) => {
+            m[0]*=x; m[5]*=y; m[10]*=z; return m;
+        }
+    };
+
+    // --- IK Logic ---
+    // Solves for the elbow position given shoulder, target, and bone lengths
+    function solveIK(shoulder, target, upperLen, lowerLen) {
+        const dx = target.x - shoulder.x;
+        const dy = target.y - shoulder.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // Clamp target to reach
+        const reach = upperLen + lowerLen;
+        const actualDist = Math.min(dist, reach * 0.99); 
+        
+        // Law of Cosines: a^2 = b^2 + c^2 - 2bc*cos(A)
+        const angleA = Math.acos((upperLen**2 + actualDist**2 - lowerLen**2) / (2 * upperLen * actualDist));
+        const baseAngle = Math.atan2(dy, dx);
+        
+        const elbowX = shoulder.x + Math.cos(baseAngle + angleA) * upperLen;
+        const elbowY = shoulder.y + Math.sin(baseAngle + angleA) * upperLen;
+        
+        return { x: elbowX, y: elbowY };
+    }
+
+    // --- State ---
+    let mouse = { x: 400, y: 300 };
+    window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+    const wall = { x: 600, y: 300, w: 100, h: 400 };
+    const char = { x: 100, y: 400, upperArm: 60, lowerArm: 50 };
+
+    function drawBox(x, y, w, h, color) {
+        let mat = m4.projection(canvas.width, canvas.height, 1000);
+        mat = m4.translate(mat, x, y, 0);
+        mat = m4.scale(mat, w, h, 1);
+        gl.uniformMatrix4fv(matrixLoc, false, mat);
+        gl.uniform4fv(colorLoc, color);
+        gl.drawElements(gl.LINES, indices.length, gl.UNSIGNED_SHORT, 0);
+    }
+
+    function render() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Move character toward mouse
+        char.x += (mouse.x - char.x) * 0.05;
+        char.y += (mouse.y - char.y) * 0.05;
+
+        // Draw Wall
+        drawBox(wall.x, wall.y, wall.w, wall.h, [0.5, 0.5, 0.5, 1]);
+
+        // IK Target: if close to wall, stick to wall surface
+        let shoulder = { x: char.x + 20, y: char.y - 40 };
+        let target = { x: char.x + 100, y: char.y - 60 };
+        
+        // "Climb Sequence" Logic: Attach to surface if within reach
+        const wallLeft = wall.x - wall.w/2;
+        if (target.x > wallLeft - 20) {
+            target.x = wallLeft; // Attach hand to wall surface
+        }
+
+        const elbow = solveIK(shoulder, target, char.upperArm, char.lowerArm);
+
+        // Draw Character Body
+        drawBox(char.x, char.y, 40, 80, [1, 1, 1, 1]); // Torso
+        
+        // Draw IK Arm segments
+        // Upper Arm
+        drawBox((shoulder.x + elbow.x)/2, (shoulder.y + elbow.y)/2, 
+                Math.abs(shoulder.x - elbow.x) + 5, Math.abs(shoulder.y - elbow.y) + 5, [0, 1, 0, 1]);
+        // Lower Arm
+        drawBox((elbow.x + target.x)/2, (elbow.y + target.y)/2, 
+                Math.abs(elbow.x - target.x) + 5, Math.abs(elbow.y - target.y) + 5, [0, 0.8, 1, 1]);
+        
+        requestAnimationFrame(render);
+    }
+
+    render();
+</script>
+</body>
+</html>
