@@ -165,9 +165,9 @@ const m4 = {
 
         const draw = (x, y, w, h, r, col) => {
             let m = m4.projection(gl.canvas.width, gl.canvas.height);
-            m = m3.translate(m, x, y);
-            m = m3.rotate(m, r);
-            m = m3.scale(m, w, h);
+            m = m4.translate(m, x, y);
+            m = m4.rotate(m, r);
+            m = m4.scale(m, w, h);
             gl.uniformMatrix4fv(matLoc, false, m);
             gl.uniform4fv(colLoc, col);
             gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
