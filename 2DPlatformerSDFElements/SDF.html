@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL SDF Elastic Platformer</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #111; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; bottom: 20px; left: 0; width: 100%; display: flex; justify-content: space-between; pointer-events: none; padding: 0 20px; box-sizing: border-box; }
+        .btn-group { display: flex; gap: 10px; pointer-events: auto; }
+        .btn { width: 70px; height: 70px; background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.5); border-radius: 50%; color: white; font-size: 24px; font-weight: bold; display: flex; justify-content: center; align-items: center; user-select: none; }
+        .btn:active { background: rgba(255,255,255,0.5); }
+    </style>
+</head>
+<body>
+
+<canvas id="glcanvas"></canvas>
+
+<div id="ui">
+    <div class="btn-group">
+        <div class="btn" id="btn-left">←</div>
+        <div class="btn" id="btn-right">→</div>
+    </div>
+    <div class="btn-group">
+        <div class="btn" id="btn-jump">↑</div>
+    </div>
+</div>
+
+<script>
+// --- WEBGL SETUP ---
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const vertexShaderSource = `
+    attribute vec2 a_position;
+    varying vec2 v_uv;
+    void main() {
+        v_uv = (a_position + 1.0) / 2.0;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+    }
+`;
+
+const fragmentShaderSource = `
+    precision mediump float;
+    varying vec2 v_uv;
+    uniform vec2 u_res;
+    uniform vec2 u_playerNodes[5];
+    uniform vec2 u_glowPos;
+    uniform float u_glowIntensity;
+    uniform vec3 u_glowColor;
+
+    // SDF Utilities
+    float smin(float a, float b, float k) {
+        float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+        return mix(b, a, h) - k * h * (1.0 - h);
+    }
+
+    float sdBox(vec2 p, vec2 b) {
+        vec2 d = abs(p) - b;
+        return length(max(d,0.0)) + min(max(d.x,d.y),0.0);
+    }
+
+    float sdTriangle(in vec2 p, in vec2 p0, in vec2 p1, in vec2 p2) {
+        vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+        vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+        vec2 pq0 = v0 - e0*clamp(dot(v0,e0)/dot(e0,e0), 0.0, 1.0);
+        vec2 pq1 = v1 - e1*clamp(dot(v1,e1)/dot(e1,e1), 0.0, 1.0);
+        vec2 pq2 = v2 - e2*clamp(dot(v2,e2)/dot(e2,e2), 0.0, 1.0);
+        float s = sign(e0.x*e2.y - e0.y*e2.x);
+        vec2 d = min(min(vec2(dot(pq0,pq0), s*(v0.x*e0.y-v0.y*e0.x)),
+                         vec2(dot(pq1,pq1), s*(v1.x*e1.y-v1.y*e1.x))),
+                         vec2(dot(pq2,pq2), s*(v2.x*e2.y-v2.y*e2.x)));
+        return -sqrt(d.x)*sign(d.y);
+    }
+
+    void main() {
+        vec2 uv = gl_FragCoord.xy / u_res.y; // Correct aspect ratio
+        vec2 center = vec2(u_res.x/u_res.y*0.5, 0.5);
+        
+        // 1. Player SDF (Elastic Blob using smin)
+        float dPlayer = 1000.0;
+        for(int i=0; i<5; i++) {
+            vec2 nodePos = u_playerNodes[i] / u_res.y;
+            dPlayer = smin(dPlayer, length(uv - nodePos) - 0.04, 0.08);
+        }
+
+        // 2. Map Environment
+        // Red static boxes
+        float dBox1 = sdBox(uv - vec2(0.2, 0.2), vec2(0.1, 0.05));
+        float dBox2 = sdBox(uv - vec2(0.8, 0.5), vec2(0.1, 0.05));
+        
+        // Blue elastic box
+        float dBlueBox = sdBox(uv - vec2(1.2, 0.3), vec2(0.1, 0.1));
+
+        // GJK Triangle Platform
+        float dTri = sdTriangle(uv, vec2(0.4, 0.1), vec2(0.6, 0.1), vec2(0.5, 0.3));
+
+        // 3. Coloring and Rendering
+        vec3 col = vec3(0.05); // Background
+
+        // Environment Colors
+        if(dBox1 < 0.0 || dBox2 < 0.0) col = vec3(0.8, 0.1, 0.1); // Static Red
+        if(dBlueBox < 0.0) col = vec3(0.1, 0.4, 0.9); // Elastic Blue
+        if(dTri < 0.0) col = vec3(0.4, 0.8, 0.2); // GJK Triangle
+
+        // Player Color
+        if(dPlayer < 0.0) {
+            float edge = smoothstep(-0.01, 0.0, dPlayer);
+            col = mix(vec3(0.9, 0.9, 1.0), vec3(0.3, 0.8, 0.9), edge);
+        }
+
+        // 4. Glow on Collision
+        vec2 glowUv = u_glowPos / u_res.y;
+        float dGlow = length(uv - glowUv);
+        col += u_glowColor * (u_glowIntensity / (dGlow * 15.0 + 0.01));
+
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+    }
+    return shader;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, createShader(gl, gl.VERTEX_SHADER, vertexShaderSource));
+gl.attachShader(prog, createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const posBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(prog, "a_position");
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(prog, "u_res");
+const uPlayerNodes = gl.getUniformLocation(prog, "u_playerNodes");
+const uGlowPos = gl.getUniformLocation(prog, "u_glowPos");
+const uGlowIntensity = gl.getUniformLocation(prog, "u_glowIntensity");
+const uGlowColor = gl.getUniformLocation(prog, "u_glowColor");
+
+// --- PHYSICS ENGINE ---
+
+// Soft body parameters
+const nodes = [];
+const springs = [];
+const numNodes = 5; // 1 center, 4 shell
+const restLength = 20;
+const kSpring = 0.1;
+const damping = 0.92;
+const gravity = 0.5;
+
+let glowTimer = 0;
+let glowPos = {x: 0, y: 0};
+let glowColor = [0,0,0];
+
+// Init Soft Body Player
+const startX = window.innerWidth * 0.5;
+const startY = window.innerHeight * 0.8;
+nodes.push({x: startX, y: startY, vx: 0, vy: 0}); // Center
+nodes.push({x: startX-restLength, y: startY, vx: 0, vy: 0});
+nodes.push({x: startX+restLength, y: startY, vx: 0, vy: 0});
+nodes.push({x: startX, y: startY-restLength, vx: 0, vy: 0});
+nodes.push({x: startX, y: startY+restLength, vx: 0, vy: 0});
+
+for(let i=1; i<5; i++) {
+    springs.push({a: 0, b: i, len: restLength}); // Center to shell
+    springs.push({a: i, b: (i%4)+1, len: restLength * 1.414}); // Shell to shell
+}
+
+// Platforms corresponding to Shader layout
+const h = canvas.height;
+const boxes = [
+    {x: 0.2*h, y: 0.2*h, w: 0.1*h, h2: 0.05*h, type: 'static'}, // Red
+    {x: 0.8*h, y: 0.5*h, w: 0.1*h, h2: 0.05*h, type: 'static'}, // Red
+    {x: 1.2*h, y: 0.3*h, w: 0.1*h, h2: 0.1*h, type: 'elastic'}  // Blue
+];
+
+const triPlatform = [
+    {x: 0.4*h, y: 0.1*h},
+    {x: 0.6*h, y: 0.1*h},
+    {x: 0.5*h, y: 0.3*h}
+];
+
+// Simplified GJK Core Logic
+function supportPoint(vertices, dir) {
+    let max = -Infinity;
+    let best = vertices[0];
+    for (let v of vertices) {
+        let dot = v.x * dir.x + v.y * dir.y;
+        if (dot > max) { max = dot; best = v; }
+    }
+    return best;
+}
+
+function gjkIntersect(polyA, polyB) {
+    // Simplified separating axis check representing GJK's core outcome for fast 2D limits
+    for (let p = 0; p < 2; p++) {
+        let poly = p === 0 ? polyA : polyB;
+        for (let i = 0; i < poly.length; i++) {
+            let p1 = poly[i];
+            let p2 = poly[(i + 1) % poly.length];
+            let normal = { x: p2.y - p1.y, y: p1.x - p2.x };
+            
+            let minA = Infinity, maxA = -Infinity;
+            for (let v of polyA) {
+                let proj = normal.x * v.x + normal.y * v.y;
+                minA = Math.min(minA, proj); maxA = Math.max(maxA, proj);
+            }
+            
+            let minB = Infinity, maxB = -Infinity;
+            for (let v of polyB) {
+                let proj = normal.x * v.x + normal.y * v.y;
+                minB = Math.min(minB, proj); maxB = Math.max(maxB, proj);
+            }
+            if (maxA < minB || maxB < minA) return false; // Gap found
+        }
+    }
+    return true; // No gap, intersecting
+}
+
+// Input Handling
+const keys = { left: false, right: false, jump: false };
+const setKey = (k, v) => (e) => { e.preventDefault(); keys[k] = v; };
+
+document.getElementById('btn-left').addEventListener('touchstart', setKey('left', true));
+document.getElementById('btn-left').addEventListener('touchend', setKey('left', false));
+document.getElementById('btn-right').addEventListener('touchstart', setKey('right', true));
+document.getElementById('btn-right').addEventListener('touchend', setKey('right', false));
+document.getElementById('btn-jump').addEventListener('touchstart', setKey('jump', true));
+document.getElementById('btn-jump').addEventListener('touchend', setKey('jump', false));
+
+document.addEventListener('keydown', e => {
+    if(e.code==='ArrowLeft') keys.left=true;
+    if(e.code==='ArrowRight') keys.right=true;
+    if(e.code==='ArrowUp') keys.jump=true;
+});
+document.addEventListener('keyup', e => {
+    if(e.code==='ArrowLeft') keys.left=false;
+    if(e.code==='ArrowRight') keys.right=false;
+    if(e.code==='ArrowUp') keys.jump=false;
+});
+
+function triggerGlow(x, y, r, g, b) {
+    glowPos.x = x; glowPos.y = y;
+    glowTimer = 1.0;
+    glowColor = [r, g, b];
+}
+
+// Game Loop
+function update() {
+    // Inputs
+    if (keys.left) nodes[0].vx -= 0.5;
+    if (keys.right) nodes[0].vx += 0.5;
+    if (keys.jump) {
+        // Simple ground check for jump
+        if(nodes[0].y < h * 0.15 || Math.abs(nodes[0].vy) < 0.1) {
+            nodes[0].vy += 15; // WebGL +Y is up, but standard canvas is down. Here we use +Y as up
+        }
+    }
+
+    // Apply Physics to Nodes
+    for (let n of nodes) {
+        n.vy -= gravity; // Gravity (assuming +Y is UP in our shader coords)
+        n.x += n.vx;
+        n.y += n.vy;
+        n.vx *= damping;
+        n.vy *= damping;
+
+        // Floor constraint
+        if (n.y < 20) {
+            n.y = 20;
+            n.vy *= -0.5;
+        }
+
+        // Box Collisions (AABB)
+        for (let b of boxes) {
+            let dx = n.x - b.x;
+            let dy = n.y - b.y;
+            if (Math.abs(dx) < b.w + 10 && Math.abs(dy) < b.h2 + 10) {
+                if (Math.abs(dx) > Math.abs(dy)) {
+                    n.vx *= -1; n.x += Math.sign(dx) * 5;
+                } else {
+                    n.vy *= b.type === 'elastic' ? -1.5 : -0.5; 
+                    n.y += Math.sign(dy) * 5;
+                }
+                
+                if (glowTimer <= 0) {
+                    if(b.type === 'elastic') triggerGlow(n.x, n.y, 0.2, 0.5, 1.0);
+                    else triggerGlow(n.x, n.y, 1.0, 0.2, 0.2);
+                }
+            }
+        }
+    }
+
+    // Soft Body Springs Constraint Resolution
+    for (let i = 0; i < 3; i++) { // Iterations for stability
+        for (let s of springs) {
+            let n1 = nodes[s.a], n2 = nodes[s.b];
+            let dx = n2.x - n1.x, dy = n2.y - n1.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            let diff = dist - s.len;
+            let force = diff * kSpring;
+            let fx = (dx / dist) * force, fy = (dy / dist) * force;
+            
+            n1.vx += fx; n1.vy += fy;
+            n2.vx -= fx; n2.vy -= fy;
+        }
+    }
+
+    // GJK Triangle Collision (Approximated player bounds vs Triangle)
+    let playerBounds = nodes.map(n => ({x: n.x, y: n.y}));
+    if (gjkIntersect(playerBounds, triPlatform)) {
+        // Resolve outwards
+        for(let n of nodes) {
+            n.vy += 2.0; 
+            n.y += 2.0;
+        }
+        if(glowTimer <= 0) triggerGlow(nodes[0].x, nodes[0].y, 0.5, 1.0, 0.2);
+    }
+
+    if(glowTimer > 0) glowTimer -= 0.05;
+
+    // Render Update
+    gl.uniform2f(uRes, canvas.width, canvas.height);
+    gl.uniform2f(uGlowPos, glowPos.x, glowPos.y);
+    gl.uniform1f(uGlowIntensity, Math.max(0, glowTimer));
+    gl.uniform3f(uGlowColor, glowColor[0], glowColor[1], glowColor[2]);
+
+    let flatNodes = [];
+    for (let n of nodes) { flatNodes.push(n.x, n.y); }
+    gl.uniform2fv(uPlayerNodes, flatNodes);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    requestAnimationFrame(update);
+}
+
+// Start
+update();
+</script>
+</body>
+</html>
