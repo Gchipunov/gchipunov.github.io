@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Interactive Gem Physics Room</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 15px; z-index: 10;
+        }
+        .btn {
+            background: rgba(255,255,255,0.2); color: white; border: 2px solid white;
+            padding: 15px 20px; border-radius: 10px; font-weight: bold; cursor: pointer;
+            backdrop-filter: blur(5px); user-select: none;
+        }
+        .btn:active { background: rgba(255,255,255,0.5); }
+        
+        #info {
+            position: absolute; top: 20px; left: 20px; color: #0df; z-index: 10;
+            background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="info">
+    Hits: <span id="hitCount">0</span>/3<br>
+    Barycentric: <span id="bary">N/A</span><br>
+    <small>Swipe/Drag to throw boxes at the Gem!</small>
+</div>
+
+<div id="ui">
+    <div class="btn" id="btnSpin">Spin Gem</div>
+    <div class="btn" id="btnReset">Reset</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// --- SCENE SETUP ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 2, 8);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- LIGHTING ---
+const ambientLight = new THREE.AmbientLight(0x404040);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(5, 10, 7);
+scene.add(dirLight);
+const pointLight = new THREE.PointLight(0x00ffff, 2, 20);
+scene.add(pointLight);
+
+// --- THE ROOM ---
+const roomGeo = new THREE.BoxGeometry(20, 10, 20);
+const roomMat = new THREE.MeshPhongMaterial({ color: 0x333333, side: THREE.BackSide });
+const room = new THREE.Mesh(roomGeo, roomMat);
+room.position.y = 5;
+scene.add(room);
+
+// --- ROTATING BOXES (Background) ---
+const bgBoxes = [];
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+const boxMat = new THREE.MeshPhongMaterial({ color: 0xff0055 });
+for(let i=0; i<5; i++) {
+    let b = new THREE.Mesh(boxGeo, boxMat);
+    b.position.set((Math.random()-0.5)*15, Math.random()*8, (Math.random()-0.5)*15 - 5);
+    scene.add(b);
+    bgBoxes.push(b);
+}
+
+// --- THE GEM ---
+let gem;
+let fragments = [];
+let gemHits = 0;
+let isCracked = false;
+
+function createGem() {
+    if(gem) scene.remove(gem);
+    fragments.forEach(f => scene.remove(f));
+    fragments = [];
+    gemHits = 0;
+    isCracked = false;
+    document.getElementById('hitCount').innerText = gemHits;
+    
+    // Icosahedron makes a nice gem shape
+    const gemGeo = new THREE.IcosahedronGeometry(1.5, 0); 
+    const gemMat = new THREE.MeshPhysicalMaterial({ 
+        color: 0x00aaff, metalness: 0.2, roughness: 0.1, 
+        transmission: 0.9, thickness: 1.0, flatShading: true 
+    });
+    gem = new THREE.Mesh(gemGeo, gemMat);
+    gem.position.set(0, 2, 0);
+    scene.add(gem);
+    pointLight.position.copy(gem.position);
+}
+createGem();
+
+// --- BARYCENTRIC CALCULATION ---
+function calculateBarycentric(point, a, b, c) {
+    const v0 = new THREE.Vector3().subVectors(b, a);
+    const v1 = new THREE.Vector3().subVectors(c, a);
+    const v2 = new THREE.Vector3().subVectors(point, a);
+    
+    const d00 = v0.dot(v0);
+    const d01 = v0.dot(v1);
+    const d11 = v1.dot(v1);
+    const d20 = v2.dot(v0);
+    const d21 = v2.dot(v1);
+    
+    const denom = d00 * d11 - d01 * d01;
+    const v = (d11 * d20 - d01 * d21) / denom;
+    const w = (d00 * d21 - d01 * d20) / denom;
+    const u = 1.0 - v - w;
+    return {u, v, w};
+}
+
+// --- FRACTURE / CRACK SYSTEM ---
+function crackGem() {
+    isCracked = true;
+    scene.remove(gem);
+    
+    // Convert gem geometry to non-indexed to get individual triangles
+    const geo = gem.geometry.toNonIndexed();
+    const positions = geo.attributes.position.array;
+    
+    const material = gem.material.clone();
+    
+    for (let i = 0; i < positions.length; i += 9) {
+        const fragGeo = new THREE.BufferGeometry();
+        const vertices = new Float32Array([
+            positions[i], positions[i+1], positions[i+2],
+            positions[i+3], positions[i+4], positions[i+5],
+            positions[i+6], positions[i+7], positions[i+8]
+        ]);
+        fragGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        fragGeo.computeVertexNormals();
+        
+        const shard = new THREE.Mesh(fragGeo, material);
+        shard.position.copy(gem.position);
+        shard.rotation.copy(gem.rotation);
+        
+        // Calculate centroid to push outwards
+        const centroid = new THREE.Vector3(
+            (vertices[0] + vertices[3] + vertices[6])/3,
+            (vertices[1] + vertices[4] + vertices[7])/3,
+            (vertices[2] + vertices[5] + vertices[8])/3
+        );
+        centroid.normalize();
+        
+        shard.userData.velocity = centroid.multiplyScalar(0.05 + Math.random() * 0.1);
+        shard.userData.rotSpeed = new THREE.Vector3(Math.random(), Math.random(), Math.random()).multiplyScalar(0.1);
+        
+        fragments.push(shard);
+        scene.add(shard);
+    }
+}
+
+// --- PROJECTILE SYSTEM (Draw to Throw) ---
+let projectiles = [];
+let dragStart = null;
+
+function throwBox(startVec, endVec) {
+    const projGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+    const projMat = new THREE.MeshPhongMaterial({ color: 0xffaa00 });
+    const proj = new THREE.Mesh(projGeo, projMat);
+    
+    proj.position.copy(camera.position);
+    proj.position.y -= 1; // Throw from slightly below camera
+    
+    // Calculate velocity vector based on swipe
+    const dir = new THREE.Vector3().subVectors(endVec, startVec).normalize();
+    dir.z = -1; // Force it forwards into the screen
+    proj.userData.velocity = dir.multiplyScalar(0.4);
+    
+    scene.add(proj);
+    projectiles.push(proj);
+}
+
+// --- INTERACTION / EVENTS ---
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+function getNormalizedEventCoords(e) {
+    let clientX = e.clientX || (e.touches && e.touches[0].clientX);
+    let clientY = e.clientY || (e.touches && e.touches[0].clientY);
+    return new THREE.Vector2(
+        (clientX / window.innerWidth) * 2 - 1,
+        -(clientY / window.innerHeight) * 2 + 1
+    );
+}
+
+// Handle Touch/Mouse input for swiping
+window.addEventListener('pointerdown', (e) => {
+    if(e.target.className === 'btn') return; // Ignore UI clicks
+    dragStart = getNormalizedEventCoords(e);
+});
+
+window.addEventListener('pointerup', (e) => {
+    if(!dragStart || e.target.className === 'btn') return;
+    const dragEnd = getNormalizedEventCoords(e);
+    
+    // If it was a quick click, just throw straight ahead. If swipe, throw in direction.
+    throwBox(dragStart, dragEnd);
+    dragStart = null;
+});
+
+// UI Buttons
+document.getElementById('btnSpin').addEventListener('click', () => {
+    if(gem && !isCracked) {
+        gem.rotation.y += Math.PI / 2;
+        gem.rotation.x += Math.PI / 4;
+    }
+});
+document.getElementById('btnReset').addEventListener('click', createGem);
+
+// Window Resize
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- MAIN LOOP ---
+function animate() {
+    requestAnimationFrame(animate);
+
+    // Rotate background boxes
+    bgBoxes.forEach(b => {
+        b.rotation.x += 0.01;
+        b.rotation.y += 0.02;
+    });
+
+    // Spin Gem
+    if(gem && !isCracked) {
+        gem.rotation.y += 0.005;
+        gem.rotation.x += 0.002;
+    }
+
+    // Update Projectiles and check collisions
+    for(let i = projectiles.length - 1; i >= 0; i--) {
+        let p = projectiles[i];
+        p.position.add(p.userData.velocity);
+        p.rotation.x += 0.1;
+        p.rotation.y += 0.1;
+
+        // Collision Check with Gem
+        if(gem && !isCracked) {
+            const dist = p.position.distanceTo(gem.position);
+            if(dist < 2.0) { // Simple bounding sphere check first
+                // Raycast exact impact
+                raycaster.set(p.position.clone().sub(p.userData.velocity), p.userData.velocity.clone().normalize());
+                const intersects = raycaster.intersectObject(gem);
+                
+                if(intersects.length > 0) {
+                    const hit = intersects[0];
+                    
+                    // Extract vertices of the hit face
+                    const positions = gem.geometry.attributes.position;
+                    const a = new THREE.Vector3().fromBufferAttribute(positions, hit.face.a);
+                    const b = new THREE.Vector3().fromBufferAttribute(positions, hit.face.b);
+                    const c = new THREE.Vector3().fromBufferAttribute(positions, hit.face.c);
+                    
+                    // Transform to world space
+                    a.applyMatrix4(gem.matrixWorld);
+                    b.applyMatrix4(gem.matrixWorld);
+                    c.applyMatrix4(gem.matrixWorld);
+
+                    // Averages the barycentric coordinate as requested
+                    const bary = calculateBarycentric(hit.point, a, b, c);
+                    document.getElementById('bary').innerText = `u:${bary.u.toFixed(2)}, v:${bary.v.toFixed(2)}, w:${bary.w.toFixed(2)}`;
+
+                    // Impact Logic
+                    gemHits++;
+                    document.getElementById('hitCount').innerText = gemHits;
+                    
+                    // Add rotational velocity to gem based on hit
+                    gem.rotation.y += 0.5;
+
+                    // Remove projectile
+                    scene.remove(p);
+                    projectiles.splice(i, 1);
+
+                    // Crack Check
+                    if(gemHits >= 3) crackGem();
+                    continue;
+                }
+            }
+        }
+        
+        // Remove projectiles if they go too far
+        if(p.position.z < -20 || p.position.y < -10) {
+            scene.remove(p);
+            projectiles.splice(i, 1);
+        }
+    }
+
+    // Update Fragments if Cracked
+    if(isCracked) {
+        fragments.forEach(f => {
+            f.position.add(f.userData.velocity);
+            f.rotation.x += f.userData.rotSpeed.x;
+            f.rotation.y += f.userData.rotSpeed.y;
+            f.userData.velocity.y -= 0.002; // Simple gravity
+        });
+    }
+
+    renderer.render(scene, camera);
+}
+
+animate();
+</script>
+
+</body>
+</html>
