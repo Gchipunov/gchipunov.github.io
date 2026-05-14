@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL FaceCap Customizer</title>
+    <style>
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui-container {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid #444;
+        }
+
+        .control-group { margin-bottom: 15px; }
+        label { display: block; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; color: #aaa; }
+        input[type=range] { width: 100%; height: 8px; border-radius: 5px; accent-color: #00ff88; }
+        
+        h2 { margin: 0 0 15px 0; font-size: 18px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<canvas id="glCanvas"></canvas>
+
+<div id="ui-container">
+    <h2>AVATAR EDITOR</h2>
+    <div class="control-group">
+        <label>Jaw Width</label>
+        <input type="range" id="jawWidth" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+        <label>Eye Size</label>
+        <input type="range" id="eyeSize" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+        <label>Head Height</label>
+        <input type="range" id="headHeight" min="0.8" max="1.4" step="0.01" value="1.0">
+    </div>
+    <div class="control-group">
+        <label>Skin Tone</label>
+        <input type="range" id="skinTone" min="0" max="1" step="0.01" value="0.7">
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+
+    if (!gl) { alert('WebGL not supported'); }
+
+    // --- SHADERS ---
+    const vsSource = `
+        attribute var4 aPosition;
+        attribute vec3 aNormal;
+        uniform mat4 uProjectionMatrix;
+        uniform mat4 uModelViewMatrix;
+        
+        // Face Morph Uniforms
+        uniform float uJawWidth;
+        uniform float uHeadHeight;
+        
+        varying lowp vec3 vNormal;
+        varying lowp vec3 vPos;
+
+        void main() {
+            vec4 pos = aPosition;
+            
+            // Apply Morphs
+            if(pos.y < -0.2) { // Jaw area
+                pos.x *= (1.0 + (uJawWidth - 0.5));
+            }
+            pos.y *= uHeadHeight;
+
+            gl_Position = uProjectionMatrix * uModelViewMatrix * pos;
+            vNormal = aNormal;
+            vPos = pos.xyz;
+        }
+    `;
+
+    const fsSource = `
+        precision lowp float;
+        varying vec3 vNormal;
+        varying vec3 vPos;
+        uniform float uSkinTone;
+
+        void main() {
+            vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
+            float intensity = dot(normalize(vNormal), lightDir) * 0.5 + 0.5;
+            
+            // Simple skin tone gradient
+            vec3 darkSkin = vec3(0.2, 0.1, 0.05);
+            vec3 lightSkin = vec3(1.0, 0.8, 0.7);
+            vec3 skinColor = mix(darkSkin, lightSkin, uSkinTone);
+            
+            gl_FragColor = vec4(skinColor * intensity, 1.0);
+        }
+    `;
+
+    // --- WEBGL HELPER FUNCTIONS ---
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    // --- GEOMETRY (SPHERE/HEAD) ---
+    function createSphere(radius, div) {
+        const pos = [], nor = [], idx = [];
+        for (let y = 0; y <= div; y++) {
+            let lat = y * Math.PI / div;
+            for (let x = 0; x <= div; x++) {
+                let lon = x * 2 * Math.PI / div;
+                let ux = Math.cos(lon) * Math.sin(lat);
+                let uy = Math.cos(lat);
+                let uz = Math.sin(lon) * Math.sin(lat);
+                pos.push(ux * radius, uy * radius, uz * radius);
+                nor.push(ux, uy, uz);
+            }
+        }
+        for (let y = 0; y < div; y++) {
+            for (let x = 0; x < div; x++) {
+                let p1 = y * (div + 1) + x;
+                let p2 = p1 + (div + 1);
+                idx.push(p1, p2, p1 + 1, p1 + 1, p2, p2 + 1);
+            }
+        }
+        return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
+    }
+
+    const sphere = createSphere(1, 30);
+    const posBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, sphere.pos, gl.STATIC_DRAW);
+
+    const idxBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphere.idx, gl.STATIC_DRAW);
+
+    const aPos = gl.getAttribLocation(program, "aPosition");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+
+    // --- UNIFORMS ---
+    const uProj = gl.getUniformLocation(program, "uProjectionMatrix");
+    const uMV = gl.getUniformLocation(program, "uModelViewMatrix");
+    const uJaw = gl.getUniformLocation(program, "uJawWidth");
+    const uHeight = gl.getUniformLocation(program, "uHeadHeight");
+    const uSkin = gl.getUniformLocation(program, "uSkinTone");
+
+    // --- RENDER LOOP ---
+    let rotation = 0;
+    function render() {
+        // Handle Resize
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        
+        gl.clearColor(0.1, 0.1, 0.1, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+
+        // Matrices
+        const aspect = canvas.width / canvas.height;
+        const pMat = new Float32Array([1/aspect,0,0,0, 0,1,0,0, 0,0,-1.02,-1, 0,0,-0.2,0]); // Simple Perspective
+        
+        rotation += 0.01;
+        const c = Math.cos(rotation), s = Math.sin(rotation);
+        const mvMat = new Float32Array([c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,-3,1]); // Rotation + Translation
+
+        gl.uniformMatrix4fv(uProj, false, pMat);
+        gl.uniformMatrix4fv(uMV, false, mvMat);
+
+        // Update from UI
+        gl.uniform1f(uJaw, document.getElementById('jawWidth').value);
+        gl.uniform1f(uHeight, document.getElementById('headHeight').value);
+        gl.uniform1f(uSkin, document.getElementById('skinTone').value);
+
+        gl.drawElements(gl.TRIANGLES, sphere.idx.length, gl.UNSIGNED_SHORT, 0);
+        requestAnimationFrame(render);
+    }
+
+    render();
+
+    // Mobile touch prevention to allow smooth UI interaction
+    document.addEventListener('touchmove', (e) => {
+        if (e.target.tagName !== 'INPUT') e.preventDefault();
+    }, { passive: false });
+</script>
+</body>
+</html>
