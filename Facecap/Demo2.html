@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL FaceCap Customizer</title>
+    <style>
+        body { margin: 0; background: #111; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        #ui-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 85%;
+            max-width: 350px;
+            background: rgba(25, 25, 25, 0.85);
+            padding: 25px;
+            border-radius: 24px;
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .control-group { margin-bottom: 18px; }
+        label { display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 8px; color: #888; letter-spacing: 1px; }
+        input[type=range] { width: 100%; height: 6px; border-radius: 3px; accent-color: #00ff88; background: #333; outline: none; }
+        
+        h2 { margin: 0 0 20px 0; font-size: 16px; text-align: center; font-weight: 800; letter-spacing: 2px; color: #00ff88; }
+    </style>
+</head>
+<body>
+
+<canvas id="glCanvas"></canvas>
+
+<div id="ui-container">
+    <h2>FACE DESIGNER</h2>
+    <div class="control-group">
+        <label>Jaw Shape <span>Width</span></label>
+        <input type="range" id="jawWidth" min="0.5" max="1.5" step="0.01" value="1.0">
+    </div>
+    <div class="control-group">
+        <label>Eye Intensity <span>Scale</span></label>
+        <input type="range" id="eyeSize" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+        <label>Cranium <span>Height</span></label>
+        <input type="range" id="headHeight" min="0.8" max="1.3" step="0.01" value="1.0">
+    </div>
+    <div class="control-group">
+        <label>Melanin <span>Tone</span></label>
+        <input type="range" id="skinTone" min="0" max="1" step="0.01" value="0.6">
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+
+    if (!gl) { alert('WebGL not supported'); }
+
+    // --- SHADERS (Fixed var4 -> vec4) ---
+    const vsSource = `
+        attribute vec4 aPosition;
+        attribute vec3 aNormal;
+        uniform mat4 uProjectionMatrix;
+        uniform mat4 uModelViewMatrix;
+        
+        uniform float uJawWidth;
+        uniform float uHeadHeight;
+        uniform float uEyeSize;
+        
+        varying vec3 vNormal;
+        varying vec3 vPos;
+
+        void main() {
+            vec4 pos = aPosition;
+            
+            // 1. Jaw Morphing
+            if(pos.y < -0.2) { 
+                pos.x *= uJawWidth;
+                pos.z *= (uJawWidth * 0.8);
+            }
+            
+            // 2. Head Height Morphing
+            if(pos.y > 0.0) {
+                pos.y *= uHeadHeight;
+            }
+
+            // 3. Simple Eye Socket Bulge (based on eyeSize)
+            float distToEye = distance(vec3(abs(pos.x), pos.y, pos.z), vec3(0.4, 0.3, 0.8));
+            if(distToEye < 0.3) {
+                pos.xyz += aNormal * (uEyeSize * 0.1);
+            }
+
+            gl_Position = uProjectionMatrix * uModelViewMatrix * pos;
+            vNormal = aNormal;
+            vPos = pos.xyz;
+        }
+    `;
+
+    const fsSource = `
+        precision lowp float;
+        varying vec3 vNormal;
+        uniform float uSkinTone;
+
+        void main() {
+            vec3 lightDir = normalize(vec3(0.5, 1.0, 1.0));
+            float diff = dot(normalize(vNormal), lightDir);
+            float lighting = max(diff, 0.2); // Ambient baseline
+            
+            vec3 darkSkin = vec3(0.15, 0.08, 0.05);
+            vec3 lightSkin = vec3(1.0, 0.85, 0.75);
+            vec3 color = mix(darkSkin, lightSkin, uSkinTone);
+            
+            gl_FragColor = vec4(color * lighting, 1.0);
+        }
+    `;
+
+    // Shader Compiler Helper
+    function initShaderProgram(gl, vs, fs) {
+        const load = (t, s) => {
+            const sh = gl.createShader(t);
+            gl.shaderSource(sh, s);
+            gl.compileShader(sh);
+            if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(sh));
+                gl.deleteShader(sh);
+                return null;
+            }
+            return sh;
+        };
+        const vsh = load(gl.VERTEX_SHADER, vs);
+        const fsh = load(gl.FRAGMENT_SHADER, fs);
+        const prog = gl.createProgram();
+        gl.attachShader(prog, vsh);
+        gl.attachShader(prog, fsh);
+        gl.linkProgram(prog);
+        return prog;
+    }
+
+    const program = initShaderProgram(gl, vsSource, fsSource);
+    gl.useProgram(program);
+
+    // --- GEOMETRY DATA ---
+    function createSphere(radius, div) {
+        const pos = [], nor = [], idx = [];
+        for (let y = 0; y <= div; y++) {
+            let lat = y * Math.PI / div;
+            let sinLat = Math.sin(lat);
+            let cosLat = Math.cos(lat);
+            for (let x = 0; x <= div; x++) {
+                let lon = x * 2 * Math.PI / div;
+                let ux = Math.cos(lon) * sinLat;
+                let uy = cosLat;
+                let uz = Math.sin(lon) * sinLat;
+                pos.push(ux * radius, uy * radius, uz * radius);
+                nor.push(ux, uy, uz);
+            }
+        }
+        for (let y = 0; y < div; y++) {
+            for (let x = 0; x < div; x++) {
+                let p1 = y * (div + 1) + x;
+                let p2 = p1 + (div + 1);
+                idx.push(p1, p2, p1 + 1, p1 + 1, p2, p2 + 1);
+            }
+        }
+        return { pos: new Float32Array(pos), nor: new Float32Array(nor), idx: new Uint16Array(idx) };
+    }
+
+    const sphere = createSphere(1.2, 40);
+
+    const buffers = {
+        pos: gl.createBuffer(),
+        nor: gl.createBuffer(),
+        idx: gl.createBuffer()
+    };
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.pos);
+    gl.bufferData(gl.ARRAY_BUFFER, sphere.pos, gl.STATIC_DRAW);
+    
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.nor);
+    gl.bufferData(gl.ARRAY_BUFFER, sphere.nor, gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.idx);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphere.idx, gl.STATIC_DRAW);
+
+    // --- LOCATIONS ---
+    const locs = {
+        attrPos: gl.getAttribLocation(program, "aPosition"),
+        attrNor: gl.getAttribLocation(program, "aNormal"),
+        uProj: gl.getUniformLocation(program, "uProjectionMatrix"),
+        uMV: gl.getUniformLocation(program, "uModelViewMatrix"),
+        uJaw: gl.getUniformLocation(program, "uJawWidth"),
+        uHeight: gl.getUniformLocation(program, "uHeadHeight"),
+        uEye: gl.getUniformLocation(program, "uEyeSize"),
+        uSkin: gl.getUniformLocation(program, "uSkinTone")
+    };
+
+    // --- ANIMATION & RENDER ---
+    let rotation = 0;
+    function render() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        
+        gl.clearColor(0.05, 0.05, 0.05, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.enable(gl.DEPTH_TEST);
+
+        const aspect = canvas.width / canvas.height;
+        const pMat = new Float32Array([1/aspect,0,0,0, 0,1,0,0, 0,0,-1.02,-1, 0,0,-0.2,0]); 
+        
+        rotation += 0.005;
+        const c = Math.cos(rotation), s = Math.sin(rotation);
+        const mvMat = new Float32Array([c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,-4,1]);
+
+        gl.uniformMatrix4fv(locs.uProj, false, pMat);
+        gl.uniformMatrix4fv(locs.uMV, false, mvMat);
+
+        // UI Updates
+        gl.uniform1f(locs.uJaw, document.getElementById('jawWidth').value);
+        gl.uniform1f(locs.uHeight, document.getElementById('headHeight').value);
+        gl.uniform1f(locs.uEye, document.getElementById('eyeSize').value);
+        gl.uniform1f(locs.uSkin, document.getElementById('skinTone').value);
+
+        // Bind attributes
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.pos);
+        gl.vertexAttribPointer(locs.attrPos, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(locs.attrPos);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.nor);
+        gl.vertexAttribPointer(locs.attrNor, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(locs.attrNor);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.idx);
+        gl.drawElements(gl.TRIANGLES, sphere.idx.length, gl.UNSIGNED_SHORT, 0);
+        
+        requestAnimationFrame(render);
+    }
+
+    render();
+</script>
+</body>
+</html>
