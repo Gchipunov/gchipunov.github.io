@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Soft Selection Sphere with Recording</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: sans-serif;
+            display: flex;
+            overflow: hidden;
+        }
+        #canvas-container {
+            flex-grow: 1;
+            position: relative;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #sidebar {
+            width: 300px;
+            background: #2a2a2a;
+            padding: 20px;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.5);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #aaa;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        span {
+            font-size: 14px;
+            color: #00ffcc;
+        }
+        button {
+            background: #00ffcc;
+            color: #1a1a1a;
+            border: none;
+            padding: 10px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background: #00b399;
+        }
+        button:disabled {
+            background: #444;
+            color: #888;
+            cursor: not-allowed;
+        }
+        .info {
+            font-size: 12px;
+            color: #888;
+            line-height: 1.4;
+        }
+        .recording-box {
+            background: #222;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #status-indicator {
+            font-size: 12px;
+            font-weight: bold;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+        .btn-row {
+            display: flex;
+            gap: 5px;
+        }
+        .btn-row button {
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container">
+        <canvas id="glCanvas"></canvas>
+    </div>
+
+    <div id="sidebar">
+        <h2>Soft Selection</h2>
+        
+        <div class="recording-box">
+            <label>Timeline Controls</label>
+            <div id="status-indicator">Status: Idle</div>
+            <div class="btn-row">
+                <button id="btn-record">Record</button>
+                <button id="btn-stop" disabled>Stop</button>
+                <button id="btn-replay" disabled>Replay</button>
+            </div>
+        </div>
+
+        <p class="info">Click anywhere on the sphere to select a center vertex. Modify the parameters below to morph the shape.</p>
+        
+        <div class="control-group">
+            <label>Selection Radius: <span id="val-radius">0.5</span></label>
+            <input type="range" id="param-radius" min="0.1" max="2.0" step="0.05" value="0.5">
+        </div>
+
+        <hr style="border-color: #444;">
+
+        <div class="control-group">
+            <label>Move X: <span id="val-transX">0.0</span></label>
+            <input type="range" id="param-transX" min="-1.0" max="1.0" step="0.02" value="0.0">
+        </div>
+        <div class="control-group">
+            <label>Move Y: <span id="val-transY">0.0</span></label>
+            <input type="range" id="param-transY" min="-1.0" max="1.0" step="0.02" value="0.0">
+        </div>
+        <div class="control-group">
+            <label>Move Z: <span id="val-transZ">0.0</span></label>
+            <input type="range" id="param-transZ" min="-1.0" max="1.0" step="0.02" value="0.0">
+        </div>
+
+        <hr style="border-color: #444;">
+
+        <div class="control-group">
+            <label>Rotate (Twist): <span id="val-rot">0.0</span>°</label>
+            <input type="range" id="param-rot" min="-180" max="180" step="1" value="0">
+        </div>
+
+        <hr style="border-color: #444;">
+
+        <div class="control-group">
+            <label>Scale Region: <span id="val-scale">1.0</span></label>
+            <input type="range" id="param-scale" min="0.1" max="2.5" step="0.05" value="1.0">
+        </div>
+
+        <button id="btn-reset">Reset Geometry</button>
+    </div>
+
+    <script>
+        // --- SHADERS (WebGL2) ---
+        const vsSource = `#version 300 es
+            in vec3 aPosition;
+            in vec3 aNormal;
+
+            uniform mat4 uModelMatrix;
+            uniform mat4 uViewMatrix;
+            uniform mat4 uProjectionMatrix;
+
+            uniform vec3 uSelectedVertex;
+            uniform float uRadius;
+            uniform vec3 uTranslation;
+            uniform float uRotationAngle; 
+            uniform float uScale;
+
+            out vec3 vNormal;
+            out vec3 vColor;
+            out float vFalloff;
+
+            mat4 rotationMatrix(vec3 axis, float angle) {
+                axis = normalize(axis);
+                float s = sin(angle);
+                float c = cos(angle);
+                float oc = 1.0 - c;
+                
+                return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
+                            oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,  0.0,
+                            oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c,           0.0,
+                            0.0,                                0.0,                                0.0,                                1.0);
+            }
+
+            void main() {
+                vec3 pos = aPosition;
+                float dist = distance(pos, uSelectedVertex);
+                float falloff = 0.0;
+
+                if (dist < uRadius && uRadius > 0.0) {
+                    float ratio = dist / uRadius;
+                    falloff = 1.0 - (ratio * ratio);
+                    falloff = falloff * falloff; 
+                }
+
+                if (falloff > 0.0) {
+                    vec3 toVertex = pos - uSelectedVertex;
+                    vec3 scaledToVertex = toVertex * (1.0 + (uScale - 1.0) * falloff);
+                    pos = uSelectedVertex + scaledToVertex;
+
+                    if (uRotationAngle != 0.0) {
+                        mat4 rotMat = rotationMatrix(uSelectedVertex, uRotationAngle * falloff);
+                        pos = (rotMat * vec4(pos, 1.0)).xyz;
+                    }
+
+                    pos += uTranslation * falloff;
+                }
+
+                gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * vec4(pos, 1.0);
+                vNormal = mat3(uModelMatrix) * aNormal;
+                vFalloff = falloff;
+                vColor = mix(vec3(0.2, 0.4, 0.9), vec3(1.0, 0.2, 0.2), falloff);
+            }
+        `;
+
+        const fsSource = `#version 300 es
+            precision highp float;
+            in vec3 vNormal;
+            in vec3 vColor;
+            in float vFalloff;
+            out vec4 fragColor;
+
+            void main() {
+                vec3 normal = normalize(vNormal);
+                vec3 lightDir = normalize(vec3(1.0, 1.0, 1.5));
+                float diffuse = max(dot(normal, lightDir), 0.0) * 0.7;
+                float ambient = 0.3;
+                vec3 lightingColor = vColor * (diffuse + ambient);
+                fragColor = vec4(lightingColor, 1.0);
+            }
+        `;
+
+        // --- application state ---
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) {
+            alert('WebGL 2 not supported on your browser.');
+        }
+
+        let programInfo, buffers, sphereGeometry;
+        let selectedVertex = [0, 0, 0];
+        let rotationY = 0.0;
+        let rotationX = 0.0;
+        let isDragging = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // UI Parameter references
+        const params = {
+            radius: document.getElementById('param-radius'),
+            transX: document.getElementById('param-transX'),
+            transY: document.getElementById('param-transY'),
+            transZ: document.getElementById('param-transZ'),
+            rot: document.getElementById('param-rot'),
+            scale: document.getElementById('param-scale'),
+        };
+
+        // --- RECORD & REPLAY STATE ENGINE MODULE ---
+        let recordedFrames = [];
+        let isRecording = false;
+        let isReplaying = false;
+        let recordTimer = null;
+        let replayIndex = 0;
+        let replayTimer = null;
+
+        const uiElements = {
+            recordBtn: document.getElementById('btn-record'),
+            stopBtn: document.getElementById('btn-stop'),
+            replayBtn: document.getElementById('btn-replay'),
+            status: document.getElementById('status-indicator')
+        };
+
+        // --- MATH UTILITIES ---
+        const Mat4 = {
+            perspective: (fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2);
+                return [
+                    f / aspect, 0, 0, 0,
+                    0, f, 0, 0,
+                    0, 0, (far + near) / (near - far), -1,
+                    0, 0, (2 * far * near) / (near - far), 0
+                ];
+            },
+            identity: () => [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1],
+            multiply: (a, b) => {
+                let out = new Array(16);
+                for (let row = 0; row < 4; row++) {
+                    for (let col = 0; col < 4; col++) {
+                        out[row * 4 + col] = 
+                            a[row * 4 + 0] * b[0 * 4 + col] +
+                            a[row * 4 + 1] * b[1 * 4 + col] +
+                            a[row * 4 + 2] * b[2 * 4 + col] +
+                            a[row * 4 + 3] * b[3 * 4 + col];
+                    }
+                }
+                return out;
+            },
+            rotateX: (m, rad) => {
+                const c = Math.cos(rad), s = Math.sin(rad);
+                const r = [1,0,0,0, 0,c,-s,0, 0,s,c,0, 0,0,0,1];
+                return Mat4.multiply(m, r);
+            },
+            rotateY: (m, rad) => {
+                const c = Math.cos(rad), s = Math.sin(rad);
+                const r = [c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,0,1];
+                return Mat4.multiply(m, r);
+            }
+        };
+
+        // --- GEOMETRY GENERATION ---
+        function createSphere(radius, segments) {
+            const positions = [];
+            const normals = [];
+            const indices = [];
+
+            for (let lat = 0; lat <= segments; lat++) {
+                const theta = lat * Math.PI / segments;
+                const sinTheta = Math.sin(theta);
+                const cosTheta = Math.cos(theta);
+
+                for (let lon = 0; lon <= segments; lon++) {
+                    const phi = lon * 2 * Math.PI / segments;
+                    const sinPhi = Math.sin(phi);
+                    const cosPhi = Math.cos(phi);
+
+                    const x = cosPhi * sinTheta;
+                    const y = cosTheta;
+                    const z = sinPhi * sinTheta;
+
+                    positions.push(radius * x, radius * y, radius * z);
+                    normals.push(x, y, z);
+                }
+            }
+
+            for (let lat = 0; lat < segments; lat++) {
+                for (let lon = 0; lon < segments; lon++) {
+                    const first = (lat * (segments + 1)) + lon;
+                    const second = first + segments + 1;
+
+                    indices.push(first, second, first + 1);
+                    indices.push(second, second + 1, first + 1);
+                }
+            }
+
+            return { positions, normals, indices };
+        }
+
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        // --- INITIALIZATION ---
+        function init() {
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+            programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    position: gl.getAttribLocation(shaderProgram, 'aPosition'),
+                    normal: gl.getAttribLocation(shaderProgram, 'aNormal'),
+                },
+                uniformLocations: {
+                    modelMatrix: gl.getUniformLocation(shaderProgram, 'uModelMatrix'),
+                    viewMatrix: gl.getUniformLocation(shaderProgram, 'uViewMatrix'),
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    selectedVertex: gl.getUniformLocation(shaderProgram, 'uSelectedVertex'),
+                    radius: gl.getUniformLocation(shaderProgram, 'uRadius'),
+                    translation: gl.getUniformLocation(shaderProgram, 'uTranslation'),
+                    rotationAngle: gl.getUniformLocation(shaderProgram, 'uRotationAngle'),
+                    scale: gl.getUniformLocation(shaderProgram, 'uScale'),
+                },
+            };
+
+            sphereGeometry = createSphere(1.2, 32);
+            buffers = {
+                position: gl.createBuffer(),
+                normal: gl.createBuffer(),
+                index: gl.createBuffer(),
+            };
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereGeometry.positions), gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereGeometry.normals), gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphereGeometry.indices), gl.STATIC_DRAW);
+
+            setupEvents();
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            requestAnimationFrame(render);
+        }
+
+        // --- INTERACTION & EVENT BINDINGS ---
+        function setupEvents() {
+            Object.keys(params).forEach(key => {
+                params[key].addEventListener('input', (e) => {
+                    if (isReplaying) return; // Ignore interactions during playback
+                    let suffix = (key === 'rot') ? '°' : '';
+                    document.getElementById(`val-${key}`).innerText = parseFloat(e.target.value).toFixed(2) + suffix;
+                });
+            });
+
+            document.getElementById('btn-reset').onclick = () => {
+                if (isReplaying || isRecording) return;
+                resetParametersToDefault();
+            };
+
+            canvas.addEventListener('mousedown', (e) => {
+                if (isReplaying) return;
+                isDragging = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                selectVertex(e);
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging || isReplaying) return;
+                let deltaX = e.clientX - lastMouseX;
+                let deltaY = e.clientY - lastMouseY;
+
+                rotationY += deltaX * 0.005;
+                rotationX += deltaY * 0.005;
+
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            });
+
+            window.addEventListener('mouseup', () => isDragging = false);
+
+            // --- RECORDING SYSTEM LOGIC ---
+            uiElements.recordBtn.onclick = () => {
+                recordedFrames = [];
+                isRecording = true;
+                isReplaying = false;
+                
+                uiElements.recordBtn.disabled = true;
+                uiElements.stopBtn.disabled = false;
+                uiElements.replayBtn.disabled = true;
+                toggleFormInputs(false);
+
+                uiElements.status.innerText = "Status: Recording (0s)";
+                uiElements.status.style.color = "#ff3333";
+
+                // Save initial frame immediately
+                captureFrame();
+
+                // Setup interval clock for exactly 1-second ticks
+                recordTimer = setInterval(() => {
+                    captureFrame();
+                    uiElements.status.innerText = `Status: Recording (${recordedFrames.length - 1}s)`;
+                    
+                    // Enforce max duration constraint threshold (100 seconds = 101 recorded index elements)
+                    if (recordedFrames.length >= 101) {
+                        stopRecording();
+                    }
+                }, 1000);
+            };
+
+            uiElements.stopBtn.onclick = () => {
+                if (isRecording) stopRecording();
+                if (isReplaying) stopReplay();
+            };
+
+            uiElements.replayBtn.onclick = () => {
+                if (recordedFrames.length === 0) return;
+                isReplaying = true;
+                isRecording = false;
+
+                uiElements.recordBtn.disabled = true;
+                uiElements.stopBtn.disabled = false;
+                uiElements.replayBtn.disabled = true;
+                toggleFormInputs(false);
+
+                replayIndex = 0;
+                applyCapturedFrame(recordedFrames[replayIndex]);
+                uiElements.status.innerText = `Status: Playing (0s / ${recordedFrames.length - 1}s)`;
+                uiElements.status.style.color = "#00ffcc";
+
+                replayTimer = setInterval(() => {
+                    replayIndex++;
+                    if (replayIndex >= recordedFrames.length) {
+                        stopReplay();
+                    } else {
+                        applyCapturedFrame(recordedFrames[replayIndex]);
+                        uiElements.status.innerText = `Status: Playing (${replayIndex}s / ${recordedFrames.length - 1}s)`;
+                    }
+                }, 1000);
+            };
+        }
+
+        function captureFrame() {
+            recordedFrames.push({
+                selectedVertex: [...selectedVertex],
+                rotationX: rotationX,
+                rotationY: rotationY,
+                radius: parseFloat(params.radius.value),
+                transX: parseFloat(params.transX.value),
+                transY: parseFloat(params.transY.value),
+                transZ: parseFloat(params.transZ.value),
+                rot: parseFloat(params.rot.value),
+                scale: parseFloat(params.scale.value)
+            });
+        }
+
+        function applyCapturedFrame(frame) {
+            selectedVertex = [...frame.selectedVertex];
+            rotationX = frame.rotationX;
+            rotationY = frame.rotationY;
+
+            params.radius.value = frame.radius;
+            params.transX.value = frame.transX;
+            params.transY.value = frame.transY;
+            params.transZ.value = frame.transZ;
+            params.rot.value = frame.rot;
+            params.scale.value = frame.scale;
+
+            // Update UI Numerical display readouts matching state injection values
+            document.getElementById('val-radius').innerText = frame.radius.toFixed(2);
+            document.getElementById('val-transX').innerText = frame.transX.toFixed(2);
+            document.getElementById('val-transY').innerText = frame.transY.toFixed(2);
+            document.getElementById('val-transZ').innerText = frame.transZ.toFixed(2);
+            document.getElementById('val-rot').innerText = frame.rot.toFixed(2) + '°';
+            document.getElementById('val-scale').innerText = frame.scale.toFixed(2);
+        }
+
+        function stopRecording() {
+            clearInterval(recordTimer);
+            isRecording = false;
+            uiElements.recordBtn.disabled = false;
+            uiElements.stopBtn.disabled = true;
+            uiElements.replayBtn.disabled = (recordedFrames.length === 0);
+            toggleFormInputs(true);
+            uiElements.status.innerText = `Status: Idle (Saved ${recordedFrames.length - 1}s)`;
+            uiElements.status.style.color = "#aaa";
+        }
+
+        function stopReplay() {
+            clearInterval(replayTimer);
+            isReplaying = false;
+            uiElements.recordBtn.disabled = false;
+            uiElements.stopBtn.disabled = true;
+            uiElements.replayBtn.disabled = false;
+            toggleFormInputs(true);
+            uiElements.status.innerText = "Status: Idle";
+            uiElements.status.style.color = "#aaa";
+        }
+
+        function toggleFormInputs(enable) {
+            Object.keys(params).forEach(key => {
+                params[key].disabled = !enable;
+            });
+        }
+
+        function resetParametersToDefault() {
+            Object.keys(params).forEach(key => {
+                params[key].value = key === 'scale' ? 1.0 : 0.0;
+                if(key === 'radius') params[key].value = 0.5;
+                document.getElementById(`val-${key}`).innerText = params[key].value + (key === 'rot' ? '°' : '');
+            });
+            selectedVertex = [0,0,0];
+        }
+
+        function selectVertex(event) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = event.clientX - rect.left;
+            const clientY = event.clientY - rect.top;
+
+            const ndcX = (clientX / canvas.clientWidth) * 2 - 1;
+            const ndcY = -(clientY / canvas.clientHeight) * 2 + 1;
+
+            let modelMat = Mat4.identity();
+            modelMat = Mat4.rotateX(modelMat, rotationX);
+            modelMat = Mat4.rotateY(modelMat, rotationY);
+
+            let bestVertex = [0, 0, 0];
+            let minDistance = Infinity;
+
+            for (let i = 0; i < sphereGeometry.positions.length; i += 3) {
+                let x = sphereGeometry.positions[i];
+                let y = sphereGeometry.positions[i+1];
+                let z = sphereGeometry.positions[i+2];
+
+                let tx = modelMat[0]*x + modelMat[4]*y + modelMat[8]*z;
+                let ty = modelMat[1]*x + modelMat[5]*y + modelMat[9]*z;
+                let tz = modelMat[2]*x + modelMat[6]*y + modelMat[10]*z - 4.0;
+
+                let projX = (tx / -tz); 
+                let projY = (ty / -tz); 
+
+                let distance2D = Math.hypot(ndcX - projX, ndcY - projY);
+                if (distance2D < minDistance && tz < 0) { 
+                    minDistance = distance2D;
+                    bestVertex = [x, y, z];
+                }
+            }
+            
+            if(minDistance < 0.3) { 
+                 selectedVertex = bestVertex;
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        // --- RENDER ENGINE LOOP ---
+        function render() {
+            gl.clearColor(0.1, 0.1, 0.1, 1.0);
+            gl.clearDepth(1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const fieldOfView = 45 * Math.PI / 180;
+            const aspect = canvas.width / canvas.height;
+            const projectionMatrix = Mat4.perspective(fieldOfView, aspect, 0.1, 100.0);
+
+            let viewMatrix = Mat4.identity();
+            viewMatrix[14] = -4.0; 
+
+            let modelMatrix = Mat4.identity();
+            modelMatrix = Mat4.rotateX(modelMatrix, rotationX);
+            modelMatrix = Mat4.rotateY(modelMatrix, rotationY);
+
+            gl.useProgram(programInfo.program);
+
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.viewMatrix, false, viewMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelMatrix, false, modelMatrix);
+
+            gl.uniform3fv(programInfo.uniformLocations.selectedVertex, selectedVertex);
+            gl.uniform1f(programInfo.uniformLocations.radius, parseFloat(params.radius.value));
+            gl.uniform3fv(programInfo.uniformLocations.translation, [
+                parseFloat(params.transX.value),
+                parseFloat(params.transY.value),
+                parseFloat(params.transZ.value)
+            ]);
+            gl.uniform1f(programInfo.uniformLocations.rotationAngle, parseFloat(params.rot.value) * Math.PI / 180);
+            gl.uniform1f(programInfo.uniformLocations.scale, parseFloat(params.scale.value));
+
+            {
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+                gl.vertexAttribPointer(programInfo.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(programInfo.attribLocations.position);
+            }
+            {
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+                gl.vertexAttribPointer(programInfo.attribLocations.normal, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(programInfo.attribLocations.normal);
+            }
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+            gl.drawElements(gl.TRIANGLES, sphereGeometry.indices.length, gl.UNSIGNED_SHORT, 0);
+
+            requestAnimationFrame(render);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
