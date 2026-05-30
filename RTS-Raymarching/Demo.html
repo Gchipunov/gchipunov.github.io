@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Raymarched RTS Scene</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: monospace;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #00ffcc;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 12px;
+            border-radius: 5px;
+            pointer-events: none;
+            border: 1px solid #00ffcc;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay">
+        <strong>RTS Raymarch Engine Controls:</strong><br>
+        • Move: W, A, S, D (XZ Plane)<br>
+        • Elevation: Q (Down), E (Up)<br>
+        • Look: Click & Drag Mouse
+    </div>
+    <canvas id="glCanvas"></canvas>
+
+    <script>
+        // --- Shaders Source ---
+
+        // Vertex Shader: Pass simple full-screen quad positions
+        const vsSource = `#version 300 es
+        in vec2 position;
+        out vec2 v_fragCoord;
+        void main() {
+            v_fragCoord = (position + 1.0) * 0.5; // map back to 0.0 -> 1.0 range
+            gl_Position = vec4(position, 0.0, 1.0);
+        }`;
+
+        // Fragment Shader: Complete implementation using your template and custom primitives
+        const fsSource = `#version 300 es
+        precision highp float;
+
+        out vec4 fragColor;
+        in vec2 v_fragCoord;
+
+        uniform vec2  u_Resolution;
+        uniform vec3  u_CameraPos;      
+        uniform vec3  u_ViewDir;        
+        uniform vec4  u_BaseMaterial;   
+        uniform float u_MaxDist;        
+        uniform float u_Time;
+
+        // --- Signed Distance Functions (SDFs) ---
+
+        // Plane with a minor wavy terrain profile
+        float sdTerrainPlane(vec3 p) {
+            float waves = sin(p.x * 2.0) * cos(p.z * 2.0) * 0.12;
+            return p.y - (-0.8 + waves);
+        }
+
+        // Box/Cube SDF
+        float sdBox(vec3 p, vec3 b) {
+            vec3 q = abs(p) - b;
+            return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+        }
+
+        // Pyramid SDF
+        float sdPyramid(vec3 p, float h) {
+            float m2 = h*h + 0.25;
+            p.xz = abs(p.xz);
+            p.xz = (p.z>p.x) ? p.zx : p.xz;
+            p.xz -= 0.5;
+            vec3 q = vec3(p.z, h*p.y - 0.5*p.x, h*p.x + 0.5*p.y);
+            float s = max(-q.x, 0.0);
+            float t = clamp((q.y-0.5*p.z)/(m2+0.25), 0.0, 1.0);
+            float a = m2*(q.x+s)*(q.x+s) + q.y*q.y;
+            float b = m2*(q.x+t*0.5)*(q.x+t*0.5) + (q.y-t*m2)*(q.y-t*m2);
+            float d = min(a,b);
+            return sqrt(d)*sign(max(q.z,-p.y));
+        }
+
+        // Smooth minimum interpolation for blending geometries smoothly
+        float smin(float a, float b, float k) {
+            float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+            return mix(b, a, h) - k * h * (1.0 - h);
+        }
+
+        //------------------------------------------------------------------
+        // STREAMLINED MAP FUNCTION (Populated with requested assets)
+        //------------------------------------------------------------------
+        float map(in vec3 pos) {
+            // 1. Evaluate Terrain Plane
+            float terrain = sdTerrainPlane(pos);
+            
+            // 2. Evaluate Cube (Animate a floating baseline)
+            vec3 cubePos = pos - vec3(-1.2, -0.3 + sin(u_Time * 1.5) * 0.15, 0.0);
+            float cube = sdBox(cubePos, vec3(0.4));
+            
+            // 3. Evaluate Pyramid 
+            vec3 pyrPos = pos - vec3(1.2, -0.4, -0.5);
+            float pyramid = sdPyramid(pyrPos, 0.8);
+            
+            // Blend elements together 
+            float objects = min(cube, pyramid);
+            return smin(terrain, objects, 0.15); 
+        }
+
+        //------------------------------------------------------------------
+        // MATHEMATICALLY ACCURATE GRADIENT NORMALS
+        //------------------------------------------------------------------
+        vec3 calcNormal(in vec3 pos) {
+            vec3 n = vec3(0.0);
+            for(int i=0; i<4; i++) {
+                vec3 e = 0.5773*(2.0*vec3((((i+3)>>1)&1),((i>>1)&1),(i&1))-1.0);
+                n += e * map(pos + 0.0005 * e);
+            }
+            return normalize(n);
+        }
+
+        //------------------------------------------------------------------
+        // TRANSLUCENT RAYMARCHING ENGINE
+        //------------------------------------------------------------------
+        vec4 raymarchTransparent(in vec3 ro, in vec3 rd, float maxDist) {
+            vec4 accumulatedColor = vec4(0.0); 
+            float t = 0.01;      
+            float tmax = maxDist; 
+            
+            for(int i=0; i<64; i++) {
+                if(t > tmax || accumulatedColor.a >= 0.95) break;
+                
+                vec3 pos = ro + rd * t;
+                float h = map(pos);
+                
+                if(h < 0.02) {
+                    vec3 nor = calcNormal(pos);
+                    vec3 lightDir = normalize(vec3(-0.5, 0.6, -0.4));
+                    float diff = clamp(dot(nor, lightDir), 0.0, 1.0);
+                    
+                    float fresnel = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 3.0);
+                    
+                    vec3 surfaceColor = u_BaseMaterial.rgb * (diff * 1.5 + vec3(0.15));
+                    surfaceColor += vec3(1.0) * fresnel * 0.5; 
+                    
+                    float surfaceAlpha = clamp((0.02 - h) * 4.0, 0.0, 1.0) * u_BaseMaterial.a;
+                    
+                    float weight = (1.0 - accumulatedColor.a) * surfaceAlpha;
+                    accumulatedColor.rgb += weight * surfaceColor;
+                    accumulatedColor.a   += weight;
+                    
+                    t += max(0.02, h * 0.5); 
+                } else {
+                    t += h;
+                }
+            }
+            return clamp(accumulatedColor, 0.0, 1.0);
+        }
+
+        //------------------------------------------------------------------
+        // MAIN FRAGMENT ENTRY POINT
+        //------------------------------------------------------------------
+        void main() {
+            // Coordinate mapping matching dynamic resolution properties
+            vec2 fragCoord = v_fragCoord * u_Resolution;
+            vec2 p = (2.0 * fragCoord - u_Resolution.xy) / u_Resolution.y;
+
+            // Generate Ray Direction leveraging Matrix Transformations from View Direction Uniform
+            vec3 ro = u_CameraPos;
+            vec3 ww = u_ViewDir; 
+            vec3 uu = normalize(cross(ww, vec3(0.0, 1.0, 0.0)));
+            vec3 vv = normalize(cross(uu, ww));
+            vec3 rd = normalize(p.x * uu + p.y * vv + 1.5 * ww);
+
+            float maxDist = (u_MaxDist > 0.0) ? u_MaxDist : 15.0;
+            
+            // Render Pass Calculation
+            vec4 finalMaterialPass = raymarchTransparent(ro, rd, maxDist);
+            
+            // Environment/Sky Background tint fill for transparency fall-off
+            vec3 skyTint = vec3(0.03, 0.05, 0.08) * (1.0 - vec3(p.y * 0.2));
+            finalMaterialPass.rgb = mix(skyTint, finalMaterialPass.rgb, finalMaterialPass.a);
+
+            // Gamma correction
+            finalMaterialPass.rgb = pow(finalMaterialPass.rgb, vec3(0.4545));
+            
+            fragColor = vec4(finalMaterialPass.rgb, 1.0);
+        }`;
+
+        // --- Core Application Logic ---
+
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) {
+            alert('WebGL 2 is required to run this engine implementation.');
+        }
+
+        // Helper function for shader asset compilation
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error('Failed linking shader program hierarchy:', gl.getProgramInfoLog(program));
+        }
+
+        // Simple full screen quad mapping array configuration
+        const positions = new Float32Array([
+            -1.0, -1.0,
+             1.0, -1.0,
+            -1.0,  1.0,
+            -1.0,  1.0,
+             1.0, -1.0,
+             1.0,  1.0,
+        ]);
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        const positionAttribLocation = gl.getAttribLocation(program, 'position');
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        gl.enableVertexAttribArray(positionAttribLocation);
+        gl.vertexAttribPointer(positionAttribLocation, 2, gl.FLOAT, false, 0, 0);
+
+        // Map GL Uniform Target References
+        const uResLoc = gl.getUniformLocation(program, "u_Resolution");
+        const uCamPosLoc = gl.getUniformLocation(program, "u_CameraPos");
+        const uViewDirLoc = gl.getUniformLocation(program, "u_ViewDir");
+        const uMatLoc = gl.getUniformLocation(program, "u_BaseMaterial");
+        const uMaxDistLoc = gl.getUniformLocation(program, "u_MaxDist");
+        const uTimeLoc = gl.getUniformLocation(program, "u_Time");
+
+        // --- RTS Strategy Tracking Matrix & Physics Configurations ---
+        let camPos = { x: 0.0, y: 2.0, z: 4.5 };
+        let camPitch = -0.5; // Look downwards slightly towards terrain grid maps
+        let camYaw = -1.57;  // Face down standard forward axis
+
+        const keys = {};
+        let isMouseDown = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // Hook Event Binding Listeners
+        window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+        canvas.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => isMouseDown = false);
+        window.addEventListener('mousemove', (e) => {
+            if (!isMouseDown) return;
+            let deltaX = e.clientX - lastMouseX;
+            let deltaY = e.clientY - lastMouseY;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+
+            const sensitivity = 0.005;
+            camYaw += deltaX * sensitivity;
+            camPitch -= deltaY * sensitivity;
+
+            // Cap tracking angles to protect viewpoint integrity flipping boundaries
+            if (camPitch > 1.4) camPitch = 1.4;
+            if (camPitch < -1.4) camPitch = -1.4;
+        });
+
+        function handleCameraMovement(deltaTime) {
+            const speed = 2.5 * deltaTime;
+            
+            // Compute coordinate orientation direction vector states dynamically
+            let forward = {
+                x: Math.cos(camPitch) * Math.cos(camYaw),
+                y: Math.sin(camPitch),
+                z: Math.cos(camPitch) * Math.sin(camYaw)
+            };
+
+            // Ground plane isolated directional references for true flat platform horizontal translation mapping
+            let groundForward = { x: forward.x, z: forward.z };
+            let len = Math.sqrt(groundForward.x * groundForward.x + groundForward.z * groundForward.z);
+            if(len > 0) { groundForward.x /= len; groundForward.z /= len; }
+
+            let groundRight = { x: -groundForward.z, z: groundForward.x };
+
+            // Apply modifications based on triggered movement configurations
+            if (keys['w']) { camPos.x += groundForward.x * speed; camPos.z += groundForward.z * speed; }
+            if (keys['s']) { camPos.x -= groundForward.x * speed; camPos.z -= groundForward.z * speed; }
+            if (keys['a']) { camPos.x -= groundRight.x * speed; camPos.z -= groundRight.z * speed; }
+            if (keys['d']) { camPos.x += groundRight.x * speed; camPos.z += groundRight.z * speed; }
+            
+            // Height Elevators
+            if (keys['e']) { camPos.y += speed; }
+            if (keys['q']) { camPos.y -= speed; }
+        }
+
+        // --- Render Execution Phase ---
+        let lastTime = 0;
+
+        function render(time) {
+            time *= 0.001;  // Convert milliseconds to seconds
+            let deltaTime = time - lastTime;
+            if (deltaTime > 0.1) deltaTime = 0.1; // Protect drop limits
+            lastTime = time;
+
+            handleCameraMovement(deltaTime);
+
+            // Dynamically adjust viewport sizes matching canvas context states
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+
+            // Recompute Normalized Target Heading Vectors
+            let targetDir = {
+                x: Math.cos(camPitch) * Math.cos(camYaw),
+                y: Math.sin(camPitch),
+                z: Math.cos(camPitch) * Math.sin(camYaw)
+            };
+            let len = Math.sqrt(targetDir.x*targetDir.x + targetDir.y*targetDir.y + targetDir.z*targetDir.z);
+            targetDir.x /= len; targetDir.y /= len; targetDir.z /= len;
+
+            // Pass Matrix States to Shader engine targets
+            gl.uniform2f(uResLoc, canvas.width, canvas.height);
+            gl.uniform3f(uCamPosLoc, camPos.x, camPos.y, camPos.z);
+            gl.uniform3f(uViewDirLoc, targetDir.x, targetDir.y, targetDir.z);
+            
+            // Color Parameters Vector: Cyan/Teal Blend Color with an Opacity Layer Core level mapping
+            gl.uniform4f(uMatLoc, 0.0, 0.8, 0.7, 0.5); 
+            gl.uniform1f(uMaxDistLoc, 25.0);
+            gl.uniform1f(uTimeLoc, time);
+
+            gl.bindVertexArray(vao);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
