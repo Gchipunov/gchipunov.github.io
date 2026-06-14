@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrimeWars Weapon System Terminal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #030306;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="glCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) {
+            alert('WebGL 2 is required.');
+        }
+
+        // ----------------------------------------------------
+        // SHADER SOURCES
+        // ----------------------------------------------------
+
+        // 1. ICOSPHERE RADAR SHADER (Neon Materialize Transparent)
+        const icoVs = `#version 300 es
+            in vec3 a_position;
+            in vec3 a_barycentric;
+            uniform mat4 u_projection, u_view, u_model;
+            out vec3 v_barycentric, v_localPos;
+            void main() {
+                v_barycentric = a_barycentric;
+                v_localPos = a_position;
+                gl_Position = u_projection * u_view * u_model * vec4(a_position, 1.0);
+            }
+        `;
+        const icoFs = `#version 300 es
+            precision highp float;
+            in vec3 v_barycentric, v_localPos;
+            uniform float u_time;
+            out vec4 fragColor;
+            void main() {
+                vec3 d = fwidth(v_barycentric);
+                vec3 a3 = smoothstep(vec3(0.0), d * 1.5, v_barycentric);
+                float edgeFactor = 1.0 - min(min(a3.x, a3.y), a3.z);
+                
+                float sweepLine = sin(u_time * 1.5) * 1.2;
+                float waveFront = sin(v_localPos.x * 10.0 + u_time * 3.0) * cos(v_localPos.z * 10.0 + u_time * 3.0) * 0.08;
+                float cutoff = sweepLine + waveFront;
+                float glowWidth = 0.15;
+
+                if (v_localPos.y > cutoff + glowWidth) discard;
+
+                vec3 baseNeon = vec3(0.0, 0.8, 1.0);
+                vec3 glowNeon = vec3(1.0, 0.0, 0.4);
+                vec3 finalColor = baseNeon;
+                float finalAlpha = 0.0;
+
+                if (v_localPos.y > cutoff) {
+                    float intensity = pow(1.0 - ((v_localPos.y - cutoff) / glowWidth), 2.0);
+                    finalColor = mix(baseNeon, glowNeon, intensity);
+                    finalAlpha = mix(edgeFactor * 0.3, 1.0, intensity);
+                } else {
+                    finalAlpha = mix(0.1, 0.8, edgeFactor);
+                }
+                fragColor = vec4(finalColor, finalAlpha);
+            }
+        `;
+
+        // 2. AK-47 WEAPON SHADER (Futuristic Cyber-Alloy Matrix)
+        const wpVs = `#version 300 es
+            in vec3 a_position;
+            in vec3 a_normal;
+            uniform mat4 u_projection, u_view, u_model;
+            out vec3 v_normal, v_localPos, v_viewDir;
+            void main() {
+                v_normal = mat3(u_model) * a_normal;
+                v_localPos = a_position;
+                vec4 worldPos = u_model * vec4(a_position, 1.0);
+                v_viewDir = normalize(vec3(0.0, 0.0, -3.5) - worldPos.xyz);
+                gl_Position = u_projection * u_view * worldPos;
+            }
+        `;
+        const wpFs = `#version 300 es
+            precision highp float;
+            in vec3 v_normal, v_localPos, v_viewDir;
+            uniform float u_time;
+            out vec4 fragColor;
+            void main() {
+                vec3 normal = normalize(v_normal);
+                vec3 viewDir = normalize(v_viewDir);
+                
+                // Base dynamic metallic casing
+                vec3 baseAlloy = vec3(0.1, 0.12, 0.16);
+                
+                // Tech glowing energy lines running across weapon depth geometry
+                float internalLines = step(0.93, sin(v_localPos.z * 35.0 - u_time * 4.0));
+                internalLines *= step(0.3, cos(v_localPos.y * 10.0));
+                
+                // Cyberpunk edge fresnel glow
+                float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
+                vec3 neonGlow = vec3(0.0, 1.0, 0.6) * fresnel * 0.7;
+                
+                // Inject internal logic lighting circuits
+                vec3 circuitColor = vec3(1.0, 0.2, 0.0) * internalLines;
+                
+                vec3 finalColor = baseAlloy + neonGlow + circuitColor;
+                fragColor = vec4(finalColor, 1.0);
+            }
+        `;
+
+        // 3. HOLO HUD SHADER (Glitch Target Panel Layout)
+        const hudVs = `#version 300 es
+            in vec3 a_position;
+            in vec2 a_uv;
+            uniform mat4 u_projection, u_view, u_model;
+            out vec2 v_uv;
+            void main() {
+                v_uv = a_uv;
+                gl_Position = u_projection * u_view * u_model * vec4(a_position, 1.0);
+            }
+        `;
+        const hudFs = `#version 300 es
+            precision highp float;
+            in vec2 v_uv;
+            uniform float u_time;
+            out vec4 fragColor;
+            void main() {
+                // UI Grid calculation loop
+                vec2 grid = abs(fract(v_uv * vec2(15.0, 8.0) - vec2(0.0, u_time * 0.5)) - 0.5) / fwidth(v_uv * vec2(15.0, 8.0));
+                float line = 1.0 - min(grid.x, grid.y);
+                float gridPattern = clamp(line, 0.0, 1.0);
+
+                // Tech-interface ring overlay
+                float dist = distance(v_uv, vec2(0.5));
+                float ring = smoothstep(0.01, 0.0, abs(dist - 0.25)) * 0.8;
+                float dataBar = step(0.45, v_uv.y) * step(v_uv.y, 0.55) * step(abs(v_uv.x - 0.5), 0.4);
+
+                // Periodic UI scanline flicker
+                float flicker = sin(u_time * 50.0) * 0.05 + 0.95;
+
+                vec3 hudColor = vec3(0.0, 1.0, 0.3); // Tactical Holo Green
+                float alpha = (gridPattern * 0.25 + ring + dataBar * 0.4) * flicker;
+
+                // Border brackets Frame
+                if(v_uv.x < 0.05 || v_uv.x > 0.95 || v_uv.y < 0.08 || v_uv.y > 0.92) {
+                    alpha += 0.5;
+                }
+
+                fragColor = vec4(hudColor, alpha * 0.85);
+            }
+        `;
+
+        // ----------------------------------------------------
+        // INITIALIZATION AND PROGRAM COMPILATION
+        // ----------------------------------------------------
+
+        function compileShader(src, type) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, src);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+            return s;
+        }
+
+        function createProgram(vs, fs) {
+            const p = gl.createProgram();
+            gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+            gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
+            gl.linkProgram(p);
+            return p;
+        }
+
+        const icoProg = createProgram(icoVs, icoFs);
+        const wpProg = createProgram(wpVs, wpFs);
+        const hudProg = createProgram(hudVs, hudFs);
+
+        // ----------------------------------------------------
+        // GEOMETRY GENERATORS (Icosphere & Cubes)
+        // ----------------------------------------------------
+
+        function getCubeMesh() {
+            const positions = new Float32Array([
+                -0.5,-0.5,-0.5,  -0.5, 0.5,-0.5,   0.5, 0.5,-0.5,   0.5, 0.5,-0.5,   0.5,-0.5,-0.5,  -0.5,-0.5,-0.5,
+                -0.5,-0.5, 0.5,   0.5,-0.5, 0.5,   0.5, 0.5, 0.5,   0.5, 0.5, 0.5,  -0.5, 0.5, 0.5,  -0.5,-0.5, 0.5,
+                -0.5, 0.5, 0.5,  -0.5, 0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5,-0.5,-0.5,  -0.5,-0.5, 0.5,  -0.5, 0.5, 0.5,
+                 0.5, 0.5, 0.5,   0.5,-0.5, 0.5,   0.5,-0.5,-0.5,   0.5,-0.5,-0.5,   0.5, 0.5,-0.5,   0.5, 0.5, 0.5,
+                -0.5,-0.5,-0.5,   0.5,-0.5,-0.5,   0.5,-0.5, 0.5,   0.5,-0.5, 0.5,  -0.5,-0.5, 0.5,  -0.5,-0.5,-0.5,
+                -0.5, 0.5,-0.5,  -0.5, 0.5, 0.5,   0.5, 0.5, 0.5,   0.5, 0.5, 0.5,   0.5, 0.5,-0.5,  -0.5, 0.5,-0.5
+            ]);
+            const normals = new Float32Array([
+                 0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,  0, 0,-1,
+                 0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,  0, 0, 1,
+                -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0,
+                 1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0,
+                 0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0,  0,-1, 0,
+                 0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0,  0, 1, 0
+            ]);
+            const uvs = new Float32Array([
+                0,0, 0,1, 1,1, 1,1, 1,0, 0,0,  0,0, 1,0, 1,1, 1,1, 0,1, 0,0,
+                1,1, 0,1, 0,0, 0,0, 1,0, 1,1,  1,1, 0,1, 0,0, 0,0, 1,0, 1,1,
+                0,0, 1,0, 1,1, 1,1, 0,1, 0,0,  0,0, 0,1, 1,1, 1,1, 1,0, 0,0
+            ]);
+            return { positions, normals, uvs };
+        }
+
+        function createIcosphere(subdivisions) {
+            const t = (1.0 + Math.sqrt(5.0)) / 2.0;
+            let vertices = [
+                -1,  t,  0,   1,  t,  0,  -1, -t,  0,   1, -t,  0,
+                 0, -1,  t,   0,  1,  t,   0, -1, -t,   0,  1, -t,
+                 t,  0, -1,   t,  0,  1,  -t,  0, -1,  -t,  0,  1
+            ];
+            for(let i=0; i<vertices.length; i+=3) {
+                let len = Math.sqrt(vertices[i]**2 + vertices[i+1]**2 + vertices[i+2]**2);
+                vertices[i]/=len; vertices[i+1]/=len; vertices[i+2]/=len;
+            }
+            let indices = [
+                0, 11,  5,   0,  5,  1,   0,  1,  7,   0,  7, 10,   0, 10, 11,
+                1,  5,  9,   5, 11,  4,  11, 10,  2,  10,  7,  6,   7,  1,  8,
+                3,  9,  4,   3,  4,  2,   3,  2,  6,   3,  6,  8,   3,  8,  9,
+                4,  9,  5,   2,  4, 11,   6,  2, 10,   8,  6,  7,   9,  8,  1
+            ];
+            for (let s = 0; s < subdivisions; s++) {
+                const newIndices = [];
+                const midpoints = {};
+                function getMidpoint(p1, p2) {
+                    const key = p1 < p2 ? `${p1}_${p2}` : `${p2}_${p1}`;
+                    if (midpoints[key] !== undefined) return midpoints[key];
+                    const i1 = p1 * 3, i2 = p2 * 3;
+                    let x = vertices[i1] + vertices[i2], y = vertices[i1+1] + vertices[i2+1], z = vertices[i1+2] + vertices[i2+2];
+                    let len = Math.sqrt(x*x + y*y + z*z);
+                    vertices.push(x/len, y/len, z/len);
+                    const newIdx = (vertices.length / 3) - 1;
+                    midpoints[key] = newIdx; return newIdx;
+                }
+                for (let i = 0; i < indices.length; i += 3) {
+                    const v1 = indices[i], v2 = indices[i+1], v3 = indices[i+2];
+                    const a = getMidpoint(v1, v2), b = getMidpoint(v2, v3), c = getMidpoint(v3, v1);
+                    newIndices.push(v1, a, c,  v2, b, a,  v3, c, b,  a, b, c);
+                }
+                indices = newIndices;
+            }
+            const finalPositions = [], finalBarycentrics = [];
+            for(let i = 0; i < indices.length; i += 3) {
+                const idx0 = indices[i]*3, idx1 = indices[i+1]*3, idx2 = indices[i+2]*3;
+                finalPositions.push(vertices[idx0], vertices[idx0+1], vertices[idx0+2]);
+                finalPositions.push(vertices[idx1], vertices[idx1+1], vertices[idx1+2]);
+                finalPositions.push(vertices[idx2], vertices[idx2+1], vertices[idx2+2]);
+                finalBarycentrics.push(1,0,0,  0,1,0,  0,0,1);
+            }
+            return { positions: new Float32Array(finalPositions), barycentrics: new Float32Array(finalBarycentrics) };
+        }
+
+        // ----------------------------------------------------
+        // WEBGL BUFFER ARRANGEMENT
+        // ----------------------------------------------------
+
+        // Setup Weapon & HUD primitive (Cube structural logic)
+        const cubeData = getCubeMesh();
+        const cubeVao = gl.createVertexArray();
+        gl.bindVertexArray(cubeVao);
+
+        const wpPosBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, wpPosBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cubeData.positions, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0); // Assumes location 0 for position
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+        const wpNormBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, wpNormBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cubeData.normals, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(1); // Location 1 for Normals
+        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+
+        const hUvBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, hUvBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cubeData.uvs, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(2); // Location 2 for UVs
+        gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+
+        // Setup Radar Module (Icosphere logic)
+        const icoData = createIcosphere(3);
+        const icoVao = gl.createVertexArray();
+        gl.bindVertexArray(icoVao);
+
+        const icoPosBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, icoPosBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, icoData.positions, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+        const icoBaryBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, icoBaryBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, icoData.barycentrics, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(1); // Location 1 for Barycentric mapping inside processing pipeline
+        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+
+        // ----------------------------------------------------
+        // VECTOR MATRIX MATH LIBRARY
+        // ----------------------------------------------------
+
+        const Mat4 = {
+            identity: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+            perspective: (fov, aspect, near, far) => {
+                const f = 1.0 / Math.tan(fov / 2), nf = 1.0 / (near - far);
+                return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,(2*far*near)*nf,0]);
+            },
+            multiply: (a, b) => {
+                const out = new Float32Array(16);
+                for (let i = 0; i < 4; i++) {
+                    for (let j = 0; j < 4; j++) {
+                        let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+                        out[i * 4 + j] = s;
+                    }
+                }
+                return out;
+            },
+            translate: (m, x, y, z) => Mat4.multiply(m, new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1])),
+            scale: (m, x, y, z) => Mat4.multiply(m, new Float32Array([x,0,0,0, 0,y,0,0, 0,0,z,0, 0,0,0,1])),
+            rotateX: (m, r) => { const s = Math.sin(r), c = Math.cos(r); return Mat4.multiply(m, new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1])); },
+            rotateY: (m, r) => { const s = Math.sin(r), c = Math.cos(r); return Mat4.multiply(m, new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1])); },
+            rotateZ: (m, r) => { const s = Math.sin(r), c = Math.cos(r); return Mat4.multiply(m, new Float32Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1])); }
+        };
+
+        // ----------------------------------------------------
+        // TRANSFORMATION DATA STACK SETUP
+        // ----------------------------------------------------
+
+        function drawPart(program, modelMatrix, scaleVec, proj, view) {
+            let m = Mat4.scale(modelMatrix, scaleVec[0], scaleVec[1], scaleVec[2]);
+            gl.uniformMatrix4fv(gl.getUniformLocation(program, 'u_model'), false, m);
+            gl.drawArrays(gl.TRIANGLES, 0, 36);
+        }
+
+        // ----------------------------------------------------
+        // RENDERING PIPELINE ENGINE LOOP
+        // ----------------------------------------------------
+
+        const startTime = performance.now();
+        let weaponRotationY = -1.1; 
+
+        function render() {
+            // Screen Adjustment Lookups
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            }
+
+            const time = (performance.now() - startTime) * 0.001;
+
+            // Clear buffers
+            gl.clearColor(0.02, 0.02, 0.04, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Establish projection view setups
+            const aspect = gl.canvas.width / gl.canvas.height;
+            const projection = Mat4.perspective(Math.PI / 4, aspect, 0.1, 100.0);
+            const view = Mat4.translate(Mat4.identity(), 0.0, -0.1, -2.8);
+
+            // System Master Weapon Alignment Base Matrix (Slight automated viewing breathing motion)
+            let masterWeaponMat = Mat4.identity();
+            masterWeaponMat = Mat4.rotateX(masterWeaponMat, 0.15 + Math.sin(time * 0.5) * 0.05);
+            masterWeaponMat = Mat4.rotateY(masterWeaponMat, weaponRotationY + Math.cos(time * 0.3) * 0.05);
+
+            // ----------------------------------------------------
+            // STEP 1: RENDER PROCEDURAL AK-47 STRUCTURAL COMPONENT MESH
+            // ----------------------------------------------------
+            gl.useProgram(wpProg);
+            gl.uniform1f(gl.getUniformLocation(wpProg, 'u_time'), time);
+            gl.uniformMatrix4fv(gl.getUniformLocation(wpProg, 'u_projection'), false, projection);
+            gl.uniformMatrix4fv(gl.getUniformLocation(wpProg, 'u_view'), false, view);
+
+            gl.bindVertexArray(cubeVao);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthMask(true);
+
+            // A. Main Receiver Chassis
+            let receiverMat = Mat4.translate(masterWeaponMat, 0.0, 0.0, -0.1);
+            drawPart(wpProg, receiverMat, [0.09, 0.14, 0.7], projection, view);
+
+            // B. Handguard Front Stock
+            let handguardMat = Mat4.translate(masterWeaponMat, 0.0, -0.01, 0.45);
+            drawPart(wpProg, handguardMat, [0.08, 0.11, 0.45], projection, view);
+
+            // C. Long Steel Barrel Assemble
+            let barrelMat = Mat4.translate(masterWeaponMat, 0.0, 0.04, 0.85);
+            drawPart(wpProg, barrelMat, [0.03, 0.03, 0.6], projection, view);
+
+            // D. Gas Tube Upper Assembly
+            let gasTubeMat = Mat4.translate(masterWeaponMat, 0.0, 0.08, 0.6);
+            drawPart(wpProg, gasTubeMat, [0.035, 0.035, 0.45], projection, view);
+
+            // E. Curved Banana Magazine Clip
+            let magMat = Mat4.translate(masterWeaponMat, 0.0, -0.24, 0.28);
+            magMat = Mat4.rotateX(magMat, 0.25);
+            drawPart(wpProg, magMat, [0.06, 0.32, 0.12], projection, view);
+
+            // F. Pistol Control Grip
+            let gripMat = Mat4.translate(masterWeaponMat, 0.0, -0.18, -0.28);
+            gripMat = Mat4.rotateX(gripMat, -0.35);
+            drawPart(wpProg, gripMat, [0.05, 0.18, 0.08], projection, view);
+
+            // G. Solid Shoulder Stock
+            let stockMat = Mat4.translate(masterWeaponMat, 0.0, -0.02, -0.75);
+            stockMat = Mat4.rotateX(stockMat, 0.05);
+            drawPart(wpProg, stockMat, [0.07, 0.16, 0.6], projection, view);
+
+
+            // ----------------------------------------------------
+            // STEP 2: RENDER HOLOGRAPHIC HUD ATTACHMENT PANEL
+            // ----------------------------------------------------
+            gl.useProgram(hudProg);
+            gl.uniform1f(gl.getUniformLocation(hudProg, 'u_time'), time);
+            gl.uniformMatrix4fv(gl.getUniformLocation(hudProg, 'u_projection'), false, projection);
+            gl.uniformMatrix4fv(gl.getUniformLocation(hudProg, 'u_view'), false, view);
+
+            // Alpha transparency setup for rendering interface layers
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.depthMask(false); // Prevents overlapping geometry masking errors
+
+            // Position HUD right on side mount of Receiver, rotate via explicit Z axis logic requested
+            let hudMat = Mat4.translate(masterWeaponMat, 0.14, 0.16, 0.0); 
+            hudMat = Mat4.rotateY(hudMat, 1.4); // Angle out towards virtual monitor camera space
+            hudMat = Mat4.rotateZ(hudMat, -0.22); // Apply tactical interface Z roll rotation offsets
+            
+            let mHud = Mat4.scale(hudMat, 0.005, 0.24, 0.45); // Extrude wide plane metrics
+            gl.uniformMatrix4fv(gl.getUniformLocation(hudProg, 'u_model'), false, mHud);
+            gl.drawArrays(gl.TRIANGLES, 0, 36);
+
+
+            // ----------------------------------------------------
+            // STEP 3: RENDER ICOSPHERE RADAR ADD-ON
+            // ----------------------------------------------------
+            gl.useProgram(icoProg);
+            gl.uniform1f(gl.getUniformLocation(icoProg, 'u_time'), time);
+            gl.uniformMatrix4fv(gl.getUniformLocation(icoProg, 'u_projection'), false, projection);
+            gl.uniformMatrix4fv(gl.getUniformLocation(icoProg, 'u_view'), false, view);
+
+            gl.bindVertexArray(icoVao);
+
+            // Mount Radar Module directly on upper front Picatinny gas rails
+            let radarMat = Mat4.translate(masterWeaponMat, -0.09, 0.16, 0.45);
+            radarMat = Mat4.rotateY(radarMat, time * 0.4); // Continuous rotation loop around independent axis
+            radarMat = Mat4.scale(radarMat, 0.11, 0.11, 0.11);
+
+            gl.uniformMatrix4fv(gl.getUniformLocation(icoProg, 'u_model'), false, radarMat);
+            gl.drawArrays(gl.TRIANGLES, 0, icoData.positions.length / 3);
+
+            gl.disable(gl.BLEND);
+            requestAnimationFrame(render);
+        }
+
+        // Mouse click dragging interaction modifier to view weapon angles
+        let isDragging = false, lastX = 0;
+        window.addEventListener('mousedown', e => { isDragging = true; lastX = e.clientX; });
+        window.addEventListener('mousemove', e => {
+            if (isDragging) {
+                let deltaX = e.clientX - lastX;
+                weaponRotationY += deltaX * 0.007;
+                lastX = e.clientX;
+            }
+        });
+        window.addEventListener('mouseup', () => isDragging = false);
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
