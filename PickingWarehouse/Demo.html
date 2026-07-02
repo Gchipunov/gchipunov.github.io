@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Warehouse Picking Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #222;
+            color: white;
+            font-family: sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 100;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="info">WebGL Warehouse Simulation<br>Worker picking boxes and bags</div>
+    
+    <script>
+        // --- 1. SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2a2a2a);
+        scene.fog = new THREE.Fog(0x2a2a2a, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 8, 15);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 2, 0);
+        controls.update();
+
+        // --- 2. LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // --- 3. ENVIRONMENT ---
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(50, 50);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        // Shelving Unit
+        const shelfMat = new THREE.MeshStandardMaterial({ color: 0x114488 });
+        const shelfGeo = new THREE.BoxGeometry(8, 0.2, 2);
+        
+        for (let i = 1; i <= 3; i++) {
+            const shelf = new THREE.Mesh(shelfGeo, shelfMat);
+            shelf.position.set(0, i * 2, -3);
+            shelf.castShadow = true;
+            scene.add(shelf);
+        }
+
+        // --- 4. OBJECTS (BOXES & BAGS) ---
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0xcc8844 });
+        const bagMat = new THREE.MeshStandardMaterial({ color: 0xddddcc });
+        
+        const items = []; // Array to hold items on shelves
+
+        // Populate shelves with boxes (cubes) and bags (spheres)
+        for(let i = -3; i <= 3; i+=2) {
+            // Box
+            const box = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), boxMat);
+            box.position.set(i, 2.4, -3);
+            box.castShadow = true;
+            scene.add(box);
+            items.push(box);
+
+            // Bag
+            const bag = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), bagMat);
+            bag.scale.set(1, 0.8, 0.6); // Flatten sphere to look like a bag
+            bag.position.set(i + 0.5, 4.4, -3);
+            bag.castShadow = true;
+            scene.add(bag);
+        }
+
+        // --- 5. CART ---
+        const cartGroup = new THREE.Group();
+        cartGroup.position.set(0, 0.5, 3);
+        
+        // Cart Base
+        const cartBase = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 2), new THREE.MeshStandardMaterial({color: 0xaaaaaa}));
+        cartBase.castShadow = true;
+        cartGroup.add(cartBase);
+        
+        // Cart Handle
+        const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.5), new THREE.MeshStandardMaterial({color: 0x888888}));
+        handle.position.set(1.4, 0.85, 0);
+        cartGroup.add(handle);
+
+        scene.add(cartGroup);
+
+        // --- 6. WORKER ---
+        const workerGroup = new THREE.Group();
+        workerGroup.position.set(0, 1.5, 0);
+        
+        // Body
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.5), new THREE.MeshStandardMaterial({color: 0xffaa00}));
+        body.castShadow = true;
+        workerGroup.add(body);
+
+        // Head
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshStandardMaterial({color: 0xffccaa}));
+        head.position.y = 1;
+        head.castShadow = true;
+        workerGroup.add(head);
+
+        // Arm
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.2), new THREE.MeshStandardMaterial({color: 0xffaa00}));
+        arm.position.set(0, 0.4, -0.6);
+        workerGroup.add(arm);
+
+        scene.add(workerGroup);
+
+        // --- 7. ANIMATION LOGIC ---
+        let time = 0;
+        let heldItem = null;
+        let state = "move_to_shelf"; // States: move_to_shelf, grab, move_to_cart, drop
+        let targetZ_shelf = -1.5;
+        let targetZ_cart = 1.5;
+
+        // Dummy item to visually hold in hand
+        const heldBox = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), boxMat);
+        heldBox.position.set(0, 0.4, -1.2);
+        heldBox.visible = false;
+        workerGroup.add(heldBox);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.02;
+
+            // Simple state machine for picking loop
+            if (state === "move_to_shelf") {
+                workerGroup.position.z -= 0.05;
+                if (workerGroup.position.z <= targetZ_shelf) {
+                    state = "grab";
+                }
+            } 
+            else if (state === "grab") {
+                heldBox.visible = true; // Simulate picking up a box
+                state = "move_to_cart";
+                workerGroup.rotation.y = Math.PI; // Turn around
+            } 
+            else if (state === "move_to_cart") {
+                workerGroup.position.z += 0.05;
+                if (workerGroup.position.z >= targetZ_cart) {
+                    state = "drop";
+                }
+            } 
+            else if (state === "drop") {
+                heldBox.visible = false; // Simulate dropping
+                
+                // Add a box to the cart visually
+                const droppedBox = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), boxMat);
+                droppedBox.position.set((Math.random() - 0.5) * 2, 0.5 + (cartGroup.children.length * 0.1), (Math.random() - 0.5) * 1);
+                cartGroup.add(droppedBox);
+
+                state = "move_to_shelf";
+                workerGroup.rotation.y = 0; // Turn back to shelf
+                
+                // Reset cart if it gets too full to keep loop clean
+                if(cartGroup.children.length > 8) {
+                    while(cartGroup.children.length > 2) {
+                        cartGroup.remove(cartGroup.children[cartGroup.children.length - 1]);
+                    }
+                }
+            }
+
+            // Slight bobbing motion for the worker
+            workerGroup.position.y = 1.5 + Math.sin(time * 5) * 0.05;
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation loop
+        animate();
+    </script>
+</body>
+</html>
