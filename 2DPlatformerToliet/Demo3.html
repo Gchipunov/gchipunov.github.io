@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Toilet Platformer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue */
+            font-family: sans-serif;
+            touch-action: none; /* Prevents mobile pull-to-refresh and zooming */
+        }
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            pointer-events: none;
+        }
+        
+        /* Mobile Controls Styling */
+        #mobile-controls {
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            width: 100vw;
+            display: flex;
+            justify-content: space-between;
+            box-sizing: border-box;
+            padding: 0 30px;
+            pointer-events: none; /* Let clicks pass through empty space */
+            user-select: none;
+            z-index: 10;
+        }
+        .control-group {
+            display: flex;
+            gap: 15px;
+        }
+        .control-btn {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: background 0.1s;
+        }
+        .control-btn:active, .control-btn.active {
+            background: rgba(255, 255, 255, 0.8);
+            color: black;
+        }
+
+        /* Hide mobile controls on larger screens to keep UI clean, though you can disable this media query if you want them always visible */
+        @media (min-width: 800px) {
+            #mobile-controls {
+                opacity: 0.5;
+            }
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="ui">
+        <h2>Toilet Platformer</h2>
+        <p><b>A / D</b>, <b>D-Pad</b>, or <b>Touch</b>: Move</p>
+        <p><b>Space / W</b>, <b>Gamepad A</b>, or <b>Touch</b>: Jump / Swim Up</p>
+        <p>Find the giant toilet and take a swim!</p>
+    </div>
+
+    <div id="mobile-controls">
+        <div class="control-group">
+            <div id="btn-left" class="control-btn">◀</div>
+            <div id="btn-right" class="control-btn">▶</div>
+        </div>
+        <div class="control-group">
+            <div id="btn-jump" class="control-btn">▲</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Scene Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky color
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        // --- Materials ---
+        const matPlayer = new THREE.MeshLambertMaterial({ color: 0xff3333 }); // Red player
+        const matPlatform = new THREE.MeshLambertMaterial({ color: 0x44aa44 }); // Green grass/platforms
+        const matToilet = new THREE.MeshLambertMaterial({ color: 0xeeeeee }); // White porcelain
+        const matWater = new THREE.MeshLambertMaterial({ 
+            color: 0x3399ff, 
+            transparent: true, 
+            opacity: 0.6 
+        }); // Semi-transparent water
+
+        // --- Game Objects ---
+        const platforms = []; // { mesh, box }
+        const waterVolumes = []; // { mesh, box }
+        const playerSize = 1;
+
+        // Player setup
+        const playerGeo = new THREE.BoxGeometry(playerSize, playerSize, playerSize);
+        const playerMesh = new THREE.Mesh(playerGeo, matPlayer);
+        scene.add(playerMesh);
+
+        // --- Level Builder Helpers ---
+        function createPlatform(x, y, w, h) {
+            const geo = new THREE.BoxGeometry(w, h, 2); // Z-depth is 2
+            const mesh = new THREE.Mesh(geo, matPlatform);
+            mesh.position.set(x, y, 0);
+            scene.add(mesh);
+            platforms.push({ x, y, w, h });
+        }
+
+        function createWater(x, y, w, h) {
+            const geo = new THREE.BoxGeometry(w, h, 2.2); // Slightly deeper to prevent Z-fighting
+            const mesh = new THREE.Mesh(geo, matWater);
+            mesh.position.set(x, y, 0);
+            scene.add(mesh);
+            waterVolumes.push({ x, y, w, h });
+        }
+
+        function createToilet(x, y) {
+            // Toilet Base/Bowl
+            const bowlGeo = new THREE.BoxGeometry(4, 3, 3);
+            const bowl = new THREE.Mesh(bowlGeo, matToilet);
+            bowl.position.set(x, y + 1.5, 0);
+            scene.add(bowl);
+            platforms.push({ x: x, y: y + 1.5, w: 4, h: 3, isToilet: true }); // Adding bowl as platform
+
+            // Toilet Tank
+            const tankGeo = new THREE.BoxGeometry(2, 5, 3.5);
+            const tank = new THREE.Mesh(tankGeo, matToilet);
+            tank.position.set(x + 3, y + 4, 0);
+            scene.add(tank);
+            platforms.push({ x: x + 3, y: y + 4, w: 2, h: 5 });
+
+            // Water inside bowl
+            createWater(x - 0.2, y + 4, 3.5, 3);
+        }
+
+        // --- Build the Level ---
+        createPlatform(0, -2, 20, 2); // Start platform
+        createPlatform(15, 0, 5, 1);  // Step 1
+        createPlatform(22, 2, 5, 1);  // Step 2
+        
+        // A gap with a pool of water below
+        createPlatform(30, -5, 30, 2); // Floor under water
+        createWater(30, -2, 10, 4);    // Lake
+
+        createPlatform(45, 1, 10, 2); // Platform after lake
+        
+        // The Giant Toilet
+        createToilet(55, 2);
+
+        // End platform
+        createPlatform(70, 0, 15, 2);
+
+        // --- Physics & State ---
+        let playerState = {
+            x: 0,
+            y: 5,
+            vx: 0,
+            vy: 0,
+            isGrounded: false,
+            inWater: false
+        };
+
+        // Input state from Keyboard and Touch
+        const keys = {
+            left: false,
+            right: false,
+            up: false
+        };
+
+        // --- Keyboard Input Handling ---
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') keys.up = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') keys.up = false;
+        });
+
+        // --- Touch UI Input Handling ---
+        function setupTouchButton(id, keyProp) {
+            const btn = document.getElementById(id);
+            
+            const press = (e) => {
+                if(e) e.preventDefault();
+                keys[keyProp] = true;
+                btn.classList.add('active');
+            };
+            const release = (e) => {
+                if(e) e.preventDefault();
+                keys[keyProp] = false;
+                btn.classList.remove('active');
+            };
+
+            // Touch events
+            btn.addEventListener('touchstart', press, {passive: false});
+            btn.addEventListener('touchend', release, {passive: false});
+            btn.addEventListener('touchcancel', release, {passive: false});
+            
+            // Mouse events fallback for testing on desktop
+            btn.addEventListener('mousedown', press);
+            btn.addEventListener('mouseup', release);
+            btn.addEventListener('mouseleave', release);
+        }
+
+        setupTouchButton('btn-left', 'left');
+        setupTouchButton('btn-right', 'right');
+        setupTouchButton('btn-jump', 'up');
+
+        // --- Collision Detection ---
+        function checkOverlap(pX, pY, box) {
+            const pLeft = pX - playerSize / 2;
+            const pRight = pX + playerSize / 2;
+            const pTop = pY + playerSize / 2;
+            const pBottom = pY - playerSize / 2;
+
+            const bLeft = box.x - box.w / 2;
+            const bRight = box.x + box.w / 2;
+            const bTop = box.y + box.h / 2;
+            const bBottom = box.y - box.h / 2;
+
+            return !(pRight <= bLeft || pLeft >= bRight || pBottom >= bTop || pTop <= bBottom);
+        }
+
+        // --- Game Loop ---
+        const speed = 0.15;
+        const jumpForce = 0.45;
+        const swimJumpForce = 0.15;
+        const gravity = -0.02;
+        const waterGravity = -0.005; // Buoyancy
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // --- Gamepad Polling ---
+            let gpLeft = false;
+            let gpRight = false;
+            let gpUp = false;
+
+            const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+            const gp = gamepads[0]; // Take the first connected controller
+
+            if (gp) {
+                // Analog stick threshold
+                const deadzone = 0.2;
+                
+                // Axis 0 is usually left stick X. Buttons 14/15 are D-Pad Left/Right
+                if ((gp.axes[0] && gp.axes[0] < -deadzone) || (gp.buttons[14] && gp.buttons[14].pressed)) {
+                    gpLeft = true;
+                }
+                if ((gp.axes[0] && gp.axes[0] > deadzone) || (gp.buttons[15] && gp.buttons[15].pressed)) {
+                    gpRight = true;
+                }
+                // Button 0 is usually bottom face button (A on Xbox, Cross on PS)
+                if (gp.buttons[0] && gp.buttons[0].pressed) {
+                    gpUp = true;
+                }
+            }
+
+            // Combine Keyboard/Touch State with Gamepad State
+            const moveLeft = keys.left || gpLeft;
+            const moveRight = keys.right || gpRight;
+            const moveUp = keys.up || gpUp;
+
+
+            // 1. Check Water State
+            playerState.inWater = false;
+            for (let water of waterVolumes) {
+                if (checkOverlap(playerState.x, playerState.y, water)) {
+                    playerState.inWater = true;
+                    break;
+                }
+            }
+
+            // 2. Apply Input & Friction
+            if (moveLeft) playerState.vx = -speed;
+            else if (moveRight) playerState.vx = speed;
+            else playerState.vx *= 0.8; // Friction
+
+            if (playerState.inWater) {
+                playerState.vx *= 0.6; // Water drag
+            }
+
+            // 3. Apply Jump & Gravity
+            if (moveUp) {
+                if (playerState.isGrounded && !playerState.inWater) {
+                    playerState.vy = jumpForce;
+                    playerState.isGrounded = false;
+                } else if (playerState.inWater) {
+                    // Can swim up continuously
+                    playerState.vy += swimJumpForce * 0.2; 
+                }
+            }
+
+            if (playerState.inWater) {
+                playerState.vy += waterGravity;
+                // Clamp terminal velocity in water
+                if (playerState.vy < -0.1) playerState.vy = -0.1; 
+                if (playerState.vy > 0.15) playerState.vy = 0.15;
+            } else {
+                playerState.vy += gravity;
+                if (playerState.vy < -0.5) playerState.vy = -0.5;
+            }
+
+            // 4. Move X and Check Collisions
+            playerState.x += playerState.vx;
+            for (let plat of platforms) {
+                if (checkOverlap(playerState.x, playerState.y, plat)) {
+                    // Resolve X collision
+                    if (playerState.vx > 0) playerState.x = (plat.x - plat.w/2) - playerSize/2 - 0.001;
+                    else if (playerState.vx < 0) playerState.x = (plat.x + plat.w/2) + playerSize/2 + 0.001;
+                    playerState.vx = 0;
+                }
+            }
+
+            // 5. Move Y and Check Collisions
+            playerState.y += playerState.vy;
+            playerState.isGrounded = false;
+            for (let plat of platforms) {
+                // Ignore collision with top of toilet bowl if we want to swim in it
+                if (plat.isToilet && playerState.inWater) continue; 
+
+                if (checkOverlap(playerState.x, playerState.y, plat)) {
+                    // Resolve Y collision
+                    if (playerState.vy < 0) {
+                        playerState.y = (plat.y + plat.h/2) + playerSize/2 + 0.001;
+                        playerState.isGrounded = true;
+                    } else if (playerState.vy > 0) {
+                        playerState.y = (plat.y - plat.h/2) - playerSize/2 - 0.001;
+                    }
+                    playerState.vy = 0;
+                }
+            }
+
+            // Bottom Death Pit (Reset)
+            if (playerState.y < -15) {
+                playerState.x = 0;
+                playerState.y = 5;
+                playerState.vy = 0;
+            }
+
+            // 6. Update Visuals & Camera
+            playerMesh.position.set(playerState.x, playerState.y, 0);
+            
+            // Smooth camera follow
+            camera.position.x += (playerState.x - camera.position.x) * 0.1;
+            camera.position.y += ((playerState.y + 3) - camera.position.y) * 0.1; // Look slightly above player
+            camera.position.z = 18; // Fixed distance for 2.5D view
+            camera.lookAt(camera.position.x, camera.position.y - 3, 0);
+
+            // Rotate player slightly for some flair
+            playerMesh.rotation.x += playerState.vx;
+            playerMesh.rotation.y += playerState.vx;
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        });
+
+        // Start game loop
+        animate();
+    </script>
+</body>
+</html>
