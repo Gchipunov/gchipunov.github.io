@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTS Base Builder with Wall Drag-to-Build</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(10, 20, 10, 0.85);
+            border: 2px solid #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0,255,0,0.3);
+            pointer-events: auto;
+            width: 250px;
+        }
+
+        h3 { margin: 0 0 10px 0; color: #0f0; text-shadow: 0 0 5px #0f0; text-transform: uppercase; font-size: 16px; }
+        .stat { margin-bottom: 5px; font-size: 14px; color: #a0ffa0; }
+        
+        .sidebar {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            bottom: 10px;
+            width: 180px;
+            background: rgba(10, 20, 10, 0.85);
+            border: 2px solid #0f0;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+        }
+
+        button {
+            background: #040;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 10px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            text-align: left;
+            transition: all 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            background: #0f0;
+            color: #000;
+            box-shadow: 0 0 10px #0f0;
+        }
+
+        button:disabled {
+            background: #222;
+            color: #555;
+            border-color: #555;
+            cursor: not-allowed;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+        }
+
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #ccc;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <h3>Command Center</h3>
+        <div class="stat">Credits: <span id="credits-txt">$10,000</span></div>
+        <div class="stat">Power: <span id="power-txt">0 / 0 MW</span></div>
+        <div class="stat" id="status-txt" style="color:#ff0; margin-top:10px;">Deploy your MCV to begin!</div>
+    </div>
+
+    <div class="sidebar" id="build-menu">
+        <h3>Build List</h3>
+        <button id="btn-mcv" onclick="selectMCV()">Deploy MCV</button>
+        <button id="btn-shed" onclick="selectStructure('shed')" disabled>Power Shed ($300)</button>
+        <button id="btn-barracks" onclick="selectStructure('barracks')" disabled>Barracks ($500)</button>
+        <button id="btn-refinery" onclick="selectStructure('refinery')" disabled>Ore Refinery ($2000)</button>
+        <button id="btn-factory" onclick="selectStructure('factory')" disabled>War Factory ($2000)</button>
+        <button id="btn-radar" onclick="selectStructure('radar')" disabled>Radar Dome ($1000)</button>
+        <button id="btn-silo" onclick="selectStructure('silo')" disabled>Missile Silo ($5000)</button>
+        <button id="btn-wall" onclick="selectStructure('wall')" disabled>Wall segment ($50)</button>
+        <button style="background:#400; color:#ff8888; border-color:#f55;" onclick="cancelPlacement()">Cancel Build</button>
+    </div>
+
+    <div id="instructions">
+        <strong>Controls:</strong><br>
+        • Left-Click MCV to Deploy it.<br>
+        • Select structure, Left-Click on grid to place.<br>
+        • <strong>WALLS:</strong> Click and <b>DRAG</b> across rows or columns to build multiple walls dynamically.
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game State
+let credits = 10000;
+let powerProvided = 0;
+let powerConsumed = 0;
+let mcvDeployed = false;
+let mcvSelected = false;
+
+// MCV Unit initial grid properties
+let mcvUnit = { x: 12, y: 15, targetX: 12, targetY: 15, size: 2 };
+
+// Selection states
+let currentPlacement = null; // 'shed', 'barracks', etc.
+let wallDragStart = null;    // {x, y} coordinates when dragging started
+let wallDragEnd = null;      // {x, y} current drag coordinates
+
+// Grid Setup (30x30 tiles)
+const GRID_SIZE = 30;
+const TILE_WIDTH = 64;
+const TILE_HEIGHT = 32;
+let grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(null));
+
+// Camera/Offset adjustments
+let offsetX = canvas.width / 2;
+let offsetY = 100;
+
+// Structure Templates
+const STRUCTURES = {
+    shed:      { name: 'Power Shed',   w: 2, h: 2, cost: 300,  powerGen: 100, powerReq: 0,   color: '#00aaff' },
+    barracks:  { name: 'Barracks',     w: 3, h: 2, cost: 500,  powerGen: 0,   powerReq: 20,  color: '#aa00ff' },
+    refinery:  { name: 'Refinery',     w: 3, h: 3, cost: 2000, powerGen: 0,   powerReq: 40,  color: '#ffaa00' },
+    factory:   { name: 'War Factory',  w: 4, h: 3, cost: 2000, powerGen: 0,   powerReq: 50,  color: '#ff5500' },
+    radar:     { name: 'Radar Dome',   w: 3, h: 3, cost: 1000, powerGen: 0,   powerReq: 60,  color: '#00ffaa' },
+    silo:      { name: 'Missile Silo', w: 3, h: 4, cost: 5000, powerGen: 0,   powerReq: 100, color: '#ff0055' },
+    wall:      { name: 'Wall',         w: 1, h: 1, cost: 50,   powerGen: 0,   powerReq: 0,   color: '#888888' },
+    conYard:   { name: 'Const. Yard',  w: 4, h: 4, cost: 0,    powerGen: 50,  powerReq: 0,   color: '#00ff00' }
+};
+
+// Track existing constructed items
+let buildings = [];
+
+// Initialize Canvas Size
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    offsetX = canvas.width / 2;
+    offsetY = canvas.height / 4;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Convert Grid Coordinates to Isometric Screen Coordinates
+function gridToScreen(gx, gy) {
+    let sx = offsetX + (gx - gy) * (TILE_WIDTH / 2);
+    let sy = offsetY + (gx + gy) * (TILE_HEIGHT / 2);
+    return { x: sx, y: sy };
+}
+
+// Convert Screen Coordinates back to Grid Coordinates
+function screenToGrid(sx, sy) {
+    let dx = sx - offsetX;
+    let dy = sy - offsetY;
+    let gx = Math.floor((dx / (TILE_WIDTH / 2) + dy / (TILE_HEIGHT / 2)) / 2);
+    let gy = Math.floor((dy / (TILE_HEIGHT / 2) - dx / (TILE_WIDTH / 2)) / 2);
+    return { x: gx, y: gy };
+}
+
+// Interaction handling
+let mouseGrid = { x: 0, y: 0 };
+
+window.addEventListener('mousemove', (e) => {
+    mouseGrid = screenToGrid(e.clientX, e.clientY);
+    if (currentPlacement === 'wall' && wallDragStart) {
+        wallDragEnd = mouseGrid;
+    }
+});
+
+window.addEventListener('mousedown', (e) => {
+    if (e.target.closest('#ui-container') || e.target.closest('#build-menu')) return;
+    
+    let clickedGrid = screenToGrid(e.clientX, e.clientY);
+
+    // 1. MCV Click and Deployment logic
+    if (!mcvDeployed && clickedGrid.x >= mcvUnit.x && clickedGrid.x < mcvUnit.x + mcvUnit.size &&
+        clickedGrid.y >= mcvUnit.y && clickedGrid.y < mcvUnit.y + mcvUnit.size) {
+        mcvSelected = true;
+        document.getElementById('status-txt').innerText = "MCV Selected. Click 'Deploy MCV' on sidebar.";
+        return;
+    }
+
+    // 2. Wall Drag and Drop building functionality
+    if (currentPlacement === 'wall' && mcvDeployed) {
+        wallDragStart = clickedGrid;
+        wallDragEnd = clickedGrid;
+        return;
+    }
+
+    // 3. Regular building placement logic
+    if (currentPlacement && currentPlacement !== 'wall' && mcvDeployed) {
+        let typeData = STRUCTURES[currentPlacement];
+        if (canPlaceStructure(clickedGrid.x, clickedGrid.y, typeData.w, typeData.h, typeData.cost)) {
+            placeStructure(clickedGrid.x, clickedGrid.y, currentPlacement);
+            currentPlacement = null;
+        }
+    }
+});
+
+window.addEventListener('mouseup', (e) => {
+    // Process wall drawing validation on mouse release
+    if (currentPlacement === 'wall' && wallDragStart && wallDragEnd) {
+        let wallTiles = calculateWallLine(wallDragStart, wallDragEnd);
+        let unitCost = STRUCTURES['wall'].cost;
+        
+        wallTiles.forEach(tile => {
+            if (canPlaceStructure(tile.x, tile.y, 1, 1, unitCost)) {
+                placeStructure(tile.x, tile.y, 'wall');
+            }
+        });
+        
+        wallDragStart = null;
+        wallDragEnd = null;
+    }
+});
+
+// Calculate row/column alignment array for wall dragging
+function calculateWallLine(start, end) {
+    let list = [];
+    let dx = Math.abs(end.x - start.x);
+    let dy = Math.abs(end.y - start.y);
+    
+    // Snap exclusively to straight columns or rows based on maximum delta deviation
+    if (dx >= dy) {
+        let step = start.x <= end.x ? 1 : -1;
+        for (let x = start.x; x !== end.x + step; x += step) {
+            list.push({ x: x, y: start.y });
+        }
+    } else {
+        let step = start.y <= end.y ? 1 : -1;
+        for (let y = start.y; y !== end.y + step; y += step) {
+            list.push({ x: start.x, y: y });
+        }
+    }
+    return list;
+}
+
+// UI Triggers
+function selectMCV() {
+    if (mcvSelected && !mcvDeployed) {
+        // Build construction yard at MCV site position
+        if (canPlaceStructure(mcvUnit.x, mcvUnit.y, 4, 4, 0)) {
+            placeStructure(mcvUnit.x, mcvUnit.y, 'conYard');
+            mcvDeployed = true;
+            mcvSelected = false;
+            document.getElementById('btn-mcv').disabled = true;
+            document.getElementById('status-txt').innerText = "Base operational! Construction Grid Online.";
+            updateUI();
+        } else {
+            document.getElementById('status-txt').innerText = "Clear space required to unpack MCV.";
+        }
+    }
+}
+
+function selectStructure(type) {
+    currentPlacement = type;
+    document.getElementById('status-txt').innerText = `Placing: ${STRUCTURES[type].name}`;
+}
+
+function cancelPlacement() {
+    currentPlacement = null;
+    wallDragStart = null;
+    wallDragEnd = null;
+    document.getElementById('status-txt').innerText = "Construction on standby.";
+}
+
+// Engine validation rules
+function canPlaceStructure(gx, gy, w, h, cost) {
+    if (credits < cost) return false;
+    if (gx < 0 || gy < 0 || gx + w > GRID_SIZE || gy + h > GRID_SIZE) return false;
+    
+    for (let x = gx; x < gx + w; x++) {
+        for (let y = gy; y < gy + h; y++) {
+            if (grid[x][y] !== null) return false;
+        }
+    }
+    return true;
+}
+
+function placeStructure(gx, gy, type) {
+    let data = STRUCTURES[type];
+    credits -= data.cost;
+    
+    let bld = { x: gx, y: gy, w: data.w, h: data.h, type: type, color: data.color };
+    buildings.push(bld);
+    
+    for (let x = gx; x < gx + data.w; x++) {
+        for (let y = gy; y < gy + data.h; y++) {
+            grid[x][y] = bld;
+        }
+    }
+    
+    powerProvided += data.powerGen;
+    powerConsumed += data.powerReq;
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById('credits-txt').innerText = `$${credits.toLocaleString()}`;
+    document.getElementById('power-txt').innerText = `${powerConsumed} / ${powerProvided} MW`;
+    
+    // Enable structural components based on tech tree configuration requirements
+    const elements = ['shed', 'barracks', 'refinery', 'factory', 'radar', 'silo', 'wall'];
+    elements.forEach(id => {
+        let el = document.getElementById(`btn-${id}`);
+        if (el) el.disabled = !mcvDeployed || (credits < STRUCTURES[id].cost);
+    });
+}
+
+// Continuous income loop tick simulating Refinery operations
+setInterval(() => {
+    if (mcvDeployed) {
+        let refineries = buildings.filter(b => b.type === 'refinery').length;
+        if (refineries > 0) {
+            credits += refineries * 100; // Generate passive income per refinery
+            updateUI();
+        }
+    }
+}, 2000);
+
+// Rendering Layer Loops
+function drawGridIsometric() {
+    // Render Ground Grid Lines
+    ctx.strokeStyle = "rgba(0, 255, 0, 0.08)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= GRID_SIZE; x++) {
+        let start = gridToScreen(x, 0);
+        let end = gridToScreen(x, GRID_SIZE);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= GRID_SIZE; y++) {
+        let start = gridToScreen(0, y);
+        let end = gridToScreen(GRID_SIZE, y);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+    }
+}
+
+function drawStructureBox(gx, gy, gw, gh, color, heightOffset = 25) {
+    let p0 = gridToScreen(gx, gy);
+    let p1 = gridToScreen(gx + gw, gy);
+    let p2 = gridToScreen(gx + gw, gy + gh);
+    let p3 = gridToScreen(gx, gy + gh);
+
+    // Draw solid 3D structural block representation projection
+    ctx.fillStyle = color;
+    ctx.strokeStyle = "#fff";
+    
+    // Top roof face projection rendering
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y - heightOffset);
+    ctx.lineTo(p1.x, p1.y - heightOffset);
+    ctx.lineTo(p2.x, p2.y - heightOffset);
+    ctx.lineTo(p3.x, p3.y - heightOffset);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Side wall facade structures rendering
+    ctx.fillStyle = adjustBrightness(color, -30);
+    ctx.beginPath();
+    ctx.moveTo(p3.x, p3.y - heightOffset);
+    ctx.lineTo(p2.x, p2.y - heightOffset);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.lineTo(p3.x, p3.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = adjustBrightness(color, -50);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y - heightOffset);
+    ctx.lineTo(p2.x, p2.y - heightOffset);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+}
+
+function adjustBrightness(hex, percent) {
+    let num = parseInt(hex.replace("#",""), 16),
+    amt = Math.round(2.55 * percent),
+    R = (num >> 16) + amt,
+    G = (num >> 8 & 0x00FF) + amt,
+    B = (num & 0x0000FF) + amt;
+    return "#" + (0x1000000 + (R<255?R<0?0:R:255)*0x10000 + (G<255?G<0?0:G:255)*0x100 + (B<255?B<0?0:B:255)).toString(16).slice(1);
+}
+
+// Main game framework loop execution iteration
+function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Space Background aesthetic glow details
+    ctx.fillStyle = "#0c140c";
+    ctx.fillRect(0,0, canvas.width, canvas.height);
+
+    drawGridIsometric();
+
+    // Render operational static objects built
+    buildings.forEach(b => {
+        let h = b.type === 'wall' ? 12 : (b.type === 'silo' ? 50 : 30);
+        drawStructureBox(b.x, b.y, b.w, b.h, b.color, h);
+    });
+
+    // Render deployment asset phase MCV tracking
+    if (!mcvDeployed) {
+        let col = mcvSelected ? '#ffff00' : '#88cc88';
+        drawStructureBox(mcvUnit.x, mcvUnit.y, mcvUnit.size, mcvUnit.size, col, 20);
+        
+        // Label overlay marker text
+        let pos = gridToScreen(mcvUnit.x + 0.5, mcvUnit.y + 0.5);
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px sans-serif";
+        ctx.fillText("MCV UNIT", pos.x - 20, pos.y - 30);
+    }
+
+    // Dynamic Ghost Placement Overlay Mechanics Engine
+    if (currentPlacement && mcvDeployed) {
+        let typeData = STRUCTURES[currentPlacement];
+        
+        if (currentPlacement === 'wall' && wallDragStart && wallDragEnd) {
+            // Render line compilation array during a drag sequence execution block
+            let wallTiles = calculateWallLine(wallDragStart, wallDragEnd);
+            wallTiles.forEach(tile => {
+                let valid = canPlaceStructure(tile.x, tile.y, 1, 1, typeData.cost);
+                drawStructureBox(tile.x, tile.y, 1, 1, valid ? 'rgba(0,255,0,0.5)' : 'rgba(255,0,0,0.5)', 12);
+            });
+        } else {
+            // Single regular element hover projection overlay profile state
+            let valid = canPlaceStructure(mouseGrid.x, mouseGrid.y, typeData.w, typeData.h, typeData.cost);
+            drawStructureBox(mouseGrid.x, mouseGrid.y, typeData.w, typeData.h, valid ? 'rgba(0,255,0,0.4)' : 'rgba(255,0,0,0.4)', 25);
+        }
+    }
+
+    requestAnimationFrame(loop);
+}
+
+// Initial engine activation run launch script routine sequence
+updateUI();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
