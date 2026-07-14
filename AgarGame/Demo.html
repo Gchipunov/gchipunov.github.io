@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Agar Clone</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #111;
+            font-family: sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            text-shadow: 1px 1px 3px black;
+            font-size: 20px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">Mass: <span id="massScore">10</span></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const gl = canvas.getContext('webgl');
+        const massScore = document.getElementById('massScore');
+
+        if (!gl) {
+            alert('WebGL not supported by your browser!');
+        }
+
+        // --- GAME CONFIG & STATE ---
+        const WORLD_SIZE = 2000;
+        const MAX_FOOD = 400;
+        const MAX_BOTS = 30;
+
+        let player = {
+            x: WORLD_SIZE / 2,
+            y: WORLD_SIZE / 2,
+            radius: 20,
+            r: 0.1, g: 0.6, b: 1.0 // Blue
+        };
+
+        let food = [];
+        let bots = [];
+        let inputX = 0;
+        let inputY = 0;
+
+        // --- SHADER SOURCE ---
+        // Vertex Shader: Projects world positions relative to the player camera
+        const vsSource = `
+            attribute vec2 a_position;
+            attribute float a_radius;
+            attribute vec3 a_color;
+
+            uniform vec2 u_camera;
+            uniform vec2 u_resolution;
+            uniform float u_zoom;
+
+            varying vec3 v_color;
+
+            void main() {
+                // Convert world pos to camera space
+                vec2 camSpace = (a_position - u_camera) * u_zoom;
+                // Convert to clip space (-1 to 1)
+                vec2 clipSpace = camSpace / (u_resolution / 2.0);
+                
+                gl_Position = vec4(clipSpace, 0.0, 1.0);
+                gl_PointSize = a_radius * 2.0 * u_zoom;
+                v_color = a_color;
+            }
+        `;
+
+        // Fragment Shader: Discards pixels outside the radius to make perfect circles
+        const fsSource = `
+            precision mediump float;
+            varying vec3 v_color;
+
+            void main() {
+                // gl_PointCoord gives local 0.0 to 1.0 coordinates across the point
+                vec2 centerDist = gl_PointCoord - vec2(0.5, 0.5);
+                if (dot(centerDist, centerDist) > 0.25) {
+                    discard; // Chop corners to make a perfect circle
+                }
+                gl_FragColor = vec4(v_color, 1.0);
+            }
+        `;
+
+        // --- WEBGL SETUP ---
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // Attribute / Uniform Locations
+        const posAttr = gl.getAttribLocation(program, 'a_position');
+        const radAttr = gl.getAttribLocation(program, 'a_radius');
+        const colAttr = gl.getAttribLocation(program, 'a_color');
+        const camUnif = gl.getUniformLocation(program, 'u_camera');
+        const resUnif = gl.getUniformLocation(program, 'u_resolution');
+        const zoomUnif = gl.getUniformLocation(program, 'u_zoom');
+
+        // Enable attributes
+        gl.enableVertexAttribArray(posAttr);
+        gl.enableVertexAttribArray(radAttr);
+        gl.enableVertexAttribArray(colAttr);
+
+        // Create VBO (Vertex Buffer Object)
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+        // --- GAME INITIALIZATION ---
+        function spawnFood() {
+            while (food.length < MAX_FOOD) {
+                food.push({
+                    x: Math.random() * WORLD_SIZE,
+                    y: Math.random() * WORLD_SIZE,
+                    radius: 4,
+                    r: Math.random(), g: Math.random(), b: Math.random()
+                });
+            }
+        }
+
+        function spawnBots() {
+            while (bots.length < MAX_BOTS) {
+                bots.push({
+                    x: Math.random() * WORLD_SIZE,
+                    y: Math.random() * WORLD_SIZE,
+                    radius: 10 + Math.random() * 30,
+                    r: Math.random(), g: Math.random(), b: Math.random(),
+                    targetX: Math.random() * WORLD_SIZE,
+                    targetY: Math.random() * WORLD_SIZE,
+                    timer: 0
+                });
+            }
+        }
+
+        spawnFood();
+        spawnBots();
+
+        // --- INPUT HANDLING (Desktop Mouse + Android Touch Friendly) ---
+        function handlePointer(clientX, clientY) {
+            inputX = clientX - canvas.width / 2;
+            inputY = (canvas.height / 2) - clientY; // Invert Y for WebGL standard
+        }
+
+        window.addEventListener('mousemove', (e) => handlePointer(e.clientX, e.clientY));
+        window.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 0) {
+                handlePointer(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+
+        // --- ENGINE LOOP ---
+        function updateAndRender() {
+            // 1. Resize Canvas dynamically
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                gl.viewport(0, 0, canvas.width, canvas.height);
+            }
+
+            // 2. Physics & Logic Update
+            // Player Movement (Speed scales inversely with size)
+            let currentSpeed = Math.max(1.5, 80 / player.radius);
+            let inputMag = Math.hypot(inputX, inputY);
+            if (inputMag > 10) {
+                player.x += (inputX / inputMag) * currentSpeed;
+                player.y += (inputY / inputMag) * currentSpeed;
+            }
+            
+            // Constrain player to arena boundaries
+            player.x = Math.max(player.radius, Math.min(WORLD_SIZE - player.radius, player.x));
+            player.y = Math.max(player.radius, Math.min(WORLD_SIZE - player.radius, player.y));
+
+            // Update Bots AI
+            for (let b of bots) {
+                b.timer--;
+                if (b.timer <= 0) {
+                    b.targetX = Math.random() * WORLD_SIZE;
+                    b.targetY = Math.random() * WORLD_SIZE;
+                    b.timer = 100 + Math.random() * 200;
+                }
+                let bSpeed = Math.max(1.2, 80 / b.radius);
+                let dx = b.targetX - b.x;
+                let dy = b.targetY - b.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist > 5) {
+                    b.x += (dx / dist) * bSpeed;
+                    b.y += (dy / dist) * bSpeed;
+                }
+                b.x = Math.max(b.radius, Math.min(WORLD_SIZE - b.radius, b.x));
+                b.y = Math.max(b.radius, Math.min(WORLD_SIZE - b.radius, b.y));
+            }
+
+            // Collisions: Eating Food
+            food = food.filter(f => {
+                // Check Player
+                let pDist = Math.hypot(player.x - f.x, player.y - f.y);
+                if (pDist < player.radius) {
+                    player.radius += 0.3; // Grow
+                    return false;
+                }
+                // Check Bots
+                for (let b of bots) {
+                    if (Math.hypot(b.x - f.x, b.y - f.y) < b.radius) {
+                        b.radius += 0.3;
+                        return false;
+                    }
+                }
+                return true;
+            });
+            spawnFood();
+
+            // Collisions: Eating Cells (Player vs Bots / Bots vs Bots)
+            for (let i = bots.length - 1; i >= 0; i--) {
+                let b = bots[i];
+                let pDist = Math.hypot(player.x - b.x, player.y - b.y);
+                
+                // Player eats bot
+                if (pDist < player.radius && player.radius > b.radius * 1.15) {
+                    player.radius += b.radius * 0.4;
+                    bots.splice(i, 1);
+                    continue;
+                }
+                // Bot eats player
+                if (pDist < b.radius && b.radius > player.radius * 1.15) {
+                    // Reset game
+                    player.radius = 20;
+                    player.x = WORLD_SIZE / 2;
+                    player.y = WORLD_SIZE / 2;
+                }
+
+                // Bot vs Bot collisions
+                for (let j = bots.length - 1; j > i; j--) {
+                    let b2 = bots[j];
+                    let bbDist = Math.hypot(b.x - b2.x, b.y - b2.y);
+                    if (bbDist < b.radius && b.radius > b2.radius * 1.15) {
+                        b.radius += b2.radius * 0.4;
+                        bots.splice(j, 1);
+                    } else if (bbDist < b2.radius && b2.radius > b.radius * 1.15) {
+                        b2.radius += b.radius * 0.4;
+                        bots.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+            spawnBots();
+
+            // Update Score Screen Text
+            massScore.textContent = Math.floor(player.radius);
+
+            // 3. Batch Visual Data into Float32Array
+            // Format per circle: [x, y, radius, r, g, b] -> 6 floats
+            const stride = 6;
+            const totalCircles = 1 + food.length + bots.length;
+            const vertexData = new Float32Array(totalCircles * stride);
+
+            let offset = 0;
+            function writeCircle(c) {
+                vertexData[offset] = c.x;
+                vertexData[offset+1] = c.y;
+                vertexData[offset+2] = c.radius;
+                vertexData[offset+3] = c.r;
+                vertexData[offset+4] = c.g;
+                vertexData[offset+5] = c.b;
+                offset += stride;
+            }
+
+            // Write all entities into array buffer
+            writeCircle(player);
+            food.forEach(writeCircle);
+            bots.forEach(writeCircle);
+
+            // 4. WebGL Drawing Pipeline
+            gl.clearColor(0.12, 0.12, 0.12, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // Dynamic camera zoom out based on size
+            let targetZoom = Math.max(0.3, 1.0 - (player.radius - 20) / 300);
+
+            // Load Global Uniforms
+            gl.uniform2f(camUnif, player.x, player.y);
+            gl.uniform2f(resUnif, canvas.width, canvas.height);
+            gl.uniform1f(zoomUnif, targetZoom);
+
+            // Send batch array data directly to GPU memory
+            gl.bufferData(gl.ARRAY_BUFFER, vertexData, gl.DYNAMIC_DRAW);
+
+            // Set up local data stride offsets
+            const bytesPerFloat = Float32Array.BYTES_PER_ELEMENT;
+            gl.vertexAttribPointer(posAttr, 2, gl.FLOAT, false, stride * bytesPerFloat, 0);
+            gl.vertexAttribPointer(radAttr, 1, gl.FLOAT, false, stride * bytesPerFloat, 2 * bytesPerFloat);
+            gl.vertexAttribPointer(colAttr, 3, gl.FLOAT, false, stride * bytesPerFloat, 3 * bytesPerFloat);
+
+            // Execute single draw call for insane efficiency
+            gl.drawArrays(gl.POINTS, 0, totalCircles);
+
+            requestAnimationFrame(updateAndRender);
+        }
+
+        // Run engine
+        requestAnimationFrame(updateAndRender);
+    </script>
+</body>
+</html>
