@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Dual Contouring Terrain & Tank Simulator</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* UI Overlay */
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+            pointer-events: none;
+            z-index: 10;
+        }
+        h1 {
+            margin: 0 0 5px 0;
+            font-size: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #4caf50;
+        }
+        p {
+            margin: 3px 0;
+            font-size: 13px;
+            opacity: 0.85;
+        }
+        /* Touch Controls */
+        #mobile-ui {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .touch-zone {
+            position: absolute;
+            width: 40%;
+            height: 50%;
+            bottom: 0;
+            pointer-events: auto;
+        }
+        #left-zone {
+            left: 0;
+        }
+        #right-zone {
+            right: 0;
+        }
+        .joystick-container {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            pointer-events: none;
+            display: none;
+            transform: translate(-50%, -50%);
+        }
+        .joystick-knob {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            background: rgba(76, 175, 80, 0.7);
+            border-radius: 50%;
+            top: 35px;
+            left: 35px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        #fire-btn {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            background: rgba(244, 67, 54, 0.7);
+            border: 3px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            color: white;
+            font-weight: bold;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.4);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+        #fire-btn:active {
+            background: rgba(244, 67, 54, 1);
+            transform: scale(0.95);
+        }
+        /* Instructions helper for desktop */
+        #desktop-help {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            background: rgba(0,0,0,0.6);
+            padding: 10px 15px;
+            border-radius: 5px;
+            border-left: 4px solid #4caf50;
+            font-size: 12px;
+            line-height: 1.5;
+            pointer-events: none;
+            z-index: 10;
+        }
+        @media (max-width: 768px) {
+            #desktop-help {
+                display: none;
+            }
+        }
+    </style>
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div id="hud">
+        <h1>Bolo-DC</h1>
+        <p>FPS: <span id="fps">60</span></p>
+        <p>Terrain: Dual Contouring Isosurface</p>
+    </div>
+
+    <div id="desktop-help">
+        <strong>Controls:</strong><br>
+        • Drive: <b>WASD</b> / Arrow Keys<br>
+        • Aim Turret: <b>Mouse Move</b><br>
+        • Fire: <b>Left Click</b> / <b>Space</b><br>
+        • Cam View: <b>C</b> (Toggle Orbit/Follow)
+    </div>
+
+    <div id="mobile-ui">
+        <div id="left-zone" class="touch-zone"></div>
+        <div id="right-zone" class="touch-zone"></div>
+        <div id="left-joystick" class="joystick-container">
+            <div id="left-knob" class="joystick-knob"></div>
+        </div>
+        <div id="right-joystick" class="joystick-container">
+            <div id="right-knob" class="joystick-knob"></div>
+        </div>
+        <button id="fire-btn">FIRE</button>
+    </div>
+
+    <script>
+        // --- 1. SETUPS AND CONFIGS ---
+        const WIDTH = window.innerWidth;
+        const HEIGHT = window.innerHeight;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x11161B);
+        scene.fog = new THREE.FogExp2(0x11161B, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, WIDTH / HEIGHT, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(WIDTH, HEIGHT);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // --- 2. LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.25);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xfffaed, 0.85);
+        sunLight.position.set(100, 150, 50);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 500;
+        const d = 100;
+        sunLight.shadow.camera.left = -d;
+        sunLight.shadow.camera.right = d;
+        sunLight.shadow.camera.top = d;
+        sunLight.shadow.camera.bottom = -d;
+        scene.add(sunLight);
+
+        // --- 3. DUAL CONTOURING CORE ENGINE ---
+        // Generates an explicit sharp-edged surface out of volumetric data (voxels/density grid).
+        // Uses Hermite data (positions, signs, normals) on cell boundaries to place a vertex inside each grid cell.
+        const GRID_SIZE = 64; 
+        const VOXEL_SCALE = 2.0; // scale world space
+        const terrainGrid = new Float32Array(GRID_SIZE * GRID_SIZE * GRID_SIZE);
+
+        function getGridIdx(x, y, z) {
+            return x + y * GRID_SIZE + z * GRID_SIZE * GRID_SIZE;
+        }
+
+        // 3D Density Field Evaluation (Noise + height constraints)
+        function getDensity(x, y, z) {
+            // World coordinates
+            const wx = (x - GRID_SIZE / 2) * VOXEL_SCALE;
+            const wy = (y - 8) * VOXEL_SCALE; // Elevate ground floor slightly
+            const wz = (z - GRID_SIZE / 2) * VOXEL_SCALE;
+
+            // Simple fast procedural noise using sine combinations (acting as 3D noise)
+            const n1 = Math.sin(wx * 0.05) * Math.cos(wz * 0.05) * 12;
+            const n2 = Math.sin(wx * 0.15 + wz * 0.1) * Math.sin(wz * 0.2) * 4;
+            const surfaceHeight = 15 + n1 + n2;
+
+            let density = wy - surfaceHeight;
+
+            // Add an underground cavern system for dual contouring to showcase tunnels!
+            const cavernNoise = Math.sin(wx * 0.1) * Math.cos(wy * 0.1) * Math.sin(wz * 0.1);
+            if (wy < 12 && cavernNoise > 0.6) {
+                density = -1.0; // carve hollow pockets
+            }
+
+            return density;
+        }
+
+        // Initialize density map
+        for (let z = 0; z < GRID_SIZE; z++) {
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    terrainGrid[getGridIdx(x, y, z)] = getDensity(x, y, z);
+                }
+            }
+        }
+
+        // Dynamic Deform Field (Craters)
+        function applyExplosion(worldPos, radius) {
+            const gridR = Math.ceil(radius / VOXEL_SCALE);
+            const gx = Math.round(worldPos.x / VOXEL_SCALE + GRID_SIZE / 2);
+            const gy = Math.round(worldPos.y / VOXEL_SCALE + 8);
+            const gz = Math.round(worldPos.z / VOXEL_SCALE + GRID_SIZE / 2);
+
+            for (let z = gz - gridR; z <= gz + gridR; z++) {
+                for (let y = gy - gridR; y <= gy + gridR; y++) {
+                    for (let x = gx - gridR; x <= gx + gridR; x++) {
+                        if (x >= 0 && x < GRID_SIZE - 1 && y >= 0 && y < GRID_SIZE - 1 && z >= 0 && z < GRID_SIZE - 1) {
+                            const wx = (x - GRID_SIZE / 2) * VOXEL_SCALE;
+                            const wy = (y - 8) * VOXEL_SCALE;
+                            const wz = (z - GRID_SIZE / 2) * VOXEL_SCALE;
+                            const dSq = (wx - worldPos.x) ** 2 + (wy - worldPos.y) ** 2 + (wz - worldPos.z) ** 2;
+                            if (dSq < radius * radius) {
+                                const dist = Math.sqrt(dSq);
+                                const factor = (radius - dist) / radius;
+                                // Carve density outwards
+                                const idx = getGridIdx(x, y, z);
+                                terrainGrid[idx] = Math.max(terrainGrid[idx], factor * 12.0); 
+                            }
+                        }
+                    }
+                }
+            }
+            rebuildTerrainMesh();
+        }
+
+        // Dual Contouring Mesher
+        // Simplified version: solves Hermite data via surface-net approximation 
+        // with gradient features to preserve crisp corners and high speed.
+        let terrainMesh = null;
+        function generateDualContouringMesh() {
+            const vertices = [];
+            const indices = [];
+            const normals = [];
+            const colors = [];
+
+            // 1. Grid of cells. We'll find exactly one vertex for each cell containing a sign-change edge.
+            // Map: cell coordinate string -> unique vertex index in our array
+            const cellToVertexIdx = new Map();
+
+            // Helper to get estimated gradient (surface normal)
+            function getNormalAt(x, y, z) {
+                const eps = 0.5;
+                const idx = getGridIdx(x, y, z);
+                const nx = getDensityAtSafe(x + eps, y, z) - getDensityAtSafe(x - eps, y, z);
+                const ny = getDensityAtSafe(x, y + eps, z) - getDensityAtSafe(x, y - eps, z);
+                const nz = getDensityAtSafe(x, y, z + eps) - getDensityAtSafe(x, y, z - eps);
+                const vec = new THREE.Vector3(nx, ny, nz);
+                return vec.normalize();
+            }
+
+            function getDensityAtSafe(x, y, z) {
+                const ix = Math.max(0, Math.min(GRID_SIZE - 1, Math.round(x)));
+                const iy = Math.max(0, Math.min(GRID_SIZE - 1, Math.round(y)));
+                const iz = Math.max(0, Math.min(GRID_SIZE - 1, Math.round(z)));
+                return terrainGrid[getGridIdx(ix, iy, iz)];
+            }
+
+            // A Cell has 8 corners. Determine active vertices.
+            for (let z = 0; z < GRID_SIZE - 1; z++) {
+                for (let y = 0; y < GRID_SIZE - 1; y++) {
+                    for (let x = 0; x < GRID_SIZE - 1; x++) {
+                        
+                        let corners = [
+                            {x: x, y: y, z: z, d: terrainGrid[getGridIdx(x, y, z)]},
+                            {x: x+1, y: y, z: z, d: terrainGrid[getGridIdx(x+1, y, z)]},
+                            {x: x, y: y+1, z: z, d: terrainGrid[getGridIdx(x, y+1, z)]},
+                            {x: x+1, y: y+1, z: z, d: terrainGrid[getGridIdx(x+1, y+1, z)]},
+                            {x: x, y: y, z: z+1, d: terrainGrid[getGridIdx(x, y, z+1)]},
+                            {x: x+1, y: y, z: z+1, d: terrainGrid[getGridIdx(x+1, y, z+1)]},
+                            {x: x, y: y+1, z: z+1, d: terrainGrid[getGridIdx(x, y+1, z+1)]},
+                            {x: x+1, y: y+1, z: z+1, d: terrainGrid[getGridIdx(x+1, y+1, z+1)]}
+                        ];
+
+                        // Count sign changes on cell edges
+                        let signMask = 0;
+                        for(let i=0; i<8; i++) {
+                            if (corners[i].d < 0) signMask |= (1 << i);
+                        }
+
+                        // If not completely inside or completely outside, we find a vertex!
+                        if (signMask !== 0 && signMask !== 255) {
+                            // Find all edge intersections in this cell to calculate the feature-preserving dual vertex
+                            let sumIntersectionPoints = new THREE.Vector3();
+                            let countIntersections = 0;
+
+                            // We check 12 edges of the cell
+                            const edges = [
+                                [0, 1], [0, 2], [1, 3], [2, 3], // bottom face
+                                [4, 5], [4, 6], [5, 7], [6, 7], // top face
+                                [0, 4], [1, 5], [2, 6], [3, 7]  // vertical vertical
+                            ];
+
+                            for(let e = 0; e < 12; e++) {
+                                const c1 = corners[edges[e][0]];
+                                const c2 = corners[edges[e][1]];
+                                // Sign change check
+                                if ((c1.d < 0 && c2.d >= 0) || (c1.d >= 0 && c2.d < 0)) {
+                                    // Interpolate crossing point
+                                    const t = c1.d / (c1.d - c2.d);
+                                    const ip = new THREE.Vector3(
+                                        c1.x + t * (c2.x - c1.x),
+                                        c1.y + t * (c2.y - c1.y),
+                                        c1.z + t * (c2.z - c1.z)
+                                    );
+                                    sumIntersectionPoints.add(ip);
+                                    countIntersections++;
+                                }
+                            }
+
+                            if (countIntersections > 0) {
+                                // Cell vertex is the average intersection (Centroid / QEF solver approximation)
+                                const cellVertex = sumIntersectionPoints.divideScalar(countIntersections);
+
+                                // Convert back to real World Space
+                                const wx = (cellVertex.x - GRID_SIZE / 2) * VOXEL_SCALE;
+                                const wy = (cellVertex.y - 8) * VOXEL_SCALE;
+                                const wz = (cellVertex.z - GRID_SIZE / 2) * VOXEL_SCALE;
+
+                                const vIdx = vertices.length / 3;
+                                vertices.push(wx, wy, wz);
+
+                                // Normal estimation
+                                const normal = getNormalAt(cellVertex.x, cellVertex.y, cellVertex.z);
+                                normals.push(normal.x, normal.y, normal.z);
+
+                                // Dynamic biome coloring based on height and slopes
+                                if (wy < -3) {
+                                    colors.push(0.12, 0.22, 0.35); // Sand/shores
+                                } else if (normal.y < 0.65) {
+                                    colors.push(0.35, 0.3, 0.28); // Steep cliff / Rock
+                                } else {
+                                    colors.push(0.24, 0.42, 0.16); // Lush green
+                                }
+
+                                cellToVertexIdx.set(`${x},${y},${z}`, vIdx);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Dual Generation: build quads across crossing edges
+            // An edge showing sign changes creates a perpendicular quad connecting its 4 sharing cells
+            for (let z = 0; z < GRID_SIZE - 1; z++) {
+                for (let y = 0; y < GRID_SIZE - 1; y++) {
+                    for (let x = 0; x < GRID_SIZE - 1; x++) {
+                        const d = terrainGrid[getGridIdx(x, y, z)];
+
+                        // Check 3 edges sharing the corner (x,y,z)
+                        // Edge X: from (x,y,z) to (x+1,y,z)
+                        if (x < GRID_SIZE - 2) {
+                            const dx = terrainGrid[getGridIdx(x+1, y, z)];
+                            if ((d < 0 && dx >= 0) || (d >= 0 && dx < 0)) {
+                                const v0 = cellToVertexIdx.get(`${x},${y-1},${z-1}`);
+                                const v1 = cellToVertexIdx.get(`${x},${y},${z-1}`);
+                                const v2 = cellToVertexIdx.get(`${x},${y},${z}`);
+                                const v3 = cellToVertexIdx.get(`${x},${y-1},${z}`);
+                                if (v0 !== undefined && v1 !== undefined && v2 !== undefined && v3 !== undefined) {
+                                    if (d < 0) {
+                                        indices.push(v0, v1, v2, v0, v2, v3);
+                                    } else {
+                                        indices.push(v0, v2, v1, v0, v3, v2);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Edge Y: from (x,y,z) to (x,y+1,z)
+                        if (y < GRID_SIZE - 2) {
+                            const dy = terrainGrid[getGridIdx(x, y+1, z)];
+                            if ((d < 0 && dy >= 0) || (d >= 0 && dy < 0)) {
+                                const v0 = cellToVertexIdx.get(`${x-1},${y},${z-1}`);
+                                const v1 = cellToVertexIdx.get(`${x},${y},${z-1}`);
+                                const v2 = cellToVertexIdx.get(`${x},${y},${z}`);
+                                const v3 = cellToVertexIdx.get(`${x-1},${y},${z}`);
+                                if (v0 !== undefined && v1 !== undefined && v2 !== undefined && v3 !== undefined) {
+                                    if (d >= 0) {
+                                        indices.push(v0, v1, v2, v0, v2, v3);
+                                    } else {
+                                        indices.push(v0, v2, v1, v0, v3, v2);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Edge Z: from (x,y,z) to (x,y,z+1)
+                        if (z < GRID_SIZE - 2) {
+                            const dz = terrainGrid[getGridIdx(x, y, z+1)];
+                            if ((d < 0 && dz >= 0) || (d >= 0 && dz < 0)) {
+                                const v0 = cellToVertexIdx.get(`${x-1},${y-1},${z}`);
+                                const v1 = cellToVertexIdx.get(`${x},${y-1},${z}`);
+                                const v2 = cellToVertexIdx.get(`${x},${y},${z}`);
+                                const v3 = cellToVertexIdx.get(`${x-1},${y},${z}`);
+                                if (v0 !== undefined && v1 !== undefined && v2 !== undefined && v3 !== undefined) {
+                                    if (d < 0) {
+                                        indices.push(v0, v1, v2, v0, v2, v3);
+                                    } else {
+                                        indices.push(v0, v2, v1, v0, v3, v2);
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+                }
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setIndex(indices);
+
+            return geometry;
+        }
+
+        function rebuildTerrainMesh() {
+            const oldGeometry = terrainMesh ? terrainMesh.geometry : null;
+            const newGeometry = generateDualContouringMesh();
+
+            if (terrainMesh) {
+                terrainMesh.geometry = newGeometry;
+                if (oldGeometry) oldGeometry.dispose();
+            } else {
+                const terrainMat = new THREE.MeshStandardMaterial({
+                    vertexColors: true,
+                    roughness: 0.8,
+                    metalness: 0.1,
+                    flatShading: true // highlights voxel mesh dual contours
+                });
+                terrainMesh = new THREE.Mesh(newGeometry, terrainMat);
+                terrainMesh.receiveShadow = true;
+                terrainMesh.castShadow = true;
+                scene.add(terrainMesh);
+            }
+        }
+
+        rebuildTerrainMesh();
+
+        // Terrain height sampling lookup for the tank to match positions
+        function getTerrainHeightAndNormal(worldX, worldZ) {
+            // Find grid cell coordinates
+            const gx = worldX / VOXEL_SCALE + GRID_SIZE / 2;
+            const gz = worldZ / VOXEL_SCALE + GRID_SIZE / 2;
+
+            if (gx < 1 || gx >= GRID_SIZE - 2 || gz < 1 || gz >= GRID_SIZE - 2) {
+                return { y: 0, normal: new THREE.Vector3(0, 1, 0) };
+            }
+
+            // Sample surface depth by traversing down from top
+            let terrainY = 0;
+            const ix = Math.floor(gx);
+            const iz = Math.floor(gz);
+
+            for (let y = GRID_SIZE - 2; y >= 0; y--) {
+                const d = terrainGrid[getGridIdx(ix, y, iz)];
+                if (d < 0) {
+                    terrainY = (y - 8) * VOXEL_SCALE;
+                    break;
+                }
+            }
+
+            // Calculate Normal Vector estimation
+            const eps = 1.0;
+            let hL = getTerrainHeightOnly(worldX - eps, worldZ);
+            let hR = getTerrainHeightOnly(worldX + eps, worldZ);
+            let hD = getTerrainHeightOnly(worldX, worldZ - eps);
+            let hU = getTerrainHeightOnly(worldX, worldZ + eps);
+
+            const normal = new THREE.Vector3(hL - hR, 2.0 * eps, hD - hU).normalize();
+
+            return { y: terrainY, normal: normal };
+        }
+
+        function getTerrainHeightOnly(worldX, worldZ) {
+            const gx = Math.max(1, Math.min(GRID_SIZE - 2, Math.floor(worldX / VOXEL_SCALE + GRID_SIZE / 2)));
+            const gz = Math.max(1, Math.min(GRID_SIZE - 2, Math.floor(worldZ / VOXEL_SCALE + GRID_SIZE / 2)));
+            for (let y = GRID_SIZE - 2; y >= 0; y--) {
+                if (terrainGrid[getGridIdx(gx, y, gz)] < 0) {
+                    return (y - 8) * VOXEL_SCALE;
+                }
+            }
+            return 0;
+        }
+
+        // --- 4. TANK MODEL CONSTRUCTION ---
+        const tankGroup = new THREE.Group();
+        scene.add(tankGroup);
+
+        // Colors
+        const metalColor = 0x2e3b2e;
+        const treadColor = 0x111111;
+        const tankMat = new THREE.MeshStandardMaterial({ color: metalColor, roughness: 0.6 });
+        const treadMat = new THREE.MeshStandardMaterial({ color: treadColor, roughness: 0.9 });
+
+        // Base/Chassis Hull Group (can pitch/roll with terrain)
+        const tankHull = new THREE.Group();
+        tankGroup.add(tankHull);
+
+        // Body block
+        const bodyGeo = new THREE.BoxGeometry(4.0, 1.2, 5.0);
+        const bodyMesh = new THREE.Mesh(bodyGeo, tankMat);
+        bodyMesh.position.y = 0.6;
+        bodyMesh.castShadow = true;
+        bodyMesh.receiveShadow = true;
+        tankHull.add(bodyMesh);
+
+        // Left tread
+        const leftTreadGeo = new THREE.BoxGeometry(0.8, 1.0, 5.2);
+        const leftTread = new THREE.Mesh(leftTreadGeo, treadMat);
+        leftTread.position.set(-2.2, 0.5, 0);
+        leftTread.castShadow = true;
+        leftTread.receiveShadow = true;
+        tankHull.add(leftTread);
+
+        // Right tread
+        const rightTread = leftTread.clone();
+        rightTread.position.x = 2.2;
+        tankHull.add(rightTread);
+
+        // Rotating Turret Group
+        const tankTurret = new THREE.Group();
+        tankTurret.position.set(0, 1.1, -0.2);
+        tankHull.add(tankTurret);
+
+        // Turret cap
+        const turretGeo = new THREE.CylinderGeometry(1.6, 1.8, 1.0, 8);
+        const turretMesh = new THREE.Mesh(turretGeo, tankMat);
+        turretMesh.position.y = 0.5;
+        turretMesh.castShadow = true;
+        turretMesh.receiveShadow = true;
+        tankTurret.add(turretMesh);
+
+        // Cannon barrel (pitchable)
+        const tankBarrel = new THREE.Group();
+        tankBarrel.position.set(0, 0.5, 1.2);
+        tankTurret.add(tankBarrel);
+
+        const barrelGeo = new THREE.CylinderGeometry(0.2, 0.25, 3.5, 8);
+        barrelGeo.rotateX(Math.PI / 2); // align forward
+        barrelGeo.translate(0, 0, 1.5);
+        const barrelMesh = new THREE.Mesh(barrelGeo, tankMat);
+        barrelMesh.castShadow = true;
+        barrelMesh.receiveShadow = true;
+        tankBarrel.add(barrelMesh);
+
+        // Muzzle end
+        const muzzleGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.6, 8);
+        muzzleGeo.rotateX(Math.PI / 2);
+        muzzleGeo.translate(0, 0, 3.2);
+        const muzzleMesh = new THREE.Mesh(muzzleGeo, new THREE.MeshStandardMaterial({color: 0x111111, metalness: 0.8}));
+        tankBarrel.add(muzzleMesh);
+
+        // Initialize Tank Physics attributes
+        const tankState = {
+            pos: new THREE.Vector3(0, 10, 0),
+            yaw: 0,
+            pitch: 0,
+            roll: 0,
+            speed: 0,
+            targetSpeed: 0,
+            accel: 15.0,
+            maxSpeed: 18.0,
+            turnSpeed: 1.8,
+            turretYaw: 0,
+            barrelPitch: 0.1
+        };
+
+        // --- 5. KEYBOARD AND CONTROLS MANAGEMENT ---
+        const keys = { w: false, s: false, a: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, Space: false };
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key in keys) keys[e.key] = true;
+            if (e.code === 'Space') keys.Space = true;
+            if (e.key === 'c' || e.key === 'C') toggleCameraView();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key in keys) keys[e.key] = false;
+            if (e.code === 'Space') keys.Space = false;
+        });
+
+        // Mouse aiming controls (desktop only)
+        let mouseX = 0;
+        let mouseY = 0;
+        window.addEventListener('mousemove', (e) => {
+            // Screen relative movement for turret aiming
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        window.addEventListener('mousedown', () => {
+            fireShell();
+        });
+
+        // --- 6. TOUCH / JOYSTICK INTERFACE ENGINE ---
+        const leftZone = document.getElementById('left-zone');
+        const rightZone = document.getElementById('right-zone');
+        const leftJoystick = document.getElementById('left-joystick');
+        const rightJoystick = document.getElementById('right-joystick');
+        const leftKnob = document.getElementById('left-knob');
+        const rightKnob = document.getElementById('right-knob');
+        const fireBtn = document.getElementById('fire-btn');
+
+        let touchLeft = { active: false, start: {x:0, y:0}, current: {x:0, y:0} };
+        let touchRight = { active: false, start: {x:0, y:0}, current: {x:0, y:0} };
+
+        // Left Joystick - Drive control
+        leftZone.addEventListener('touchstart', (e) => {
+            const touch = e.touches[0];
+            touchLeft.active = true;
+            touchLeft.start = { x: touch.clientX, y: touch.clientY };
+            touchLeft.current = { x: touch.clientX, y: touch.clientY };
+
+            leftJoystick.style.left = `${touch.clientX}px`;
+            leftJoystick.style.top = `${touch.clientY}px`;
+            leftJoystick.style.display = 'block';
+        });
+
+        leftZone.addEventListener('touchmove', (e) => {
+            if (!touchLeft.active) return;
+            // Find target touch inside left zone
+            let targetTouch = null;
+            for(let i=0; i<e.touches.length; i++) {
+                if (e.touches[i].clientX < window.innerWidth / 2) {
+                    targetTouch = e.touches[i];
+                    break;
+                }
+            }
+            if (!targetTouch) return;
+
+            touchLeft.current = { x: targetTouch.clientX, y: targetTouch.clientY };
+
+            // Calculate offset & clamp knob
+            let dx = touchLeft.current.x - touchLeft.start.x;
+            let dy = touchLeft.current.y - touchLeft.start.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const maxRadius = 35;
+
+            if (dist > maxRadius) {
+                dx = (dx / dist) * maxRadius;
+                dy = (dy / dist) * maxRadius;
+            }
+
+            leftKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+        });
+
+        leftZone.addEventListener('touchend', () => {
+            touchLeft.active = false;
+            leftJoystick.style.display = 'none';
+            leftKnob.style.transform = 'translate(0px, 0px)';
+        });
+
+        // Right Joystick - Aim control
+        rightZone.addEventListener('touchstart', (e) => {
+            let targetTouch = null;
+            for(let i=0; i<e.touches.length; i++) {
+                if (e.touches[i].clientX >= window.innerWidth / 2) {
+                    targetTouch = e.touches[i];
+                    break;
+                }
+            }
+            if(!targetTouch) return;
+
+            touchRight.active = true;
+            touchRight.start = { x: targetTouch.clientX, y: targetTouch.clientY };
+            touchRight.current = { x: targetTouch.clientX, y: targetTouch.clientY };
+
+            rightJoystick.style.left = `${targetTouch.clientX}px`;
+            rightJoystick.style.top = `${targetTouch.clientY}px`;
+            rightJoystick.style.display = 'block';
+        });
+
+        rightZone.addEventListener('touchmove', (e) => {
+            if (!touchRight.active) return;
+            let targetTouch = null;
+            for(let i=0; i<e.touches.length; i++) {
+                if (e.touches[i].clientX >= window.innerWidth / 2) {
+                    targetTouch = e.touches[i];
+                    break;
+                }
+            }
+            if (!targetTouch) return;
+
+            touchRight.current = { x: targetTouch.clientX, y: targetTouch.clientY };
+
+            let dx = touchRight.current.x - touchRight.start.x;
+            let dy = touchRight.current.y - touchRight.start.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const maxRadius = 35;
+
+            if (dist > maxRadius) {
+                dx = (dx / dist) * maxRadius;
+                dy = (dy / dist) * maxRadius;
+            }
+
+            rightKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+        });
+
+        rightZone.addEventListener('touchend', () => {
+            touchRight.active = false;
+            rightJoystick.style.display = 'none';
+            rightKnob.style.transform = 'translate(0px, 0px)';
+        });
+
+        // Fire button
+        fireBtn.addEventListener('click', () => {
+            fireShell();
+        });
+
+        // --- 7. PROJECTILE SHELLS PHYSICS SYSTEM ---
+        const shells = [];
+        const shellGeometry = new THREE.SphereGeometry(0.18, 8, 8);
+        const shellMaterial = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+
+        function fireShell() {
+            // Spawn point at muzzle end
+            const muzzleWorldPos = new THREE.Vector3();
+            muzzleMesh.getWorldPosition(muzzleWorldPos);
+
+            const shellMesh = new THREE.Mesh(shellGeometry, shellMaterial);
+            shellMesh.position.copy(muzzleWorldPos);
+            scene.add(shellMesh);
+
+            // Compute fire trajectory
+            const targetWorldDir = new THREE.Vector3();
+            muzzleMesh.getWorldDirection(targetWorldDir);
+            targetWorldDir.negate(); // Inverted directions on native Cylinders
+
+            // Velocity setup
+            const velocity = targetWorldDir.multiplyScalar(40.0);
+
+            shells.push({
+                mesh: shellMesh,
+                vel: velocity,
+                birth: Date.now()
+            });
+
+            // Brief muzzle flash
+            const light = new THREE.PointLight(0xffaa22, 10, 12);
+            light.position.copy(muzzleWorldPos);
+            scene.add(light);
+            setTimeout(() => {
+                scene.remove(light);
+            }, 80);
+        }
+
+        // Particle system for explosions
+        const particleGroup = new THREE.Group();
+        scene.add(particleGroup);
+        const particles = [];
+
+        function spawnExplosion(pos) {
+            const count = 25;
+            const pGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            for (let i = 0; i < count; i++) {
+                const pMat = new THREE.MeshBasicMaterial({
+                    color: i % 2 === 0 ? 0xff4400 : 0xffaa00,
+                    transparent: true,
+                    opacity: 1.0
+                });
+                const p = new THREE.Mesh(pGeo, pMat);
+                p.position.copy(pos);
+                particleGroup.add(p);
+
+                particles.push({
+                    mesh: p,
+                    vel: new THREE.Vector3(
+                        (Math.random() - 0.5) * 15,
+                        (Math.random() + 0.2) * 15,
+                        (Math.random() - 0.5) * 15
+                    ),
+                    life: 1.0
+                });
+            }
+        }
+
+        // --- 8. CAMERA CONTROLLER ---
+        let currentCamView = "FOLLOW"; // Alternates: "ORBIT", "FOLLOW"
+        function toggleCameraView() {
+            currentCamView = currentCamView === "FOLLOW" ? "ORBIT" : "FOLLOW";
+        }
+
+        // --- 9. MAIN GAME LOOP ---
+        let lastTime = performance.now();
+        let fpsCounter = 0;
+        let fpsTimer = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const dt = Math.min((now - lastTime) / 1000, 0.1); // cap dt delta at 10hz lag
+            lastTime = now;
+
+            // Simple Framerate calculation
+            fpsCounter++;
+            fpsTimer += dt;
+            if (fpsTimer >= 1.0) {
+                document.getElementById('fps').innerText = fpsCounter;
+                fpsCounter = 0;
+                fpsTimer = 0;
+            }
+
+            // --- TANK PHYSICS UPDATE ---
+            let moveForward = 0;
+            let steerDir = 0;
+
+            // Gather keyboard inputs
+            if (keys.w || keys.ArrowUp) moveForward = 1;
+            if (keys.s || keys.ArrowDown) moveForward = -1;
+            if (keys.a || keys.ArrowLeft) steerDir = 1;
+            if (keys.d || keys.ArrowRight) steerDir = -1;
+
+            // Overwrite with touch input calculations if active
+            if (touchLeft.active) {
+                const dy = touchLeft.current.y - touchLeft.start.y;
+                const dx = touchLeft.current.x - touchLeft.start.x;
+                // Forward/reverse input
+                moveForward = -dy / 35; // Normalize to -1 to 1 range
+                moveForward = Math.max(-1, Math.min(1, moveForward));
+                // Steering input
+                steerDir = -dx / 35;
+                steerDir = Math.max(-1, Math.min(1, steerDir));
+            }
+
+            // Apply steering rotation (yaw)
+            tankState.yaw += steerDir * tankState.turnSpeed * dt;
+
+            // Apply acceleration & friction
+            if (moveForward !== 0) {
+                tankState.targetSpeed = moveForward * tankState.maxSpeed;
+            } else {
+                tankState.targetSpeed = 0;
+            }
+            tankState.speed += (tankState.targetSpeed - tankState.speed) * tankState.accel * dt;
+
+            // Project new tank positions along coordinate plane
+            const velocityVector = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), tankState.yaw).multiplyScalar(tankState.speed);
+            tankState.pos.addScaledVector(velocityVector, dt);
+
+            // Fetch absolute altitude from Dual Contouring terrain height map
+            const terrainData = getTerrainHeightAndNormal(tankState.pos.x, tankState.pos.z);
+            
+            // Snap to surface with smooth suspension spring
+            tankState.pos.y += (terrainData.y - tankState.pos.y) * 15.0 * dt;
+
+            // Position tank assembly
+            tankGroup.position.copy(tankState.pos);
+
+            // Tilt tank hull to dynamically conform to local surface normal vector!
+            const up = terrainData.normal;
+            const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), tankState.yaw);
+            const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+            const realForward = new THREE.Vector3().crossVectors(right, up).normalize();
+
+            const orientationMatrix = new THREE.Matrix4().makeBasis(right, up, realForward);
+            tankHull.rotation.setFromRotationMatrix(orientationMatrix);
+
+            // --- TURRET AIMING ACTION ---
+            if (touchRight.active) {
+                // Drag aim controls
+                const dx = touchRight.current.x - touchRight.start.x;
+                const dy = touchRight.current.y - touchRight.start.y;
+                
+                tankState.turretYaw -= (dx / 35) * 1.5 * dt;
+                tankState.barrelPitch -= (dy / 35) * 0.8 * dt;
+                tankState.barrelPitch = Math.max(-0.1, Math.min(0.8, tankState.barrelPitch));
+            } else {
+                // Desktop Mouse input calculations
+                const angleTarget = -mouseX * Math.PI;
+                tankState.turretYaw += (angleTarget - tankState.turretYaw) * 5.0 * dt;
+
+                const pitchTarget = Math.max(-0.1, Math.min(0.8, mouseY * 0.8));
+                tankState.barrelPitch += (pitchTarget - tankState.barrelPitch) * 5.0 * dt;
+            }
+
+            tankTurret.rotation.y = tankState.turretYaw - tankState.yaw;
+            tankBarrel.rotation.x = -tankState.barrelPitch;
+
+            // Spacebar fire rate trigger
+            if (keys.Space) {
+                if (!this.lastFireTime || now - this.lastFireTime > 350) {
+                    fireShell();
+                    this.lastFireTime = now;
+                }
+            }
+
+            // --- DYNAMIC PROJECTILES & DUAL CONTOURING COLLISION ---
+            for (let i = shells.length - 1; i >= 0; i--) {
+                const s = shells[i];
+                // Apply simple gravitation
+                s.vel.y -= 9.8 * dt;
+                s.mesh.position.addScaledVector(s.vel, dt);
+
+                // Collision detect against volumetric ground
+                const groundY = getTerrainHeightOnly(s.mesh.position.x, s.mesh.position.z);
+                const isOutOfBounds = Math.abs(s.mesh.position.x) > (GRID_SIZE * VOXEL_SCALE)/2 || Math.abs(s.mesh.position.z) > (GRID_SIZE * VOXEL_SCALE)/2;
+
+                if (s.mesh.position.y <= groundY || isOutOfBounds || Date.now() - s.birth > 4000) {
+                    // Explode!
+                    if (!isOutOfBounds && s.mesh.position.y <= groundY + 2.0) {
+                        const hitPos = s.mesh.position.clone();
+                        hitPos.y = groundY; // crater at terrain level
+                        spawnExplosion(hitPos);
+                        // Dual contouring displacement
+                        applyExplosion(hitPos, 4.0);
+                    }
+
+                    scene.remove(s.mesh);
+                    s.mesh.geometry.dispose();
+                    s.mesh.material.dispose();
+                    shells.splice(i, 1);
+                }
+            }
+
+            // Update particle physics
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.vel.y -= 15 * dt; // fast dispersion gravity
+                p.mesh.position.addScaledVector(p.vel, dt);
+                p.life -= dt * 1.5;
+                p.mesh.material.opacity = p.life;
+
+                if (p.life <= 0) {
+                    particleGroup.remove(p.mesh);
+                    p.mesh.geometry.dispose();
+                    p.mesh.material.dispose();
+                    particles.splice(i, 1);
+                }
+            }
+
+            // --- CAMERA WORK ---
+            if (currentCamView === "FOLLOW") {
+                // Smooth Follow Cam Behind turret
+                const camDistance = 14;
+                const camHeight = 5;
+                const camOffset = new THREE.Vector3(0, camHeight, -camDistance).applyAxisAngle(new THREE.Vector3(0, 1, 0), tankState.yaw);
+                const targetCamPos = tankState.pos.clone().add(camOffset);
+
+                camera.position.lerp(targetCamPos, 8.0 * dt);
+                camera.lookAt(tankState.pos.clone().add(new THREE.Vector3(0, 1.5, 0)));
+            } else {
+                // Rotational high altitude orbit tracking view
+                const r = 50;
+                const timeAngle = now * 0.0001;
+                camera.position.set(Math.cos(timeAngle) * r, 25, Math.sin(timeAngle) * r);
+                camera.lookAt(tankState.pos);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- 10. SCREEN RESIZE MANAGEMENT ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Initialize Loop
+        animate();
+    </script>
+</body>
+</html>
