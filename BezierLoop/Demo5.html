@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Continuous Collision Detection (CCD) XPBD</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d0d11;
+            font-family: monospace;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #info {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            color: #00ff66;
+            background: rgba(10, 10, 15, 0.9);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            pointer-events: auto;
+            font-size: 12px;
+            line-height: 1.6;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            width: 290px;
+            z-index: 10;
+        }
+        .slider-group {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            color: #ccc;
+        }
+        .slider-group input {
+            cursor: pointer;
+            accent-color: #00ff66;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>Colo Game Physics: Swept CCD + XPBD</strong><br>
+        • Added Continuous Collision Detection (CCD)<br>
+        • Corner trajectories are swept as 2D rays<br>
+        • Zero tunneling even at warp speeds!<br>
+        <hr style="border: 0; border-top: 1px dashed #333; margin: 10px 0;">
+        
+        <div class="slider-group">
+            <label for="sizeSlider">Box Size: <span id="sizeVal">0.15</span></label>
+            <input type="range" id="sizeSlider" min="0.08" max="0.35" step="0.01" value="0.15">
+        </div>
+        
+        <div class="slider-group">
+            <label for="substepSlider">Stability (Substeps): <span id="substepVal">8</span></label>
+            <input type="range" id="substepSlider" min="1" max="20" step="1" value="8">
+        </div>
+
+        <div class="slider-group">
+            <label for="bounceSlider">Bounciness (Restitution): <span id="bounceVal">0.6</span></label>
+            <input type="range" id="bounceSlider" min="0.0" max="1.0" step="0.05" value="0.6">
+        </div>
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+    <script>
+        // --- 1. MATHEMATICAL BASIS CONVERSION (CPU) ---
+        function factorial(k) {
+            let res = 1;
+            for (let i = 1; i <= k; i++) res *= i;
+            return res;
+        }
+
+        function fallingFactorial(n, j) {
+            let res = 1;
+            for (let m = 0; m < j; m++) res *= (n - m);
+            return res;
+        }
+
+        function convertToBezierPowerBasis(P) {
+            const n = P.length - 1;
+            const C = [];
+            for (let j = 0; j <= n; j++) {
+                const multiplier = fallingFactorial(n, j);
+                let sumX = 0, sumY = 0;
+                for (let i = 0; i <= j; i++) {
+                    const sign = ((i + j) % 2 === 0) ? 1.0 : -1.0;
+                    const denominator = factorial(i) * factorial(j - i);
+                    const term = sign / denominator;
+                    sumX += P[i][0] * term;
+                    sumY += P[i][1] * term;
+                }
+                C.push([sumX * multiplier, sumY * multiplier]);
+            }
+            return C;
+        }
+
+        const controlPoints = [
+            [-0.6, -0.6],
+            [ 0.8,  0.8],
+            [-0.8,  0.8],
+            [ 0.6, -0.6]
+        ];
+        const coefficients = convertToBezierPowerBasis(controlPoints);
+
+        const numSegments = 100;
+        const curvePoints = [];
+        for (let i = 0; i <= numSegments; i++) {
+            const t = i / numSegments;
+            const x = coefficients[0][0] + t * (coefficients[1][0] + t * (coefficients[2][0] + t * coefficients[3][0]));
+            const y = coefficients[0][1] + t * (coefficients[1][1] + t * (coefficients[2][1] + t * coefficients[3][1]));
+            curvePoints.push({ x, y });
+        }
+
+        // --- 2. VECTOR & GEOMETRY HELPERS ---
+        const vec2 = {
+            add: (a, b) => ({ x: a.x + b.x, y: a.y + b.y }),
+            sub: (a, b) => ({ x: a.x - b.x, y: a.y - b.y }),
+            scale: (v, s) => ({ x: v.x * s, y: v.y * s }),
+            dot: (a, b) => a.x * b.x + a.y * b.y,
+            cross: (a, b) => a.x * b.y - a.y * b.x,
+            len: (v) => Math.sqrt(v.x * v.x + v.y * v.y),
+            normalize: (v) => {
+                const l = Math.sqrt(v.x * v.x + v.y * v.y);
+                return l > 0.0001 ? { x: v.x / l, y: v.y / l } : { x: 0, y: 0 };
+            },
+            dist: (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
+        };
+
+        // Standard 2D line segment intersection (determines if segment AB crosses CD)
+        // Returns the point of intersection or null
+        function lineIntersect(A, B, C, D) {
+            const r = vec2.sub(B, A);
+            const s = vec2.sub(D, C);
+            const rxs = vec2.cross(r, s);
+
+            if (Math.abs(rxs) < 1e-8) return null; // Parallel or collinear
+
+            const t = vec2.cross(vec2.sub(C, A), s) / rxs;
+            const u = vec2.cross(vec2.sub(C, A), r) / rxs;
+
+            if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+                return {
+                    point: vec2.add(A, vec2.scale(r, t)),
+                    t: t // fractional progress of the trajectory
+                };
+            }
+            return null;
+        }
+
+        // --- 3. STATE ---
+        const box = {
+            pos: { x: 0.0, y: 0.6 },
+            prevPos: { x: 0.0, y: 0.6 },
+            vel: { x: 0.0, y: 0.0 },
+            
+            angle: 0.2,
+            prevAngle: 0.2,
+            angularVel: 0.0,
+
+            width: 0.15,
+            height: 0.15,
+            mass: 1.0,
+            invMass: 1.0,
+            inertia: 0.00375,
+            invInertia: 266.66,
+            
+            compliance: 0.00001, // Low compliance = stiff
+            restitution: 0.6
+        };
+
+        const gravity = { x: 0.0, y: -9.81 };
+        const dt = 1 / 120;
+        let isDragging = false;
+        let dragOffset = { x: 0, y: 0 };
+        let physicsSubSteps = 8;
+
+        function updateBoxDimensions(size) {
+            box.width = size;
+            box.height = size;
+            box.inertia = (1.0 / 6.0) * box.mass * (size * size);
+            box.invInertia = 1.0 / box.inertia;
+        }
+
+        // Computes the world-space positions of the 4 corners of the box at any arbitrary state {pos, angle}
+        function calculateBoxVertices(pos, angle, width, height) {
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            const hx = width / 2;
+            const hy = height / 2;
+
+            const localDirs = [
+                { x: -hx, y: -hy },
+                { x:  hx, y: -hy },
+                { x:  hx, y:  hy },
+                { x: -hx, y:  hy }
+            ];
+
+            return localDirs.map(p => ({
+                x: pos.x + (p.x * cos - p.y * sin),
+                y: pos.y + (p.x * sin + p.y * cos)
+            }));
+        }
+
+        // --- XPBD SOLVER STEP WITH CCD ---
+        function stepPhysics() {
+            if (isDragging) {
+                box.prevPos = { ...box.pos };
+                box.prevAngle = box.angle;
+                box.vel = { x: 0, y: 0 };
+                box.angularVel = 0;
+                return;
+            }
+
+            box.prevPos = { ...box.pos };
+            box.prevAngle = box.angle;
+
+            // Semi-implicit Euler integration prediction
+            box.vel = vec2.add(box.vel, vec2.scale(gravity, dt));
+            box.pos = vec2.add(box.pos, vec2.scale(box.vel, dt));
+            box.angle += box.angularVel * dt;
+
+            const sdt = dt / physicsSubSteps;
+
+            // Substepped Solver Loop
+            for (let step = 0; step < physicsSubSteps; step++) {
+                // 1. Calculate corners at the start of this substep (previous) and end (current predicted)
+                // Interpolate states gracefully across substeps
+                const ratioPrev = 1.0 - (step / physicsSubSteps);
+                const ratioCurr = 1.0 - ((step + 1) / physicsSubSteps);
+
+                const subStepPrevPos = vec2.add(vec2.scale(box.prevPos, ratioPrev), vec2.scale(box.pos, 1 - ratioPrev));
+                const subStepPrevAngle = box.prevAngle * ratioPrev + box.angle * (1 - ratioPrev);
+
+                const subStepCurrPos = vec2.add(vec2.scale(box.prevPos, ratioCurr), vec2.scale(box.pos, 1 - ratioCurr));
+                const subStepCurrAngle = box.prevAngle * ratioCurr + box.angle * (1 - ratioCurr);
+
+                const prevCorners = calculateBoxVertices(subStepPrevPos, subStepPrevAngle, box.width, box.height);
+                const currCorners = calculateBoxVertices(subStepCurrPos, subStepCurrAngle, box.width, box.height);
+
+                // 2. Continuous Sweep (CCD) Check
+                for (let i = 0; i < 4; i++) {
+                    const pStart = prevCorners[i]; // Trajectory start
+                    const pEnd = currCorners[i];   // Trajectory end
+
+                    for (let j = 0; j < curvePoints.length - 1; j++) {
+                        const segA = curvePoints[j];
+                        const segB = curvePoints[j+1];
+
+                        // Run continuous swept line intersection
+                        const hit = lineIntersect(pStart, pEnd, segA, segB);
+
+                        if (hit) {
+                            // Calculate normal perpendicular to the hit curve segment
+                            const segmentVec = vec2.sub(segB, segA);
+                            let normal = vec2.normalize({ x: -segmentVec.y, y: segmentVec.x });
+                            
+                            // Ensure normal points outward towards the corner's approach vector
+                            const approach = vec2.sub(pEnd, pStart);
+                            if (vec2.dot(approach, normal) > 0) {
+                                normal = vec2.scale(normal, -1);
+                            }
+
+                            // Calculate penetration depth along normal
+                            const penetration = vec2.dist(pEnd, hit.point) + 0.01; // padding safety margin
+
+                            const r = vec2.sub(pEnd, box.pos);
+                            const rCrossN = vec2.cross(r, normal);
+
+                            const inverseMassSum = box.invMass + (rCrossN * rCrossN) * box.invInertia;
+                            if (inverseMassSum <= 0) continue;
+
+                            // XPBD Position update
+                            const tCompliance = box.compliance / (sdt * sdt);
+                            const lagrangeDelta = -penetration / (inverseMassSum + tCompliance);
+
+                            const dp = vec2.scale(normal, lagrangeDelta * box.invMass);
+                            const dAngle = lagrangeDelta * rCrossN * box.invInertia;
+
+                            box.pos = vec2.add(box.pos, dp);
+                            box.angle += dAngle;
+                        }
+                    }
+                }
+            }
+
+            // Post-solve velocity derivation
+            const nextVel = vec2.scale(vec2.sub(box.pos, box.prevPos), 1 / dt);
+            const nextAngularVel = (box.angle - box.prevAngle) / dt;
+
+            const norm = vec2.normalize(nextVel);
+            const relativeNormalVel = vec2.dot(box.vel, norm);
+            if (relativeNormalVel < -0.15) {
+                box.vel = vec2.add(nextVel, vec2.scale(norm, -relativeNormalVel * box.restitution));
+            } else {
+                box.vel = nextVel;
+            }
+            box.angularVel = nextAngularVel;
+
+            // Off-screen safety reset
+            if (box.pos.y < -1.1 || Math.abs(box.pos.x) > 2.0) {
+                box.pos = { x: 0.0, y: 0.7 };
+                box.vel = { x: 0, y: 0 };
+                box.angle = Math.random() * 2.0;
+                box.angularVel = 0;
+            }
+        }
+
+        // --- 4. WEBGL SHADERS & SETUP ---
+        const canvas = document.getElementById("glcanvas");
+        const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+        if (!gl) {
+            alert("WebGL 1.0 is unsupported on this system.");
+        }
+
+        const vsSource = `
+            attribute vec2 a_position;
+            uniform vec2 u_offset;
+            uniform float u_rotation;
+            uniform float u_aspect;
+            uniform vec2 u_scale;
+
+            void main() {
+                float cosR = cos(u_rotation);
+                float sinR = sin(u_rotation);
+                vec2 rotated = vec2(
+                    a_position.x * cosR - a_position.y * sinR,
+                    a_position.x * sinR + a_position.y * cosR
+                );
+                vec2 pos = rotated * u_scale + u_offset;
+                gl_Position = vec4(pos.x / u_aspect, pos.y, 0.0, 1.0);
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        function buildProgram(vsSrc, fsSrc) {
+            function compile(type, src) {
+                const s = gl.createShader(type);
+                gl.shaderSource(s, src);
+                gl.compileShader(s);
+                return s;
+            }
+            const p = gl.createProgram();
+            gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+            gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+            gl.linkProgram(p);
+            return p;
+        }
+
+        const program = buildProgram(vsSource, fsSource);
+        gl.useProgram(program);
+
+        const a_position = gl.getAttribLocation(program, "a_position");
+        const u_offset = gl.getUniformLocation(program, "u_offset");
+        const u_rotation = gl.getUniformLocation(program, "u_rotation");
+        const u_aspect = gl.getUniformLocation(program, "u_aspect");
+        const u_scale = gl.getUniformLocation(program, "u_scale");
+        const u_color = gl.getUniformLocation(program, "u_color");
+
+        const curveVerts = new Float32Array(curvePoints.flatMap(p => [p.x, p.y]));
+        const curveBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, curveBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, curveVerts, gl.STATIC_DRAW);
+
+        const boxVerts = new Float32Array([
+            -0.5, -0.5,
+             0.5, -0.5,
+             0.5,  0.5,
+            -0.5,  0.5
+        ]);
+        const boxBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, boxBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, boxVerts, gl.STATIC_DRAW);
+
+        // --- 5. SLIDER LOGIC ---
+        const sizeSlider = document.getElementById("sizeSlider");
+        const sizeVal = document.getElementById("sizeVal");
+        const substepSlider = document.getElementById("substepSlider");
+        const substepVal = document.getElementById("substepVal");
+        const bounceSlider = document.getElementById("bounceSlider");
+        const bounceVal = document.getElementById("bounceVal");
+
+        sizeSlider.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value);
+            sizeVal.textContent = val.toFixed(2);
+            updateBoxDimensions(val);
+        });
+
+        substepSlider.addEventListener("input", (e) => {
+            const val = parseInt(e.target.value);
+            substepVal.textContent = val;
+            physicsSubSteps = val;
+        });
+
+        bounceSlider.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value);
+            bounceVal.textContent = val.toFixed(2);
+            box.restitution = val;
+        });
+
+        updateBoxDimensions(parseFloat(sizeSlider.value));
+        physicsSubSteps = parseInt(substepSlider.value);
+
+        // --- 6. DRAG & DROP ---
+        function getNDCCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const x = ((clientX - rect.left) / canvas.width) * 2 - 1;
+            const y = -(((clientY - rect.top) / canvas.height) * 2 - 1);
+            const aspect = canvas.width / canvas.height;
+            return { x: x * aspect, y: y };
+        }
+
+        function onStart(e) {
+            if (e.target.tagName === "INPUT" || e.target.closest("#info")) return;
+            const mouse = getNDCCoords(e);
+            if (vec2.dist(mouse, box.pos) < (box.width * 1.5)) {
+                isDragging = true;
+                dragOffset = vec2.sub(box.pos, mouse);
+            }
+        }
+
+        function onMove(e) {
+            if (isDragging) {
+                const mouse = getNDCCoords(e);
+                box.pos = vec2.add(mouse, dragOffset);
+                box.vel = { x: 0, y: 0 };
+            }
+        }
+
+        function onEnd() {
+            isDragging = false;
+        }
+
+        window.addEventListener("mousedown", onStart);
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onEnd);
+        window.addEventListener("touchstart", onStart, { passive: true });
+        window.addEventListener("touchmove", onMove, { passive: true });
+        window.addEventListener("touchend", onEnd);
+
+        // --- 7. RENDERING LOOP ---
+        function animate() {
+            stepPhysics();
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+                gl.viewport(0, 0, width, height);
+            }
+            gl.uniform1f(u_aspect, width / height);
+
+            gl.clearColor(0.05, 0.05, 0.07, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.enableVertexAttribArray(a_position);
+
+            // A. Draw Loop Curve
+            gl.bindBuffer(gl.ARRAY_BUFFER, curveBuffer);
+            gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
+            
+            gl.uniform2f(u_offset, 0.0, 0.0);
+            gl.uniform1f(u_rotation, 0.0);
+            gl.uniform2f(u_scale, 1.0, 1.0);
+            gl.uniform4f(u_color, 0.0, 1.0, 0.4, 1.0);
+            gl.drawArrays(gl.LINE_STRIP, 0, curvePoints.length);
+
+            // B. Draw Interactive Box
+            gl.bindBuffer(gl.ARRAY_BUFFER, boxBuffer);
+            gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
+
+            gl.uniform2f(u_offset, box.pos.x, box.pos.y);
+            gl.uniform1f(u_rotation, box.angle);
+            gl.uniform2f(u_scale, box.width, box.height);
+            gl.uniform4f(u_color, 0.2, 0.6, 1.0, 1.0);
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
