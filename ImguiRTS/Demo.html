@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL RTS & Real-Time ImGui Node Editor</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            background-color: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            color: #e0e0e0;
+        }
+        #container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Game Screen Panel */
+        #game-panel {
+            flex: 1;
+            position: relative;
+            height: 100%;
+            border-right: 2px solid #2d2d2d;
+            background: #0d0d0d;
+        }
+        canvas#webgl-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        /* ImGui / Node UI Panel */
+        #editor-panel {
+            width: 480px;
+            height: 100%;
+            background-color: #1e1e1e;
+            display: flex;
+            flex-direction: column;
+            box-shadow: -5px 0 15px rgba(0,0,0,0.5);
+            position: relative;
+            z-index: 10;
+        }
+        .panel-header {
+            background-color: #2d2d2d;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 2px solid #3d3d3d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-title {
+            color: #00ffcc;
+            text-shadow: 0 0 5px rgba(0,255,204,0.3);
+        }
+        #node-canvas-container {
+            flex: 1;
+            position: relative;
+            background-color: #151515;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+            overflow: hidden;
+        }
+        canvas#node-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        /* Overlays & In-Game UI Controls */
+        .game-overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .glass-panel {
+            background: rgba(25, 25, 25, 0.85);
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            padding: 12px 18px;
+            border-radius: 6px;
+            backdrop-filter: blur(5px);
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .resource-text {
+            font-size: 18px;
+            font-weight: bold;
+            color: #00ffcc;
+            font-family: monospace;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .instruction-box {
+            font-size: 12px;
+            color: #aaaaaa;
+            line-height: 1.4;
+        }
+        .instruction-box b {
+            color: #fff;
+        }
+        /* Build Menu Overlay */
+        .build-menu {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 5;
+        }
+        .build-btn {
+            background: rgba(30, 30, 30, 0.9);
+            border: 2px solid #3d3d3d;
+            color: #fff;
+            padding: 10px 16px;
+            font-size: 13px;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .build-btn:hover {
+            border-color: #00ffcc;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+            background: #252525;
+        }
+        .build-btn.active {
+            border-color: #00ffcc;
+            background: rgba(0, 255, 204, 0.15);
+            color: #00ffcc;
+        }
+        .build-btn span.cost {
+            font-size: 10px;
+            color: #ffaa00;
+        }
+        .node-tooltip {
+            position: absolute;
+            background: rgba(10, 10, 10, 0.95);
+            border: 1px solid #444;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            pointer-events: none;
+            display: none;
+            z-index: 100;
+            max-width: 200px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <!-- Game Screen -->
+        <div id="game-panel">
+            <canvas id="webgl-canvas"></canvas>
+
+            <div class="game-overlay">
+                <div class="glass-panel">
+                    <div class="resource-text">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="#ffaa00"><path d="M12 2L2 22h20L12 2zm0 3.99L19.53 19H4.47L12 5.99zM11 16h2v2h-2zm0-6h2v4h-2z"/></svg>
+                        Ore Treasury: <span id="ore-count">150</span>
+                    </div>
+                </div>
+                <div class="glass-panel instruction-box">
+                    <b>Controls:</b><br>
+                    • <b>Left Click:</b> Select/Place Buildings<br>
+                    • <b>Right Click:</b> Move Soldiers / Direct Patrols<br>
+                    • <b>Drag Right Mouse:</b> Orbit Camera view
+                </div>
+            </div>
+
+            <!-- RTS Building Selection Buttons -->
+            <div class="build-menu">
+                <button class="build-btn" id="build-refinery-btn" onclick="setBuildMode('refinery')">
+                    Build Refinery
+                    <span class="cost" id="refinery-cost-lbl">100 Ore</span>
+                </button>
+                <button class="build-btn" id="build-barracks-btn" onclick="setBuildMode('barracks')">
+                    Build Barracks
+                    <span class="cost" id="barracks-cost-lbl">150 Ore</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Real-Time ImGui and Node Customizer Panel -->
+        <div id="editor-panel">
+            <div class="panel-header">
+                <span class="header-title">ImGui Node Graph System</span>
+                <span style="font-size: 11px; color: #888;">Live Dynamic Tuner</span>
+            </div>
+            <div id="node-canvas-container">
+                <canvas id="node-canvas"></canvas>
+                <div class="node-tooltip" id="node-tip"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebGL Shaders & Engine Framework -->
+    <script>
+        // Shader Programs
+        const vsSource = `
+            attribute vec4 aVertexPosition;
+            attribute vec4 aVertexColor;
+            attribute vec3 aVertexNormal;
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+            uniform mat4 uNormalMatrix;
+            varying lowp vec4 vColor;
+            varying highp vec3 vLighting;
+            void main(void) {
+                gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+                vColor = aVertexColor;
+                
+                // Diffuse directional lighting
+                highp vec3 ambientLight = vec3(0.3, 0.3, 0.4);
+                highp vec3 directionalLightColor = vec3(0.9, 0.85, 0.8);
+                highp vec3 directionalVector = normalize(vec3(0.85, 1.0, 0.4));
+                highp vec4 transformedNormal = uNormalMatrix * vec4(aVertexNormal, 1.0);
+                highp float directional = max(dot(transformedNormal.xyz, directionalVector), 0.0);
+                vLighting = ambientLight + (directionalLightColor * directional);
+            }
+        `;
+
+        const fsSource = `
+            varying lowp vec4 vColor;
+            varying highp vec3 vLighting;
+            void main(void) {
+                gl_FragColor = vec4(vColor.rgb * vLighting, vColor.a);
+            }
+        `;
+
+        // Interactive dynamic tuning coefficients controlled by the Node Graph editor
+        const GameTuning = {
+            oreSpawnRate: 3000,   // milliseconds
+            truckSpeed: 1.5,      // world units/sec
+            truckCapacity: 25,    // Ore units
+            soldierSpeed: 2.2,    // world units/sec
+            soldierCost: 50,      // Ore units
+            oreValue: 10          // Gold per cargo unit
+        };
+
+        // Internal Game State Core Engine
+        const GameState = {
+            oreCount: 200,
+            buildings: [],
+            units: [],
+            ores: [],
+            selectedBuild: null,
+            cameraRot: { x: 0.8, y: -0.4 },
+            cameraPos: { x: 0, y: 0, z: -25 }
+        };
+
+        // Initialize WebGL
+        const canvas = document.getElementById('webgl-canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+
+        if (!gl) {
+            alert('Unable to initialize WebGL. Your browser may not support it.');
+        }
+
+        // Set up custom geometry generation (Prisms, Cubes, Cylinders)
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                return null;
+            }
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+        const programInfo = {
+            program: shaderProgram,
+            attribLocations: {
+                vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+                vertexColor: gl.getAttribLocation(shaderProgram, 'aVertexColor'),
+                vertexNormal: gl.getAttribLocation(shaderProgram, 'aVertexNormal'),
+            },
+            uniformLocations: {
+                projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                normalMatrix: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'),
+            },
+        };
+
+        // Primitive Buffer Helpers (Custom 3D meshes styled with solid low-poly colors)
+        function makeCube(width, height, depth, color) {
+            const w = width/2, h = height/2, d = depth/2;
+            const positions = [
+                -w, -h,  d,   w, -h,  d,   w,  h,  d,  -w,  h,  d,
+                -w, -h, -d,  -w,  h, -d,   w,  h, -d,   w, -h, -d,
+                -w,  h, -d,  -w,  h,  d,   w,  h,  d,   w,  h, -d,
+                -w, -h, -d,   w, -h, -d,   w, -h,  d,  -w, -h,  d,
+                 w, -h, -d,   w,  h, -d,   w,  h,  d,   w, -h,  d,
+                -w, -h, -d,  -w, -h,  d,  -w,  h,  d,  -w,  h, -d,
+            ];
+            const faceColors = [color, color, color, color, color, color];
+            let colors = [];
+            for (let j = 0; j < faceColors.length; ++j) {
+                const c = faceColors[j];
+                colors = colors.concat(c, c, c, c);
+            }
+            const normals = [
+                 0.0,  0.0,  1.0,   0.0,  0.0,  1.0,   0.0,  0.0,  1.0,   0.0,  0.0,  1.0,
+                 0.0,  0.0, -1.0,   0.0,  0.0, -1.0,   0.0,  0.0, -1.0,   0.0,  0.0, -1.0,
+                 0.0,  1.0,  0.0,   0.0,  1.0,  0.0,   0.0,  1.0,  0.0,   0.0,  1.0,  0.0,
+                 0.0, -1.0,  0.0,   0.0, -1.0,  0.0,   0.0, -1.0,  0.0,   0.0, -1.0,  0.0,
+                 1.0,  0.0,  0.0,   1.0,  0.0,  0.0,   1.0,  0.0,  0.0,   1.0,  0.0,  0.0,
+                -1.0,  0.0,  0.0,  -1.0,  0.0,  0.0,  -1.0,  0.0,  0.0,  -1.0,  0.0,  0.0,
+            ];
+            const indices = [
+                0,  1,  2,      0,  2,  3,
+                4,  5,  6,      4,  6,  7,
+                8,  9,  10,     8,  10, 11,
+                12, 13, 14,     12, 14, 15,
+                16, 17, 18,     16, 18, 19,
+                20, 21, 22,     20, 22, 23,
+            ];
+            return { positions, colors, normals, indices };
+        }
+
+        // Setup matrix math helpers
+        function getOrthoMatrix(left, right, bottom, top, near, far) {
+            const out = new Float32Array(16);
+            const lr = 1 / (left - right);
+            const bt = 1 / (bottom - top);
+            const nf = 1 / (near - far);
+            out[0] = -2 * lr; out[5] = -2 * bt; out[10] = 2 * nf;
+            out[12] = (left + right) * lr; out[13] = (top + bottom) * bt; out[14] = (far + near) * nf;
+            out[15] = 1;
+            return out;
+        }
+
+        function getPerspectiveMatrix(fovy, aspect, near, far) {
+            const f = 1.0 / Math.tan(fovy / 2);
+            const nf = 1 / (near - far);
+            const out = new Float32Array(16);
+            out[0] = f / aspect;
+            out[5] = f;
+            out[10] = (far + near) * nf;
+            out[11] = -1;
+            out[14] = (2 * far * near) * nf;
+            return out;
+        }
+
+        function multiplyMatrices(a, b) {
+            const out = new Float32Array(16);
+            for (let i = 0; i < 4; i++) {
+                for (let j = 0; j < 4; j++) {
+                    let sum = 0;
+                    for (let k = 0; k < 4; k++) {
+                        sum += a[i * 4 + k] * b[k * 4 + j];
+                    }
+                    out[i * 4 + j] = sum;
+                }
+            }
+            return out;
+        }
+
+        function makeTranslation(x, y, z) {
+            const out = new Float32Array(16);
+            out[0] = 1; out[5] = 1; out[10] = 1; out[15] = 1;
+            out[12] = x; out[13] = y; out[14] = z;
+            return out;
+        }
+
+        function makeRotationX(r) {
+            const out = new Float32Array(16);
+            const c = Math.cos(r), s = Math.sin(r);
+            out[0] = 1; out[5] = c; out[6] = s; out[9] = -s; out[10] = c; out[15] = 1;
+            return out;
+        }
+
+        function makeRotationY(r) {
+            const out = new Float32Array(16);
+            const c = Math.cos(r), s = Math.sin(r);
+            out[0] = c; out[2] = -s; out[5] = 1; out[8] = s; out[10] = c; out[15] = 1;
+            return out;
+        }
+
+        // WebGL Mesh Buffer generator
+        function buildGLBuffers(gl, mesh) {
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.positions), gl.STATIC_DRAW);
+
+            const colorBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.colors), gl.STATIC_DRAW);
+
+            const normalBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.normals), gl.STATIC_DRAW);
+
+            const indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(mesh.indices), gl.STATIC_DRAW);
+
+            return {
+                position: positionBuffer,
+                color: colorBuffer,
+                normal: normalBuffer,
+                index: indexBuffer,
+                count: mesh.indices.length
+            };
+        }
+
+        // Precompiled Meshes
+        const Meshes = {
+            ground: buildGLBuffers(gl, makeCube(40, 0.2, 40, [0.15, 0.16, 0.18, 1.0])),
+            ore: buildGLBuffers(gl, makeCube(0.4, 0.7, 0.4, [0.0, 0.9, 0.8, 1.0])),
+            refinery: buildGLBuffers(gl, makeCube(3.0, 1.5, 2.0, [0.85, 0.45, 0.1, 1.0])),
+            barracks: buildGLBuffers(gl, makeCube(2.2, 1.8, 2.2, [0.25, 0.42, 0.2, 1.0])),
+            truck: buildGLBuffers(gl, makeCube(0.8, 0.5, 1.2, [0.9, 0.75, 0.1, 1.0])),
+            soldier: buildGLBuffers(gl, makeCube(0.4, 1.0, 0.4, [0.1, 0.4, 0.9, 1.0]))
+        };
+    </script>
+
+    <!-- UI - Interactive Node Graph Script -->
+    <script>
+        const nodeCanvas = document.getElementById('node-canvas');
+        const nCtx = nodeCanvas.getContext('2d');
+        const tooltip = document.getElementById('node-tip');
+
+        // Node Editor State
+        let nodes = [];
+        let connections = [];
+        let draggingNode = null;
+        let activeLinkOrigin = null;
+        let panOffset = { x: 0, y: 0 };
+        let isPanning = false;
+        let dragStart = { x: 0, y: 0 };
+
+        // Real ImGui Style Settings
+        const ImGuiStyle = {
+            windowBg: '#1e1e1e',
+            headerBg: '#2d2d2d',
+            nodeBg: '#2a2a2a',
+            nodeHeaderBg: '#3c3f41',
+            text: '#e0e0e0',
+            textMuted: '#888888',
+            accent: '#00ffcc',
+            accentActive: '#00ccaa',
+            border: '#4a4a4a',
+            gridColor: 'rgba(255,255,255,0.04)',
+            nodeWidth: 160,
+            nodeHeaderHeight: 28,
+            socketRadius: 5
+        };
+
+        // Node definitions setup
+        class Node {
+            constructor(id, title, x, y, inputs = [], outputs = [], category = 'general') {
+                this.id = id;
+                this.title = title;
+                this.x = x;
+                this.y = y;
+                this.width = ImGuiStyle.nodeWidth;
+                this.height = 40 + (Math.max(inputs.length, outputs.length) * 20);
+                this.inputs = inputs;   // array of structures: { name: 'speed', val: 1.0, type: 'float' }
+                this.outputs = outputs; // array of structures: { name: 'out', type: 'float' }
+                this.category = category;
+            }
+
+            draw(ctx) {
+                // Background Shadow
+                ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 4;
+
+                // Node Container Frame
+                ctx.fillStyle = ImGuiStyle.nodeBg;
+                ctx.beginPath();
+                ctx.roundRect(this.x, this.y, this.width, this.height, 6);
+                ctx.fill();
+
+                // Reset Shadows
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+
+                // Header
+                let headerColor = ImGuiStyle.nodeHeaderBg;
+                if (this.category === 'economy') headerColor = '#503515';
+                else if (this.category === 'tactical') headerColor = '#1e3820';
+                else if (this.category === 'global') headerColor = '#251c4a';
+
+                ctx.fillStyle = headerColor;
+                ctx.beginPath();
+                ctx.roundRect(this.x, this.y, this.width, ImGuiStyle.nodeHeaderHeight, [6, 6, 0, 0]);
+                ctx.fill();
+
+                // Header Text
+                ctx.fillStyle = ImGuiStyle.text;
+                ctx.font = 'bold 11px monospace';
+                ctx.fillText(this.title.toUpperCase(), this.x + 10, this.y + 18);
+
+                // Draw Sockets & Labels
+                ctx.font = '10px monospace';
+                
+                // Draw Inputs
+                this.inputs.forEach((input, index) => {
+                    const py = this.y + ImGuiStyle.nodeHeaderHeight + 20 + (index * 20);
+                    // Socket
+                    ctx.fillStyle = ImGuiStyle.accent;
+                    ctx.beginPath();
+                    ctx.arc(this.x, py, ImGuiStyle.socketRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Border
+                    ctx.strokeStyle = ImGuiStyle.border;
+                    ctx.stroke();
+
+                    // Label & Interactive Slider/Field inside Node UI
+                    ctx.fillStyle = ImGuiStyle.textMuted;
+                    ctx.fillText(input.name, this.x + 10, py + 3);
+                    
+                    // Display current interactive value
+                    ctx.fillStyle = '#ffaa00';
+                    ctx.fillText(input.val.toFixed(1), this.x + 100, py + 3);
+                });
+
+                // Draw Outputs
+                this.outputs.forEach((output, index) => {
+                    const py = this.y + ImGuiStyle.nodeHeaderHeight + 20 + (index * 20);
+                    // Socket
+                    ctx.fillStyle = '#00ffcc';
+                    ctx.beginPath();
+                    ctx.arc(this.x + this.width, py, ImGuiStyle.socketRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Border
+                    ctx.strokeStyle = ImGuiStyle.border;
+                    ctx.stroke();
+
+                    // Label
+                    ctx.fillStyle = ImGuiStyle.text;
+                    const textWidth = ctx.measureText(output.name).width;
+                    ctx.fillText(output.name, this.x + this.width - 10 - textWidth, py + 3);
+                });
+            }
+
+            getSocketPos(type, index) {
+                const py = this.y + ImGuiStyle.nodeHeaderHeight + 20 + (index * 20);
+                if (type === 'input') {
+                    return { x: this.x, y: py };
+                } else {
+                    return { x: this.x + this.width, y: py };
+                }
+            }
+        }
+
+        // Initialize preset Node configurations
+        function initNodeGraph() {
+            nodes = [
+                new Node(1, 'Refinery Master', 30, 40, [], [
+                    { name: 'Gather Speed', key: 'truckSpeed', val: GameTuning.truckSpeed },
+                    { name: 'Capacity', key: 'truckCapacity', val: GameTuning.truckCapacity }
+                ], 'economy'),
+
+                new Node(2, 'Truck Control', 280, 50, [
+                    { name: 'Velocity', val: GameTuning.truckSpeed },
+                    { name: 'Max Cargo', val: GameTuning.truckCapacity }
+                ], [], 'economy'),
+
+                new Node(3, 'Barracks Spec', 30, 200, [], [
+                    { name: 'Infantry Spd', key: 'soldierSpeed', val: GameTuning.soldierSpeed },
+                    { name: 'Spawns Cost', key: 'soldierCost', val: GameTuning.soldierCost }
+                ], 'tactical'),
+
+                new Node(4, 'Soldier Config', 280, 220, [
+                    { name: 'Tactical Spd', val: GameTuning.soldierSpeed },
+                    { name: 'Spawn Cost', val: GameTuning.soldierCost }
+                ], [], 'tactical'),
+
+                new Node(5, 'Ore Ecosystem', 150, 400, [], [
+                    { name: 'Spawn Rate', key: 'oreSpawnRate', val: GameTuning.oreSpawnRate },
+                    { name: 'Yield Value', key: 'oreValue', val: GameTuning.oreValue }
+                ], 'global')
+            ];
+
+            // Setup default connections linking matching parameter nodes together
+            connections = [
+                { fromNode: 1, fromSocket: 0, toNode: 2, toSocket: 0 },
+                { fromNode: 1, fromSocket: 1, toNode: 2, toSocket: 1 },
+                { fromNode: 3, fromSocket: 0, toNode: 4, toSocket: 0 },
+                { fromNode: 3, fromSocket: 1, toNode: 4, toSocket: 1 }
+            ];
+        }
+
+        // Handle Realtime variable state updates when connections are changed/linked
+        function evaluateNodeVariables() {
+            connections.forEach(conn => {
+                const src = nodes.find(n => n.id === conn.fromNode);
+                const dest = nodes.find(n => n.id === conn.toNode);
+                if (src && dest) {
+                    const outSocket = src.outputs[conn.fromSocket];
+                    const inSocket = dest.inputs[conn.toSocket];
+                    
+                    // Propagate values through
+                    inSocket.val = outSocket.val;
+                    
+                    // Inject directly into game dynamic tuning settings loop
+                    if (outSocket.key) {
+                        GameTuning[outSocket.key] = outSocket.val;
+                    }
+                }
+            });
+
+            // Handle standalone nodes or adjustments
+            document.getElementById('refinery-cost-lbl').innerText = `100 Ore`;
+            document.getElementById('barracks-cost-lbl').innerText = `${Math.round(GameTuning.soldierCost * 2.5)} Ore`;
+        }
+
+        // Render Canvas Node Pipeline
+        function drawNodes() {
+            nCtx.clearRect(0, 0, nodeCanvas.width, nodeCanvas.height);
+
+            // Draw Connection Lines
+            connections.forEach(conn => {
+                const src = nodes.find(n => n.id === conn.fromNode);
+                const dest = nodes.find(n => n.id === conn.toNode);
+                if (src && dest) {
+                    const p1 = src.getSocketPos('output', conn.fromSocket);
+                    const p2 = dest.getSocketPos('input', conn.toSocket);
+
+                    nCtx.strokeStyle = ImGuiStyle.accent;
+                    nCtx.lineWidth = 2.5;
+                    nCtx.beginPath();
+                    nCtx.moveTo(p1.x, p1.y);
+                    // Draw nice cubic bezier line for visual elegance
+                    nCtx.bezierCurveTo(p1.x + 40, p1.y, p2.x - 40, p2.y, p2.x, p2.y);
+                    nCtx.stroke();
+                }
+            });
+
+            // Draw active connecting line (user drag)
+            if (activeLinkOrigin) {
+                const srcNode = nodes.find(n => n.id === activeLinkOrigin.nodeId);
+                if (srcNode) {
+                    const p1 = srcNode.getSocketPos(activeLinkOrigin.type, activeLinkOrigin.socketIndex);
+                    nCtx.strokeStyle = 'rgba(0, 255, 204, 0.5)';
+                    nCtx.lineWidth = 2;
+                    nCtx.beginPath();
+                    nCtx.moveTo(p1.x, p1.y);
+                    nCtx.lineTo(dragStart.x, dragStart.y);
+                    nCtx.stroke();
+                }
+            }
+
+            // Draw nodes on top
+            nodes.forEach(node => node.draw(nCtx));
+        }
+
+        // Setup resize handlers
+        function resizeNodeCanvas() {
+            const container = document.getElementById('node-canvas-container');
+            nodeCanvas.width = container.clientWidth;
+            nodeCanvas.height = container.clientHeight;
+            drawNodes();
+        }
+
+        window.addEventListener('resize', () => {
+            resizeNodeCanvas();
+        });
+
+        // Mouse Interactivity Event Rules
+        nodeCanvas.addEventListener('mousedown', (e) => {
+            const rect = nodeCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            // 1. Check socket clicks
+            for (let node of nodes) {
+                // Check inputs
+                for (let i = 0; i < node.inputs.length; i++) {
+                    const p = node.getSocketPos('input', i);
+                    const dist = Math.hypot(p.x - mx, p.y - my);
+                    if (dist < ImGuiStyle.socketRadius + 5) {
+                        activeLinkOrigin = { nodeId: node.id, type: 'input', socketIndex: i };
+                        dragStart = { x: mx, y: my };
+                        return;
+                    }
+                }
+                // Check outputs
+                for (let i = 0; i < node.outputs.length; i++) {
+                    const p = node.getSocketPos('output', i);
+                    const dist = Math.hypot(p.x - mx, p.y - my);
+                    if (dist < ImGuiStyle.socketRadius + 5) {
+                        activeLinkOrigin = { nodeId: node.id, type: 'output', socketIndex: i };
+                        dragStart = { x: mx, y: my };
+                        return;
+                    }
+                }
+            }
+
+            // 2. Check header or node interaction clicks
+            for (let i = nodes.length - 1; i >= 0; i--) {
+                const node = nodes[i];
+                if (mx >= node.x && mx <= node.x + node.width && my >= node.y && my <= node.y + node.height) {
+                    // Bring node to front of render array
+                    nodes.push(nodes.splice(i, 1)[0]);
+                    draggingNode = node;
+                    dragStart = { x: mx - node.x, y: my - node.y };
+
+                    // Double click interaction opens direct sliding scale adjustment
+                    if (my > node.y + ImGuiStyle.nodeHeaderHeight) {
+                        const socketIdx = Math.floor((my - (node.y + ImGuiStyle.nodeHeaderHeight + 10)) / 20);
+                        // Modify slider inputs directly
+                        if (node.outputs.length > 0 && socketIdx >= 0 && socketIdx < node.outputs.length) {
+                            const val = prompt(`Enter value for ${node.outputs[socketIdx].name}:`, node.outputs[socketIdx].val);
+                            if (val !== null && !isNaN(val)) {
+                                node.outputs[socketIdx].val = parseFloat(val);
+                                evaluateNodeVariables();
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+        });
+
+        nodeCanvas.addEventListener('mousemove', (e) => {
+            const rect = nodeCanvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            if (draggingNode) {
+                draggingNode.x = mx - dragStart.x;
+                draggingNode.y = my - dragStart.y;
+                drawNodes();
+            } else if (activeLinkOrigin) {
+                dragStart = { x: mx, y: my };
+                drawNodes();
+            } else {
+                // Sockets Hover tooltips
+                let foundHover = false;
+                for (let node of nodes) {
+                    for (let i = 0; i < node.outputs.length; i++) {
+                        const p = node.getSocketPos('output', i);
+                        if (Math.hypot(p.x - mx, p.y - my) < ImGuiStyle.socketRadius + 3) {
+                            tooltip.style.left = (e.clientX + 10) + 'px';
+                            tooltip.style.top = (e.clientY + 10) + 'px';
+                            tooltip.style.display = 'block';
+                            tooltip.innerHTML = `<strong>Output:</strong> ${node.outputs[i].name}<br><em>Double-click node area to manually tune parameters!</em>`;
+                            foundHover = true;
+                        }
+                    }
+                }
+                if (!foundHover) tooltip.style.display = 'none';
+            }
+        });
+
+        nodeCanvas.addEventListener('mouseup', (e) => {
+            if (activeLinkOrigin) {
+                const rect = nodeCanvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+
+                // Match up active link targeting sockets
+                for (let node of nodes) {
+                    if (node.id === activeLinkOrigin.nodeId) continue;
+                    
+                    // Match output to input
+                    if (activeLinkOrigin.type === 'output') {
+                        for (let i = 0; i < node.inputs.length; i++) {
+                            const p = node.getSocketPos('input', i);
+                            if (Math.hypot(p.x - mx, p.y - my) < 12) {
+                                // Add connection
+                                connections.push({
+                                    fromNode: activeLinkOrigin.nodeId,
+                                    fromSocket: activeLinkOrigin.socketIndex,
+                                    toNode: node.id,
+                                    toSocket: i
+                                });
+                            }
+                        }
+                    }
+                }
+                activeLinkOrigin = null;
+                evaluateNodeVariables();
+            }
+            draggingNode = null;
+            drawNodes();
+        });
+
+        // Initialize Node Editors
+        initNodeGraph();
+        setTimeout(resizeNodeCanvas, 100);
+    </script>
+
+    <!-- 3D WebGL RTS Loop Implementation -->
+    <script>
+        // Set up the scene state elements
+        const viewMatrix = new Float32Array(16);
+        let lastTime = 0;
+        let groundLevel = -0.2;
+
+        // Dynamic Spawns
+        function spawnOre() {
+            if (GameState.ores.length < 12) {
+                const radius = 14;
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 5 + Math.random() * radius;
+                GameState.ores.push({
+                    id: Date.now() + Math.random(),
+                    x: Math.cos(angle) * dist,
+                    z: Math.sin(angle) * dist,
+                    amount: 100
+                });
+            }
+            setTimeout(spawnOre, GameTuning.oreSpawnRate);
+        }
+
+        function setBuildMode(type) {
+            GameState.selectedBuild = type;
+            document.querySelectorAll('.build-btn').forEach(b => b.classList.remove('active'));
+            if (type) {
+                document.getElementById(`build-${type}-btn`).classList.add('active');
+            }
+        }
+
+        // Basic physics / logic step
+        function updateGameEntities(dt) {
+            // Update Ore Spawner Rate UI elements dynamically
+            document.getElementById('ore-count').innerText = Math.round(GameState.oreCount);
+
+            // Keep tracking Collector Ore Trucks moving
+            GameState.units.forEach(unit => {
+                if (unit.type === 'truck') {
+                    // Harvest state logic machine
+                    if (unit.cargo >= GameTuning.truckCapacity) {
+                        // Cargo is full, return back to refinery
+                        const refinery = GameState.buildings.find(b => b.type === 'refinery');
+                        if (refinery) {
+                            const dx = refinery.x - unit.x;
+                            const dz = refinery.z - unit.z;
+                            const dist = Math.hypot(dx, dz);
+                            if (dist < 1.5) {
+                                // Unload
+                                GameState.oreCount += unit.cargo * GameTuning.oreValue;
+                                unit.cargo = 0;
+                            } else {
+                                // Move towards refinery
+                                unit.x += (dx / dist) * GameTuning.truckSpeed * dt;
+                                unit.z += (dz / dist) * GameTuning.truckSpeed * dt;
+                            }
+                        }
+                    } else {
+                        // Cargo has space, seek closest ore cluster
+                        let nearestOre = null;
+                        let minDist = Infinity;
+                        GameState.ores.forEach(ore => {
+                            const dist = Math.hypot(ore.x - unit.x, ore.z - unit.z);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                nearestOre = ore;
+                            }
+                        });
+
+                        if (nearestOre) {
+                            if (minDist < 1.0) {
+                                // Harvest raw material
+                                unit.cargo += dt * 10;
+                                nearestOre.amount -= dt * 10;
+                                if (nearestOre.amount <= 0) {
+                                    GameState.ores = GameState.ores.filter(o => o.id !== nearestOre.id);
+                                }
+                            } else {
+                                // Seek towards nearest
+                                const dx = nearestOre.x - unit.x;
+                                const dz = nearestOre.z - unit.z;
+                                unit.x += (dx / minDist) * GameTuning.truckSpeed * dt;
+                                unit.z += (dz / minDist) * GameTuning.truckSpeed * dt;
+                            }
+                        } else {
+                            // Return home to wait
+                            const refinery = GameState.buildings.find(b => b.type === 'refinery');
+                            if (refinery) {
+                                const dx = refinery.x - unit.x;
+                                const dz = refinery.z - unit.z;
+                                const dist = Math.hypot(dx, dz);
+                                if (dist > 2.0) {
+                                    unit.x += (dx / dist) * GameTuning.truckSpeed * dt;
+                                    unit.z += (dz / dist) * GameTuning.truckSpeed * dt;
+                                }
+                            }
+                        }
+                    }
+                } else if (unit.type === 'soldier') {
+                    // Move towards strategic patrol point targets ordered by user clicks
+                    const dx = unit.tx - unit.x;
+                    const dz = unit.tz - unit.z;
+                    const dist = Math.hypot(dx, dz);
+                    if (dist > 0.2) {
+                        unit.x += (dx / dist) * GameTuning.soldierSpeed * dt;
+                        unit.z += (dz / dist) * GameTuning.soldierSpeed * dt;
+                    }
+                }
+            });
+
+            // Handle active barracks production loops
+            GameState.buildings.forEach(building => {
+                if (building.type === 'barracks') {
+                    building.progress += dt;
+                    if (building.progress >= 5.0) { // Spawns a soldier every 5 seconds
+                        building.progress = 0;
+                        // Spawn soldier nearby
+                        GameState.units.push({
+                            type: 'soldier',
+                            x: building.x + (Math.random() - 0.5) * 3,
+                            z: building.z + 2,
+                            tx: building.x + (Math.random() - 0.5) * 6,
+                            tz: building.z + 5
+                        });
+                    }
+                }
+            });
+        }
+
+        // Primary WebGL Draw Loop
+        function renderScene(time) {
+            time *= 0.001; // convert to seconds
+            const dt = lastTime ? time - lastTime : 0;
+            lastTime = time;
+
+            updateGameEntities(dt);
+
+            // Resize canvas context size inside UI pane layout
+            if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+                canvas.width = canvas.clientWidth;
+                canvas.height = canvas.clientHeight;
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            }
+
+            gl.clearColor(0.08, 0.09, 0.1, 1.0);
+            gl.clearDepth(1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Perspective view
+            const fieldOfView = 45 * Math.PI / 180;
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const zNear = 0.1;
+            const zFar = 100.0;
+            const projectionMatrix = getPerspectiveMatrix(fieldOfView, aspect, zNear, zFar);
+
+            // Matrix Transform pipeline for camera viewing angles
+            let modelViewMatrix = makeTranslation(0, -6, -28);
+            const rotX = makeRotationX(GameState.cameraRot.x);
+            const rotY = makeRotationY(GameState.cameraRot.y);
+            modelViewMatrix = multiplyMatrices(modelViewMatrix, rotX);
+            modelViewMatrix = multiplyMatrices(modelViewMatrix, rotY);
+
+            // Draw Ground
+            drawMesh(Meshes.ground, makeTranslation(0, groundLevel, 0), projectionMatrix, modelViewMatrix);
+
+            // Draw Ore Crystals
+            GameState.ores.forEach(ore => {
+                const trans = makeTranslation(ore.x, 0.3, ore.z);
+                drawMesh(Meshes.ore, trans, projectionMatrix, modelViewMatrix);
+            });
+
+            // Draw Buildings
+            GameState.buildings.forEach(b => {
+                const mesh = b.type === 'refinery' ? Meshes.refinery : Meshes.barracks;
+                const trans = makeTranslation(b.x, 0.75, b.z);
+                drawMesh(mesh, trans, projectionMatrix, modelViewMatrix);
+            });
+
+            // Draw Units
+            GameState.units.forEach(u => {
+                const mesh = u.type === 'truck' ? Meshes.truck : Meshes.soldier;
+                const trans = makeTranslation(u.x, 0.4, u.z);
+                drawMesh(mesh, trans, projectionMatrix, modelViewMatrix);
+            });
+
+            requestAnimationFrame(renderScene);
+        }
+
+        // Base Mesh rendering logic
+        function drawMesh(buffers, modelMatrix, projectionMatrix, cameraMatrix) {
+            const mvMatrix = multiplyMatrices(cameraMatrix, modelMatrix);
+
+            // Calculate normals matrix
+            const normalMatrix = mvMatrix; 
+
+            // Bind attributes
+            gl.useProgram(programInfo.program);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.color);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexColor, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
+            gl.vertexAttribPointer(programInfo.attribLocations.vertexNormal, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+
+            // Send uniforms
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, mvMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, normalMatrix);
+
+            gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
+        }
+
+        // Initialize Starting Game State Layout
+        function setupGameScene() {
+            // Initial structures
+            GameState.buildings.push({ type: 'refinery', x: -6, z: -4 });
+            GameState.buildings.push({ type: 'barracks', x: 6, z: -4, progress: 0 });
+
+            // Initial harvester collectors
+            GameState.units.push({ type: 'truck', x: -6, z: 0, cargo: 0 });
+
+            // Scattered Starting Ores
+            for(let i=0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                GameState.ores.push({
+                    id: Math.random(),
+                    x: Math.cos(angle) * 12 + (Math.random() - 0.5) * 2,
+                    z: Math.sin(angle) * 12 + (Math.random() - 0.5) * 2,
+                    amount: 100
+                });
+            }
+
+            // Spawn loop triggers
+            spawnOre();
+        }
+
+        // Handle Map Screen Mouse Interactivity (World Selection / Placement / Commands)
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // prevent context popup
+
+        let isRightDragging = false;
+        let lastMousePos = { x: 0, y: 0 };
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 2) { // Right Click
+                isRightDragging = true;
+                lastMousePos = { x: e.clientX, y: e.clientY };
+
+                // Set Move orders for all trained idle soldiers on the battlefield
+                if (GameState.selectedBuild === null) {
+                    // Approximate mouse clicks to flat world projection coords
+                    const rect = canvas.getBoundingClientRect();
+                    const mx = ((e.clientX - rect.left) / canvas.width) * 2 - 1;
+                    const mz = -(((e.clientY - rect.top) / canvas.height) * 2 - 1);
+                    
+                    // Simple map projection translation formula
+                    const worldX = mx * 20;
+                    const worldZ = -mz * 20;
+
+                    GameState.units.forEach(u => {
+                        if (u.type === 'soldier') {
+                            u.tx = worldX + (Math.random() - 0.5) * 4;
+                            u.tz = worldZ + (Math.random() - 0.5) * 4;
+                        }
+                    });
+                }
+            } else if (e.button === 0) { // Left Click
+                const rect = canvas.getBoundingClientRect();
+                const mx = ((e.clientX - rect.left) / canvas.width) * 2 - 1;
+                const mz = -(((e.clientY - rect.top) / canvas.height) * 2 - 1);
+                
+                const placementX = mx * 18;
+                const placementZ = -mz * 18;
+
+                if (GameState.selectedBuild === 'refinery') {
+                    if (GameState.oreCount >= 100) {
+                        GameState.oreCount -= 100;
+                        GameState.buildings.push({ type: 'refinery', x: placementX, z: placementZ });
+                        // Spawn another mining collector truck out of refinery
+                        GameState.units.push({ type: 'truck', x: placementX, z: placementZ, cargo: 0 });
+                        setBuildMode(null);
+                    } else {
+                        alert("Insufficient ore to construct Refinery.");
+                    }
+                } else if (GameState.selectedBuild === 'barracks') {
+                    const cost = Math.round(GameTuning.soldierCost * 2.5);
+                    if (GameState.oreCount >= cost) {
+                        GameState.oreCount -= cost;
+                        GameState.buildings.push({ type: 'barracks', x: placementX, z: placementZ, progress: 0 });
+                        setBuildMode(null);
+                    } else {
+                        alert("Insufficient ore to construct Barracks.");
+                    }
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isRightDragging) {
+                const dx = e.clientX - lastMousePos.x;
+                const dy = e.clientY - lastMousePos.y;
+                GameState.cameraRot.y += dx * 0.005;
+                GameState.cameraRot.x += dy * 0.005;
+                lastMousePos = { x: e.clientX, y: e.clientY };
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (e.button === 2) {
+                isRightDragging = false;
+            }
+        });
+
+        // Initialize Game & Start Loop
+        setupGameScene();
+        requestAnimationFrame(renderScene);
+    </script>
+</body>
+</html>
