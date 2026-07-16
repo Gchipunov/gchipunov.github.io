@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL XPBD Loop-de-Loop Collision</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d0d11;
+            font-family: monospace;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #info {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            color: #00ff66;
+            background: rgba(10, 10, 15, 0.9);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            pointer-events: auto; /* Changed to allow slider interaction */
+            font-size: 12px;
+            line-height: 1.6;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            width: 280px;
+            z-index: 10;
+        }
+        .slider-group {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            color: #ccc;
+        }
+        .slider-group input {
+            cursor: pointer;
+            accent-color: #00ff66;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>Colo Game Physics: XPBD Collision</strong><br>
+        • Curve: Bezier to Power Basis<br>
+        • Interact: Click &amp; Drag the box to toss it!<br>
+        <hr style="border: 0; border-top: 1px dashed #333; margin: 10px 0;">
+        
+        <!-- Interactive Sliders -->
+        <div class="slider-group">
+            <label for="sizeSlider">Box Size: <span id="sizeVal">0.15</span></label>
+            <input type="range" id="sizeSlider" min="0.06" max="0.35" step="0.01" value="0.15">
+        </div>
+        
+        <div class="slider-group">
+            <label for="substepSlider">Stability (Substeps): <span id="substepVal">8</span></label>
+            <input type="range" id="substepSlider" min="1" max="24" step="1" value="8">
+        </div>
+
+        <div class="slider-group">
+            <label for="bounceSlider">Bounciness (Restitution): <span id="bounceVal">0.6</span></label>
+            <input type="range" id="bounceSlider" min="0.0" max="1.0" step="0.05" value="0.6">
+        </div>
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+    <script>
+        // --- 1. MATHEMATICAL BASIS CONVERSION (CPU) ---
+        function factorial(k) {
+            let res = 1;
+            for (let i = 1; i <= k; i++) res *= i;
+            return res;
+        }
+
+        function fallingFactorial(n, j) {
+            let res = 1;
+            for (let m = 0; m < j; m++) res *= (n - m);
+            return res;
+        }
+
+        function convertToBezierPowerBasis(P) {
+            const n = P.length - 1;
+            const C = [];
+            for (let j = 0; j <= n; j++) {
+                const multiplier = fallingFactorial(n, j);
+                let sumX = 0, sumY = 0;
+                for (let i = 0; i <= j; i++) {
+                    const sign = ((i + j) % 2 === 0) ? 1.0 : -1.0;
+                    const denominator = factorial(i) * factorial(j - i);
+                    const term = sign / denominator;
+                    sumX += P[i][0] * term;
+                    sumY += P[i][1] * term;
+                }
+                C.push([sumX * multiplier, sumY * multiplier]);
+            }
+            return C;
+        }
+
+        // Define the Loop-de-Loop Curve
+        const controlPoints = [
+            [-0.6, -0.6],
+            [ 0.8,  0.8],
+            [-0.8,  0.8],
+            [ 0.6, -0.6]
+        ];
+        const coefficients = convertToBezierPowerBasis(controlPoints);
+
+        // Discretize curve into segments for collision detection and rendering
+        const numSegments = 100;
+        const curvePoints = [];
+        for (let i = 0; i <= numSegments; i++) {
+            const t = i / numSegments;
+            const x = coefficients[0][0] + t * (coefficients[1][0] + t * (coefficients[2][0] + t * coefficients[3][0]));
+            const y = coefficients[0][1] + t * (coefficients[1][1] + t * (coefficients[2][1] + t * coefficients[3][1]));
+            curvePoints.push({ x, y });
+        }
+
+        // --- 2. VECTOR MATH HELPERS ---
+        const vec2 = {
+            add: (a, b) => ({ x: a.x + b.x, y: a.y + b.y }),
+            sub: (a, b) => ({ x: a.x - b.x, y: a.y - b.y }),
+            scale: (v, s) => ({ x: v.x * s, y: v.y * s }),
+            dot: (a, b) => a.x * b.x + a.y * b.y,
+            cross: (a, b) => a.x * b.y - a.y * b.x,
+            len: (v) => Math.sqrt(v.x * v.x + v.y * v.y),
+            normalize: (v) => {
+                const l = Math.sqrt(v.x * v.x + v.y * v.y);
+                return l > 0.0001 ? { x: v.x / l, y: v.y / l } : { x: 0, y: 0 };
+            },
+            dist: (a, b) => Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
+        };
+
+        // --- 3. XPBD PHYSICS ENGINE & STATE ---
+        const box = {
+            pos: { x: 0.0, y: 0.5 },
+            prevPos: { x: 0.0, y: 0.5 },
+            vel: { x: 0.0, y: 0.0 },
+            
+            angle: 0.3,
+            prevAngle: 0.3,
+            angularVel: 0.0,
+
+            // Configurable parameters
+            width: 0.15,
+            height: 0.15,
+            mass: 1.0,
+            invMass: 1.0,
+            inertia: 0.00375,     // Will update with size
+            invInertia: 266.66,   // Will update with size
+            
+            compliance: 0.0001,   // Elastic spring compliance
+            restitution: 0.6
+        };
+
+        const gravity = { x: 0.0, y: -9.81 };
+        const dt = 1 / 120;
+        let isDragging = false;
+        let dragOffset = { x: 0, y: 0 };
+        let physicsSubSteps = 8; // Controlled by slider
+
+        // Dynamic Box Sizing & Inertia calculation
+        function updateBoxDimensions(size) {
+            box.width = size;
+            box.height = size;
+            // Moment of inertia for solid square: I = (1/6) * mass * size^2
+            box.inertia = (1.0 / 6.0) * box.mass * (size * size);
+            box.invInertia = 1.0 / box.inertia;
+        }
+
+        // Get corners
+        function getBoxVertices(b) {
+            const cos = Math.cos(b.angle);
+            const sin = Math.sin(b.angle);
+            const hx = b.width / 2;
+            const hy = b.height / 2;
+
+            const localDirs = [
+                { x: -hx, y: -hy },
+                { x:  hx, y: -hy },
+                { x:  hx, y:  hy },
+                { x: -hx, y:  hy }
+            ];
+
+            return localDirs.map(p => ({
+                x: b.pos.x + (p.x * cos - p.y * sin),
+                y: b.pos.y + (p.x * sin + p.y * cos)
+            }));
+        }
+
+        function closestPointOnSegment(p, a, b) {
+            const ab = vec2.sub(b, a);
+            const ap = vec2.sub(p, a);
+            let t = vec2.dot(ap, ab) / vec2.dot(ab, ab);
+            t = Math.max(0, Math.min(1, t));
+            return vec2.add(a, vec2.scale(ab, t));
+        }
+
+        // --- XPBD SOLVER STEP ---
+        function stepPhysics() {
+            if (isDragging) {
+                box.prevPos = { ...box.pos };
+                box.prevAngle = box.angle;
+                box.vel = { x: 0, y: 0 };
+                box.angularVel = 0;
+                return;
+            }
+
+            // 1. Predict position/orientation
+            box.prevPos = { ...box.pos };
+            box.prevAngle = box.angle;
+
+            box.vel = vec2.add(box.vel, vec2.scale(gravity, dt));
+            box.pos = vec2.add(box.pos, vec2.scale(box.vel, dt));
+            box.angle += box.angularVel * dt;
+
+            // 2. XPBD Iterations
+            const sdt = dt / physicsSubSteps;
+
+            for (let step = 0; step < physicsSubSteps; step++) {
+                const verts = getBoxVertices(box);
+                
+                for (let i = 0; i < verts.length; i++) {
+                    const vertex = verts[i];
+
+                    for (let j = 0; j < curvePoints.length - 1; j++) {
+                        const segmentStart = curvePoints[j];
+                        const segmentEnd = curvePoints[j+1];
+
+                        const cp = closestPointOnSegment(vertex, segmentStart, segmentEnd);
+                        const toVertex = vec2.sub(vertex, cp);
+                        const distance = vec2.len(toVertex);
+
+                        // Adaptive collision boundary to prevent clipping for larger boxes
+                        const collisionThickness = Math.max(0.015, box.width * 0.1);
+
+                        if (distance < collisionThickness) {
+                            let normal = vec2.normalize(toVertex);
+                            if (distance === 0) normal = { x: 0, y: 1 };
+
+                            const penetration = collisionThickness - distance;
+                            const r = vec2.sub(vertex, box.pos);
+                            const rCrossN = vec2.cross(r, normal);
+
+                            const inverseMassSum = box.invMass + (rCrossN * rCrossN) * box.invInertia;
+                            if (inverseMassSum <= 0) continue;
+
+                            const tCompliance = box.compliance / (sdt * sdt);
+                            const lagrangeDelta = -penetration / (inverseMassSum + tCompliance);
+
+                            const dp = vec2.scale(normal, lagrangeDelta * box.invMass);
+                            const dAngle = lagrangeDelta * rCrossN * box.invInertia;
+
+                            box.pos = vec2.add(box.pos, dp);
+                            box.angle += dAngle;
+                        }
+                    }
+                }
+            }
+
+            // 3. Update Velocities
+            const nextVel = vec2.scale(vec2.sub(box.pos, box.prevPos), 1 / dt);
+            const nextAngularVel = (box.angle - box.prevAngle) / dt;
+
+            const normal = vec2.normalize(nextVel);
+            const relativeNormalVel = vec2.dot(box.vel, normal);
+            if (relativeNormalVel < -0.1) {
+                const bouncedNormalVel = -relativeNormalVel * box.restitution;
+                box.vel = vec2.add(nextVel, vec2.scale(normal, bouncedNormalVel));
+            } else {
+                box.vel = nextVel;
+            }
+            box.angularVel = nextAngularVel;
+
+            // Reset boundary check
+            if (box.pos.y < -1.1 || Math.abs(box.pos.x) > 2.0) {
+                box.pos = { x: 0.0, y: 0.7 };
+                box.vel = { x: 0, y: 0 };
+                box.angle = Math.random();
+                box.angularVel = 0;
+            }
+        }
+
+        // --- 4. WEBGL 1.0 GRAPHICS PIPELINE ---
+        const canvas = document.getElementById("glcanvas");
+        const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+        if (!gl) {
+            alert("WebGL 1.0 is unsupported on this system.");
+        }
+
+        const vsSource = `
+            attribute vec2 a_position;
+            uniform vec2 u_offset;
+            uniform float u_rotation;
+            uniform float u_aspect;
+            uniform vec2 u_scale;
+
+            void main() {
+                float cosR = cos(u_rotation);
+                float sinR = sin(u_rotation);
+                vec2 rotated = vec2(
+                    a_position.x * cosR - a_position.y * sinR,
+                    a_position.x * sinR + a_position.y * cosR
+                );
+                vec2 pos = rotated * u_scale + u_offset;
+                gl_Position = vec4(pos.x / u_aspect, pos.y, 0.0, 1.0);
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        function buildProgram(vsSrc, fsSrc) {
+            function compile(type, src) {
+                const s = gl.createShader(type);
+                gl.shaderSource(s, src);
+                gl.compileShader(s);
+                return s;
+            }
+            const p = gl.createProgram();
+            gl.attachShader(p, compile(gl.VERTEX_SHADER, vsSrc));
+            gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsSrc));
+            gl.linkProgram(p);
+            return p;
+        }
+
+        const program = buildProgram(vsSource, fsSource);
+        gl.useProgram(program);
+
+        const a_position = gl.getAttribLocation(program, "a_position");
+        const u_offset = gl.getUniformLocation(program, "u_offset");
+        const u_rotation = gl.getUniformLocation(program, "u_rotation");
+        const u_aspect = gl.getUniformLocation(program, "u_aspect");
+        const u_scale = gl.getUniformLocation(program, "u_scale");
+        const u_color = gl.getUniformLocation(program, "u_color");
+
+        // Curve vertex buffer
+        const curveVerts = new Float32Array(curvePoints.flatMap(p => [p.x, p.y]));
+        const curveBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, curveBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, curveVerts, gl.STATIC_DRAW);
+
+        // Box vertex buffer
+        const boxVerts = new Float32Array([
+            -0.5, -0.5,
+             0.5, -0.5,
+             0.5,  0.5,
+            -0.5,  0.5
+        ]);
+        const boxBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, boxBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, boxVerts, gl.STATIC_DRAW);
+
+        // --- 5. INTERACTIVE SLIDER LOGIC ---
+        const sizeSlider = document.getElementById("sizeSlider");
+        const sizeVal = document.getElementById("sizeVal");
+        const substepSlider = document.getElementById("substepSlider");
+        const substepVal = document.getElementById("substepVal");
+        const bounceSlider = document.getElementById("bounceSlider");
+        const bounceVal = document.getElementById("bounceVal");
+
+        sizeSlider.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value);
+            sizeVal.textContent = val.toFixed(2);
+            updateBoxDimensions(val);
+        });
+
+        substepSlider.addEventListener("input", (e) => {
+            const val = parseInt(e.target.value);
+            substepVal.textContent = val;
+            physicsSubSteps = val;
+        });
+
+        bounceSlider.addEventListener("input", (e) => {
+            const val = parseFloat(e.target.value);
+            bounceVal.textContent = val.toFixed(2);
+            box.restitution = val;
+        });
+
+        // Initialize dynamic parameters
+        updateBoxDimensions(parseFloat(sizeSlider.value));
+        physicsSubSteps = parseInt(substepSlider.value);
+
+        // --- 6. DRAG & DROP INTERACTION ---
+        function getNDCCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const x = ((clientX - rect.left) / canvas.width) * 2 - 1;
+            const y = -(((clientY - rect.top) / canvas.height) * 2 - 1);
+            const aspect = canvas.width / canvas.height;
+            return { x: x * aspect, y: y };
+        }
+
+        function onStart(e) {
+            // Ignore mouse interaction if clicking on UI controls
+            if (e.target.tagName === "INPUT" || e.target.closest("#info")) return;
+
+            const mouse = getNDCCoords(e);
+            // Increase search radius relative to box size
+            if (vec2.dist(mouse, box.pos) < (box.width * 1.5)) {
+                isDragging = true;
+                dragOffset = vec2.sub(box.pos, mouse);
+            }
+        }
+
+        function onMove(e) {
+            if (isDragging) {
+                const mouse = getNDCCoords(e);
+                box.pos = vec2.add(mouse, dragOffset);
+                box.vel = { x: 0, y: 0 };
+            }
+        }
+
+        function onEnd() {
+            isDragging = false;
+        }
+
+        window.addEventListener("mousedown", onStart);
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onEnd);
+        window.addEventListener("touchstart", onStart, { passive: true });
+        window.addEventListener("touchmove", onMove, { passive: true });
+        window.addEventListener("touchend", onEnd);
+
+        // --- 7. RENDERING LOOP ---
+        function animate() {
+            stepPhysics();
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+                gl.viewport(0, 0, width, height);
+            }
+            gl.uniform1f(u_aspect, width / height);
+
+            gl.clearColor(0.05, 0.05, 0.07, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.enableVertexAttribArray(a_position);
+
+            // A. Draw Curve
+            gl.bindBuffer(gl.ARRAY_BUFFER, curveBuffer);
+            gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
+            
+            gl.uniform2f(u_offset, 0.0, 0.0);
+            gl.uniform1f(u_rotation, 0.0);
+            gl.uniform2f(u_scale, 1.0, 1.0);
+            gl.uniform4f(u_color, 0.0, 1.0, 0.4, 1.0); // Bright Green
+            gl.drawArrays(gl.LINE_STRIP, 0, curvePoints.length);
+
+            // B. Draw Dynamic Box
+            gl.bindBuffer(gl.ARRAY_BUFFER, boxBuffer);
+            gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
+
+            gl.uniform2f(u_offset, box.pos.x, box.pos.y);
+            gl.uniform1f(u_rotation, box.angle);
+            gl.uniform2f(u_scale, box.width, box.height);
+            gl.uniform4f(u_color, 0.2, 0.6, 1.0, 1.0); // Bright Cyan
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
