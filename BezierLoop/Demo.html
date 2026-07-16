@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Loop-de-Loop Curve (Power Basis)</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #111;
+            font-family: monospace;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #0f0;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>Bezier to Power Basis conversion (WebGL 1.0 / ES 2.0)</strong><br>
+        Optimized for legacy hardware (Raspberry Pi Zero)<br>
+        C0, C1, C2, C3 calculated on CPU & evaluated in VS.
+    </div>
+    <canvas id="glcanvas"></canvas>
+
+    <script>
+        // --- 1. MATHEMATICAL BASIS CONVERSION (CPU) ---
+        function factorial(k) {
+            let res = 1;
+            for (let i = 1; i <= k; i++) res *= i;
+            return res;
+        }
+
+        function fallingFactorial(n, j) {
+            let res = 1;
+            for (let m = 0; m < j; m++) {
+                res *= (n - m);
+            }
+            return res;
+        }
+
+        // Converts Bezier Control Points P to Power Basis Coefficients C_j
+        // P is an array of 2D coordinates: [[x0, y0], [x1, y1], ...]
+        function convertToBezierPowerBasis(P) {
+            const n = P.length - 1;
+            const C = [];
+
+            for (let j = 0; j <= n; j++) {
+                const multiplier = fallingFactorial(n, j);
+                let sumX = 0;
+                let sumY = 0;
+
+                for (let i = 0; i <= j; i++) {
+                    const sign = ((i + j) % 2 === 0) ? 1.0 : -1.0;
+                    const denominator = factorial(i) * factorial(j - i);
+                    
+                    const term = sign / denominator;
+                    sumX += P[i][0] * term;
+                    sumY += P[i][1] * term;
+                }
+                
+                C.push([sumX * multiplier, sumY * multiplier]);
+            }
+            return C;
+        }
+
+        // Define a Loop-De-Loop curve via 4 control points (Cubic, n=3)
+        const controlPoints = [
+            [-0.6, -0.6],  // Start bottom-left
+            [ 0.8,  0.8],  // Control point top-right
+            [-0.8,  0.8],  // Control point top-left
+            [ 0.6, -0.6]   // End bottom-right
+        ];
+
+        // Compute C_j coefficients
+        const coefficients = convertToBezierPowerBasis(controlPoints);
+        console.log("Calculated Power Basis Coefficients C_j:", coefficients);
+
+        // --- 2. WEBGL 1.0 / ES 2.0 RENDERER ---
+        const canvas = document.getElementById("glcanvas");
+        const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+        if (!gl) {
+            alert("WebGL 1.0 is not supported on this browser/hardware.");
+        }
+
+        // Vertex Shader: Evaluates B(t) = C0 + C1*t + C2*t^2 + C3*t^3
+        const vsSource = `
+            attribute float a_t; // Parameter t in [0, 1]
+            
+            // Power basis coefficients passed as uniforms
+            uniform vec2 u_C0;
+            uniform vec2 u_C1;
+            uniform vec2 u_C2;
+            uniform vec2 u_C3;
+            uniform float u_aspect;
+
+            void main() {
+                // Evaluate polynomials using Horner's method or direct multiplications
+                // B(t) = C0 + t*(C1 + t*(C2 + t*C3))
+                vec2 position = u_C0 + a_t * (u_C1 + a_t * (u_C2 + a_t * u_C3));
+
+                // Correct for screen aspect ratio to prevent stretching
+                gl_Position = vec4(position.x / u_aspect, position.y, 0.0, 1.0);
+                gl_PointSize = 8.0; // Thicker visual representation for points
+            }
+        `;
+
+        // Simple fragment shader (solid active green line/points)
+        const fsSource = `
+            precision mediump float;
+            void main() {
+                gl_FragColor = vec4(0.0, 1.0, 0.3, 1.0); // Neon Green
+            }
+        `;
+
+        // Shader compiling helper
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error(gl.getProgramInfoLog(program));
+        }
+
+        gl.useProgram(program);
+
+        // Generate normalized curve parameters 't' from 0.0 to 1.0
+        const segmentCount = 200; // Fast and smooth
+        const tValues = [];
+        for (let i = 0; i <= segmentCount; i++) {
+            tValues.push(i / segmentCount);
+        }
+
+        // Create buffer and load 't' values
+        const tBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, tBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tValues), gl.STATIC_DRAW);
+
+        const a_t = gl.getAttribLocation(program, "a_t");
+        gl.enableVertexAttribArray(a_t);
+        gl.vertexAttribPointer(a_t, 1, gl.FLOAT, false, 0, 0);
+
+        // Retrieve uniform locations
+        const u_C0 = gl.getUniformLocation(program, "u_C0");
+        const u_C1 = gl.getUniformLocation(program, "u_C1");
+        const u_C2 = gl.getUniformLocation(program, "u_C2");
+        const u_C3 = gl.getUniformLocation(program, "u_C3");
+        const u_aspect = gl.getUniformLocation(program, "u_aspect");
+
+        // Pass calculated C coefficients to the shaders
+        gl.uniform2fv(u_C0, coefficients[0]);
+        gl.uniform2fv(u_C1, coefficients[1]);
+        gl.uniform2fv(u_C2, coefficients[2]);
+        gl.uniform2fv(u_C3, coefficients[3]);
+
+        // Draw and handle viewport scaling
+        function render() {
+            // Resize canvas context dynamically
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+                gl.viewport(0, 0, width, height);
+            }
+
+            // Set aspect ratio
+            gl.uniform1f(u_aspect, width / height);
+
+            // Clear screen
+            gl.clearColor(0.07, 0.07, 0.09, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // Draw line strip
+            gl.drawArrays(gl.LINE_STRIP, 0, tValues.length);
+            
+            // Draw discrete point anchors over the path for styling
+            gl.drawArrays(gl.POINTS, 0, tValues.length);
+        }
+
+        window.addEventListener("resize", render);
+        render();
+    </script>
+</body>
+</html>
