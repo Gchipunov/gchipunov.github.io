@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pancake Slider - Mobile WebGL Platformer</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #1a151e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            color: #fff;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+            border-radius: 8px;
+            overflow: hidden;
+            max-width: 100vw;
+            max-height: 100vh;
+            display: flex;
+        }
+        canvas {
+            display: block;
+            background-color: #2b213a;
+            width: 100%;
+            height: auto;
+            max-height: 100vh;
+            aspect-ratio: 4 / 3;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            pointer-events: none;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+        h1 { margin: 0 0 5px 0; font-size: 20px; color: #ffd700; }
+        p { margin: 3px 0; font-size: 12px; color: #eee; }
+        .dash-status {
+            margin-top: 8px;
+            font-weight: bold;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            background: rgba(0,0,0,0.4);
+        }
+        .ready { color: #55ff55; border: 1px solid #55ff55; }
+        .cooldown { color: #ff5555; border: 1px solid #ff5555; }
+
+        /* --- MOBILE TOUCH CONTROLS --- */
+        #touch-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 20;
+        }
+        .touch-group {
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+        }
+        .touch-btn {
+            width: 65px;
+            height: 65px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+            backdrop-filter: blur(4px);
+            transition: background 0.1s, transform 0.1s, border-color 0.1s;
+            touch-action: none; /* Prevents mobile browser zooming/scrolling */
+        }
+        .touch-btn.pressed {
+            background: rgba(255, 215, 0, 0.4);
+            border-color: #ffd700;
+            transform: scale(0.92);
+        }
+        @media (max-width: 600px) {
+            #ui-overlay p { display: none; } /* Hide keyboard instructions on phones */
+            .touch-btn { width: 60px; height: 60px; font-size: 14px; }
+            #touch-controls { bottom: 15px; left: 15px; right: 15px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="glCanvas" width="800" height="600"></canvas>
+    
+    <div id="ui-overlay">
+        <h1>🥞 Pancake Slider</h1>
+        <p><b>Move:</b> A/D or Arrows | <b>Jump:</b> W / Up / Space | <b>Dash:</b> Shift / Z</p>
+        <div id="dash-indicator" class="dash-status ready">DASH READY</div>
+    </div>
+
+    <!-- On-Screen Virtual Gamepad -->
+    <div id="touch-controls">
+        <div class="touch-group">
+            <div class="touch-btn" id="btn-left">◄</div>
+            <div class="touch-btn" id="btn-right">►</div>
+        </div>
+        <div class="touch-group">
+            <div class="touch-btn" id="btn-dash" style="border-radius: 15px; width: 65px;">DASH</div>
+            <div class="touch-btn" id="btn-jump">JUMP</div>
+        </div>
+    </div>
+</div>
+
+<!-- Vertex Shader -->
+<script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    uniform vec2 u_resolution;
+    uniform vec4 u_rect;
+    varying vec2 v_uv;
+
+    void main() {
+        v_uv = a_position;
+        vec2 pixel_pos = u_rect.xy + (a_position * u_rect.zw);
+        vec2 clip_space = (pixel_pos / u_resolution) * 2.0 - 1.0;
+        gl_Position = vec4(clip_space * vec2(1, -1), 0, 1);
+    }
+</script>
+
+<!-- Fragment Shader -->
+<script id="fs" type="x-shader/x-fragment">
+    precision mediump float;
+    varying vec2 v_uv;
+    uniform vec4 u_color;
+    uniform int u_type;
+
+    void main() {
+        vec4 color = u_color;
+
+        if (u_type == 1) {
+            float border = 0.08;
+            if (v_uv.y < border || v_uv.y > 1.0 - border || v_uv.x < 0.02 || v_uv.x > 0.98) {
+                color.rgb *= 0.6;
+            }
+            if (v_uv.y < 0.25) {
+                color = vec4(0.55, 0.25, 0.05, 1.0);
+            }
+        } else if (u_type == 2) {
+            color.rgb -= vec3(0.1, 0.1, 0.0) * v_uv.y;
+            if (v_uv.y > 0.25 && v_uv.y < 0.45) {
+                if ((v_uv.x > 0.25 && v_uv.x < 0.38) || (v_uv.x > 0.62 && v_uv.x < 0.75)) {
+                    color = vec4(0.1, 0.1, 0.1, 1.0);
+                }
+            }
+        } else if (u_type == 3) {
+            float dist = distance(v_uv, vec2(0.5));
+            if (dist > 0.5) discard;
+            color.a *= (1.0 - dist * 2.0);
+        }
+
+        gl_FragColor = color;
+    }
+</script>
+
+<script>
+(function() {
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl');
+    const dashUI = document.getElementById('dash-indicator');
+
+    if (!gl) {
+        alert('WebGL not supported!');
+        return;
+    }
+
+    // --- Shader Compilation & Program Setup ---
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const vsSource = document.getElementById('vs').text;
+    const fsSource = document.getElementById('fs').text;
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    gl.useProgram(program);
+
+    const posAttr = gl.getAttribLocation(program, 'a_position');
+    const resUni = gl.getUniformLocation(program, 'u_resolution');
+    const rectUni = gl.getUniformLocation(program, 'u_rect');
+    const colorUni = gl.getUniformLocation(program, 'u_color');
+    const typeUni = gl.getUniformLocation(program, 'u_type');
+
+    const posBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        0, 0,  1, 0,  0, 1,
+        0, 1,  1, 0,  1, 1,
+    ]), gl.STATIC_DRAW);
+
+    gl.enableVertexAttribArray(posAttr);
+    gl.vertexAttribPointer(posAttr, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(resUni, canvas.width, canvas.height);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    function drawRect(x, y, w, h, color, type = 0) {
+        gl.uniform4f(rectUni, x, y, w, h);
+        gl.uniform4fv(colorUni, color);
+        gl.uniform1i(typeUni, type);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    // --- Game World & Physics Setup ---
+    const GRAVITY = 1800;
+    const JUMP_FORCE = -650;
+    const ACCEL = 1200;
+    const FRICTION = 0.98;
+    const AIR_RESIST = 0.92;
+    const DASH_SPEED = 850;
+    const DASH_DURATION = 0.15;
+    const DASH_COOLDOWN = 1.0;
+
+    const platforms = [
+        { x: 50,  y: 480, w: 300, h: 40 },
+        { x: 450, y: 360, w: 300, h: 40 },
+        { x: 150, y: 220, w: 320, h: 40 }
+    ];
+
+    const player = {
+        x: 150, y: 350, w: 36, h: 36,
+        vx: 0, vy: 0,
+        grounded: false,
+        facing: 1,
+        isDashing: false,
+        dashTimer: 0,
+        dashCooldownTimer: 0
+    };
+
+    const particles = [];
+
+    function spawnParticles(x, y, count, color, speedScale = 1.0) {
+        for (let i = 0; i < count; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random() - 0.5) * 200 * speedScale,
+                vy: (Math.random() - 0.5) * 200 * speedScale,
+                size: Math.random() * 8 + 4,
+                color: [...color],
+                life: 1.0,
+                decay: Math.random() * 2.0 + 1.5
+            });
+        }
+    }
+
+    // --- Input Handling (Keyboard + Multi-Touch) ---
+    const keys = {};
+
+    function triggerJump() {
+        if (player.grounded) {
+            player.vy = JUMP_FORCE;
+            player.grounded = false;
+            spawnParticles(player.x + player.w/2, player.y + player.h, 10, [0.9, 0.7, 0.2, 1.0]);
+        }
+    }
+
+    function triggerDash() {
+        if (player.dashCooldownTimer <= 0 && !player.isDashing) {
+            player.isDashing = true;
+            player.dashTimer = DASH_DURATION;
+            player.dashCooldownTimer = DASH_COOLDOWN;
+            player.vx = player.facing * DASH_SPEED;
+            player.vy = 0;
+            spawnParticles(player.x + player.w/2, player.y + player.h/2, 25, [1.0, 0.9, 0.3, 1.0], 2.5);
+        }
+    }
+
+    // Keyboard Events
+    window.addEventListener('keydown', e => {
+        keys[e.code] = true;
+        if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') triggerJump();
+        if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyZ' || e.code === 'KeyJ') triggerDash();
+    });
+    window.addEventListener('keyup', e => keys[e.code] = false);
+
+    // Helper to bind Touch/Mouse to Game Keys
+    function bindTouchButton(elementId, keyCode, onPressAction) {
+        const el = document.getElementById(elementId);
+        
+        const handlePress = (e) => {
+            e.preventDefault();
+            keys[keyCode] = true;
+            el.classList.add('pressed');
+            if (onPressAction) onPressAction();
+        };
+
+        const handleRelease = (e) => {
+            e.preventDefault();
+            keys[keyCode] = false;
+            el.classList.remove('pressed');
+        };
+
+        // Touch events for mobile
+        el.addEventListener('touchstart', handlePress, { passive: false });
+        el.addEventListener('touchend', handleRelease, { passive: false });
+        el.addEventListener('touchcancel', handleRelease, { passive: false });
+
+        // Mouse events for testing touch UI on desktop
+        el.addEventListener('mousedown', handlePress);
+        el.addEventListener('mouseup', handleRelease);
+        el.addEventListener('mouseleave', handleRelease);
+    }
+
+    // Bind Virtual Gamepad
+    bindTouchButton('btn-left', 'ArrowLeft');
+    bindTouchButton('btn-right', 'ArrowRight');
+    bindTouchButton('btn-jump', 'Space', triggerJump);
+    bindTouchButton('btn-dash', 'ShiftLeft', triggerDash);
+
+    // Prevent scrolling/zooming when touching the canvas directly
+    canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    canvas.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+    // --- Collision Detection (AABB) ---
+    function checkCollisions() {
+        player.grounded = false;
+
+        for (let p of platforms) {
+            if (player.x < p.x + p.w &&
+                player.x + player.w > p.x &&
+                player.y < p.y + p.h &&
+                player.y + player.h > p.y) {
+                
+                let overlapLeft = (player.x + player.w) - p.x;
+                let overlapRight = (p.x + p.w) - player.x;
+                let overlapTop = (player.y + player.h) - p.y;
+                let overlapBottom = (p.y + p.h) - player.y;
+
+                let minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+
+                if (minOverlap === overlapTop && player.vy >= 0) {
+                    player.y = p.y - player.h;
+                    player.vy = 0;
+                    player.grounded = true;
+                } else if (minOverlap === overlapBottom && player.vy <= 0) {
+                    player.y = p.y + p.h;
+                    player.vy = 0;
+                } else if (minOverlap === overlapLeft) {
+                    player.x = p.x - player.w;
+                    player.vx = 0;
+                } else if (minOverlap === overlapRight) {
+                    player.x = p.x + p.w;
+                    player.vx = 0;
+                }
+            }
+        }
+
+        if (player.x < 0) { player.x = 0; player.vx = -player.vx * 0.5; }
+        if (player.x + player.w > canvas.width) { player.x = canvas.width - player.w; player.vx = -player.vx * 0.5; }
+        if (player.y + player.h > canvas.height) {
+            player.y = -50;
+            player.vy = 0;
+            player.vx = 0;
+        }
+    }
+
+    // --- Main Game Loop ---
+    let lastTime = performance.now();
+
+    function update(now) {
+        const dt = Math.min((now - lastTime) / 1000, 0.1);
+        lastTime = now;
+
+        if (player.dashCooldownTimer > 0) {
+            player.dashCooldownTimer -= dt;
+            if (player.dashCooldownTimer <= 0) {
+                dashUI.textContent = "DASH READY";
+                dashUI.className = "dash-status ready";
+            } else {
+                dashUI.textContent = `DASH COOLDOWN: ${player.dashCooldownTimer.toFixed(1)}s`;
+                dashUI.className = "dash-status cooldown";
+            }
+        }
+
+        if (player.isDashing) {
+            player.dashTimer -= dt;
+            spawnParticles(player.x + player.w/2, player.y + player.h/2, 2, [1.0, 0.9, 0.5, 0.7]);
+            if (player.dashTimer <= 0) {
+                player.isDashing = false;
+            }
+        } else {
+            if (keys['KeyA'] || keys['ArrowLeft']) {
+                player.vx -= ACCEL * dt;
+                player.facing = -1;
+            }
+            if (keys['KeyD'] || keys['ArrowRight']) {
+                player.vx += ACCEL * dt;
+                player.facing = 1;
+            }
+
+            if (player.grounded) {
+                player.vx *= FRICTION;
+                if (Math.abs(player.vx) > 150 && Math.random() < 0.3) {
+                    spawnParticles(player.x + player.w/2, player.y + player.h, 1, [0.55, 0.25, 0.05, 1.0]);
+                }
+            } else {
+                player.vx *= AIR_RESIST;
+                player.vy += GRAVITY * dt;
+            }
+        }
+
+        player.x += player.vx * dt;
+        player.y += player.vy * dt;
+
+        checkCollisions();
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.life -= p.decay * dt;
+            p.color[3] = Math.max(0, p.life);
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0.17, 0.13, 0.23, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        for (let p of platforms) {
+            drawRect(p.x, p.y, p.w, p.h, [0.85, 0.65, 0.35, 1.0], 1);
+        }
+
+        for (let p of particles) {
+            drawRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size, p.color, 3);
+        }
+
+        drawRect(player.x, player.y, player.w, player.h, [1.0, 0.9, 0.3, 1.0], 2);
+
+        requestAnimationFrame(update);
+    }
+
+    requestAnimationFrame(update);
+})();
+</script>
+</body>
+</html>
