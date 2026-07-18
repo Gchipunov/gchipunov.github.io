@@ -382,7 +382,7 @@ var divSpeaker4 = document.createElement('div');
 function initMainBackground()
 {
 // div1
-alert('initMainBackground div1');
+//alert('initMainBackground div1');
 
 var div1 = document.getElementById('div1');
 div1.style.backgroundImage =  "url("+ GBL.Media + "levelstart3.png)" ;
@@ -417,7 +417,7 @@ function main()
 //=Array.prototype.slice.call(el.labels||[]);if(!labels.length){labels=[];let root=el.getRootNode();if(el.id){let matching=root.querySelectorAll(`label[for = ${el.id}]`);for(let i=0;i<matching.length;i++){labels.push(matching[i])}}}return labels}let mouseCanceller=function(mouseEvent){let sc=mouseEvent.sourceCapabilities;if(sc&&!sc.firesTouchEvents){return}mouseEvent[HANDLED_OBJ]={skip:true};if(mouseEvent.type==="click"){let clickFromLabel=false;let path=getComposedPath(mouseEvent);for(let i=0;i<path.length;i++){if(path[i].nodeType===Node.ELEMENT_NODE){if(path[i].localName==="label"){clickedLabels.push(path[i])}else if(canBeLabelled(path[i])){let ownerLabels=matchingLabels(path[i]);for(let j=0;j<ownerLabels.length;j++){clickFromLabel=clickFromLabel||clickedLabels.indexOf(ownerLabels[j])>-1}}}if(path[i]===POINTERSTATE.mouse.target){return}}if(clickFromLabel){return}mouseEvent.preventDefault();mouseEvent.stopPropagation()}};function setupTeardownMouseCanceller(setup){let events=IS_TOUCH_ONLY?["click"]:MOUSE_EVE//NTS;for(let i=0,en;i<events.length;i++){en=events[i];if(setup)
 
 
-alert('main');
+//alert('main');
 //document.addEventListener(KeyboardEvent);
 document.addEventListener("keydown", function(e) {
 // alert(e)
@@ -456,7 +456,7 @@ console.log(e);
 
 function test1()
 {
-alert('test1 asd');
+//alert('test1 asd');
 var div1img  = document.getElementById('Pee3zy13.png'); 
 
 }
