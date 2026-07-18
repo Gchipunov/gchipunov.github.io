@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Sonic Mobile Controller Game</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Arial', sans-serif;
+        }
+        #game-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        /* UI Overlay */
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px #000;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .ring-count {
+            color: #ffd700;
+        }
+        /* Virtual Gamepad */
+        #gamepad {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 20;
+        }
+        #joystick-area {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 140px;
+            height: 140px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 3px solid rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            pointer-events: auto;
+            touch-action: none;
+        }
+        #joystick-knob {
+            position: absolute;
+            top: 35px;
+            left: 35px;
+            width: 70px;
+            height: 70px;
+            background: rgba(0, 150, 255, 0.7);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            pointer-events: none;
+            transition: transform 0.05s ease-out;
+        }
+        #jump-btn {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 110px;
+            height: 110px;
+            background: rgba(255, 50, 0, 0.7);
+            border: 4px solid #fff;
+            border-radius: 50%;
+            pointer-events: auto;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        #jump-btn:active {
+            background: rgba(255, 100, 50, 0.9);
+            transform: scale(0.95);
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #ccc;
+            font-size: 14px;
+            text-align: right;
+            pointer-events: none;
+            text-shadow: 1px 1px 2px #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container"></div>
+    
+    <div id="ui">
+        RINGS: <span id="rings-val" class="ring-count">0</span> | SPEED: <span id="speed-val">0</span>
+    </div>
+
+    <div id="instructions">
+        Desktop: A/D or Arrows to Move | S or Down to Duck/Charge Spindash | Space to Jump<br>
+        Mobile: Use On-Screen Joystick & Jump Button
+    </div>
+
+    <div id="gamepad">
+        <div id="joystick-area">
+            <div id="joystick-knob"></div>
+        </div>
+        <div id="jump-btn">JUMP</div>
+    </div>
+
+    <!-- Three.js via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- GAME CONFIG & STATE ---
+        const STATE = {
+            rings: 0,
+            input: { x: 0, y: 0, jump: false },
+            player: {
+                x: 0, y: 5, vx: 0, vy: 0,
+                radius: 1,
+                grounded: false,
+                rolling: false,
+                spindashing: false,
+                spindashCharge: 0,
+                angle: 0
+            }
+        };
+
+        const PHYSICS = {
+            accel: 0.04,
+            fric: 0.96,
+            airResist: 0.99,
+            gravity: 0.018,
+            jumpForce: 0.45,
+            topSpeed: 0.8,
+            slopeFactor: 0.03
+        };
+
+        // --- WEBGL SCENE SETUP ---
+        const container = document.getElementById('game-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x103060);
+        scene.fog = new THREE.FogExp2(0x103060, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 40, 20);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // --- ENVIRONMENT GENERATION ---
+        const platforms = [];
+        const rings = [];
+        const matGround = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
+        const matGrass = new THREE.MeshLambertMaterial({ color: 0x2e8b57 });
+        const matChecker = new THREE.MeshLambertMaterial({ color: 0xd4af37 });
+
+        function addPlatform(x, y, width, height, slope = 0, colorType = 'ground') {
+            const group = new THREE.Group();
+            const geom = new THREE.BoxGeometry(width, height, 6);
+            let mat = matGround;
+            if (colorType === 'grass') mat = matGrass;
+            if (colorType === 'gold') mat = matChecker;
+
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            group.add(mesh);
+
+            group.position.set(x, y, 0);
+            group.rotation.z = slope;
+            scene.add(group);
+
+            platforms.push({
+                x: x, y: y, width: width, height: height,
+                slope: slope,
+                cos: Math.cos(slope), sin: Math.sin(slope)
+            });
+        }
+
+        function addRing(x, y) {
+            const geom = new THREE.TorusGeometry(0.6, 0.15, 8, 16);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.set(x, y, 0);
+            scene.add(mesh);
+            rings.push({ x: x, y: y, mesh: mesh, active: true });
+        }
+
+        // Build Level
+        addPlatform(0, -2, 40, 4, 0, 'grass');            // Start Ground
+        addPlatform(28, 1.5, 20, 4, Math.PI / 8, 'ground'); // Ramp Up
+        addPlatform(50, 5, 25, 4, 0, 'grass');            // High Plateau
+        addPlatform(72, 1.5, 20, 4, -Math.PI / 8, 'ground');// Ramp Down
+        addPlatform(100, -2, 40, 4, 0, 'grass');          // Valley Ground
+        addPlatform(100, 4, 12, 1, 0, 'gold');            // Floating Platform 1
+        addPlatform(115, 7, 12, 1, 0, 'gold');            // Floating Platform 2
+        addPlatform(140, -2, 50, 4, 0, 'grass');          // End Ground
+        addPlatform(180, 5, 30, 4, Math.PI / 6, 'ground');  // Steep Ramp
+
+        // Add Rings
+        for (let i = -10; i <= 10; i += 4) addRing(i, 1);
+        for (let i = 22; i <= 34; i += 4) addRing(i, 6);
+        for (let i = 42; i <= 58; i += 4) addRing(i, 8.5);
+        addRing(100, 6); addRing(100, 7.5);
+        addRing(115, 9); addRing(115, 10.5);
+        for (let i = 130; i <= 160; i += 5) addRing(i, 1);
+
+        // --- PLAYER (SONIC) SETUP ---
+        const playerGroup = new THREE.Group();
+        const sonicBlue = new THREE.MeshLambertMaterial({ color: 0x0044ff });
+        const sonicRed = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+        const sonicWhite = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+        // Body sphere
+        const bodyGeom = new THREE.SphereGeometry(STATE.player.radius, 16, 16);
+        const playerMesh = new THREE.Mesh(bodyGeom, sonicBlue);
+        playerMesh.castShadow = true;
+        playerGroup.add(playerMesh);
+
+        // Spikes (Visual indication of spin)
+        for (let i = 0; i < 4; i++) {
+            const spikeGeom = new THREE.ConeGeometry(0.4, 0.8, 8);
+            const spike = new THREE.Mesh(spikeGeom, sonicBlue);
+            spike.position.set(-0.6 * Math.cos(i), 0.6 * Math.sin(i), 0);
+            spike.rotation.z = Math.PI / 2 + i * 0.5;
+            playerMesh.add(spike);
+        }
+
+        // Eyes
+        const eyeGeom = new THREE.SphereGeometry(0.25, 8, 8);
+        const eyeR = new THREE.Mesh(eyeGeom, sonicWhite);
+        eyeR.position.set(0.6, 0.3, 0.3);
+        const eyeL = eyeR.clone();
+        eyeL.position.set(0.6, 0.3, -0.3);
+        playerMesh.add(eyeR);
+        playerMesh.add(eyeL);
+
+        scene.add(playerGroup);
+
+        // --- CONTROLS & INPUT HANDLING ---
+        // Keyboard
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') STATE.input.x = 1;
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') STATE.input.x = -1;
+            if (e.code === 'ArrowDown' || e.code === 'KeyS') STATE.input.y = -1;
+            if (e.code === 'Space' && !STATE.input.jump) triggerJump();
+        });
+        window.addEventListener('keyup', (e) => {
+            if ((e.code === 'ArrowRight' || e.code === 'KeyD') && STATE.input.x === 1) STATE.input.x = 0;
+            if ((e.code === 'ArrowLeft' || e.code === 'KeyA') && STATE.input.x === -1) STATE.input.x = 0;
+            if ((e.code === 'ArrowDown' || e.code === 'KeyS') && STATE.input.y === -1) STATE.input.y = 0;
+            if (e.code === 'Space') STATE.input.jump = false;
+        });
+
+        // Mobile Touch Joystick
+        const joyArea = document.getElementById('joystick-area');
+        const joyKnob = document.getElementById('joystick-knob');
+        let joyTouchId = null;
+        const joyCenter = { x: 70, y: 70 };
+        const maxRadius = 50;
+
+        joyArea.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.changedTouches[0];
+            joyTouchId = touch.identifier;
+            updateJoystick(touch);
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            if (joyTouchId === null) return;
+            for (let touch of e.changedTouches) {
+                if (touch.identifier === joyTouchId) {
+                    updateJoystick(touch);
+                    break;
+                }
+            }
+        }, { passive: false });
+
+        window.addEventListener('touchend', (e) => {
+            for (let touch of e.changedTouches) {
+                if (touch.identifier === joyTouchId) {
+                    joyTouchId = null;
+                    joyKnob.style.transform = `translate(0px, 0px)`;
+                    STATE.input.x = 0;
+                    STATE.input.y = 0;
+                    break;
+                }
+            }
+        });
+
+        function updateJoystick(touch) {
+            const rect = joyArea.getBoundingClientRect();
+            const touchX = touch.clientX - rect.left - joyCenter.x;
+            const touchY = touch.clientY - rect.top - joyCenter.y;
+            
+            const dist = Math.hypot(touchX, touchY);
+            const angle = Math.atan2(touchY, touchX);
+            
+            const moveDist = Math.min(dist, maxRadius);
+            const knobX = Math.cos(angle) * moveDist;
+            const knobY = Math.sin(angle) * moveDist;
+
+            joyKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+
+            // Normalize input between -1 and 1
+            STATE.input.x = Math.abs(knobX) > 10 ? Math.sign(knobX) : 0;
+            STATE.input.y = Math.abs(knobY) > 10 ? -Math.sign(knobY) : 0; // Invert Y for down
+        }
+
+        // Mobile Jump Button
+        const jumpBtn = document.getElementById('jump-btn');
+        jumpBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            triggerJump();
+        });
+        jumpBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            STATE.input.jump = false;
+        });
+
+        function triggerJump() {
+            STATE.input.jump = true;
+            const p = STATE.player;
+            if (p.grounded) {
+                if (STATE.input.y === -1) {
+                    // Start or charge Spindash
+                    p.spindashing = true;
+                    p.spindashCharge = Math.min(p.spindashCharge + 0.3, 1.2);
+                } else {
+                    // Regular Jump
+                    p.vy = PHYSICS.jumpForce;
+                    p.grounded = false;
+                    p.rolling = true;
+                }
+            }
+        }
+
+        // --- GAME LOOP & PHYSICS ENGINE ---
+        function updatePhysics() {
+            const p = STATE.player;
+
+            // Spindash Release
+            if (p.spindashing && STATE.input.y !== -1) {
+                p.spindashing = false;
+                p.rolling = true;
+                p.vx = (p.vx >= 0 ? 1 : -1) * Math.max(0.6, p.spindashCharge);
+                p.spindashCharge = 0;
+            }
+
+            // Ground Movement
+            if (p.grounded && !p.spindashing) {
+                if (STATE.input.x !== 0) {
+                    p.vx += STATE.input.x * PHYSICS.accel;
+                    // Cap top speed unless rolling down a slope
+                    if (Math.abs(p.vx) > PHYSICS.topSpeed && !p.rolling) {
+                        p.vx = Math.sign(p.vx) * PHYSICS.topSpeed;
+                    }
+                } else {
+                    p.vx *= PHYSICS.fric;
+                }
+
+                // Duck / Trigger Rolling
+                if (STATE.input.y === -1 && Math.abs(p.vx) > 0.1) {
+                    p.rolling = true;
+                }
+                if (Math.abs(p.vx) < 0.05 && p.rolling && STATE.input.y !== -1) {
+                    p.rolling = false;
+                }
+            } 
+            // Air Movement
+            else if (!p.grounded) {
+                p.vx += STATE.input.x * (PHYSICS.accel * 0.5);
+                p.vx *= PHYSICS.airResist;
+                p.vy -= PHYSICS.gravity;
+            }
+
+            // Apply Velocity
+            p.x += p.vx;
+            p.y += p.vy;
+
+            // --- COLLISION DETECTION (Platforms & Slopes) ---
+            p.grounded = false;
+            let currentSlope = 0;
+
+            for (let plat of platforms) {
+                // Transform player relative to platform angle
+                const dx = p.x - plat.x;
+                const dy = p.y - plat.y;
+                
+                // Rotate coordinates to platform's local space
+                const localX = dx * plat.cos + dy * plat.sin;
+                const localY = -dx * plat.sin + dy * plat.cos;
+
+                const halfW = plat.width / 2;
+                const halfH = plat.height / 2;
+
+                // Check if within platform horizontal bounds
+                if (localX >= -halfW && localX <= halfW) {
+                    // Check top surface collision
+                    if (localY >= halfH && localY - (halfH + p.radius) < 0.3 && p.vy <= 0) {
+                        p.grounded = true;
+                        p.vy = 0;
+                        currentSlope = plat.slope;
+                        
+                        // Snap to surface
+                        const targetLocalY = halfH + p.radius;
+                        p.x = plat.x + (localX * plat.cos - targetLocalY * plat.sin);
+                        p.y = plat.y + (localX * plat.sin + targetLocalY * plat.cos);
+                        
+                        // Slope Physics: Gravity pulls down slopes, especially when rolling!
+                        if (currentSlope !== 0) {
+                            const slopeForce = Math.sin(currentSlope) * (p.rolling ? 0.06 : PHYSICS.slopeFactor);
+                            p.vx -= slopeForce;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Fall reset
+            if (p.y < -15) {
+                p.x = 0; p.y = 5; p.vx = 0; p.vy = 0;
+            }
+
+            // --- RING COLLECTION ---
+            for (let ring of rings) {
+                if (ring.active && Math.hypot(p.x - ring.x, p.y - ring.y) < p.radius + 0.6) {
+                    ring.active = false;
+                    ring.mesh.visible = false;
+                    STATE.rings++;
+                    document.getElementById('rings-val').innerText = STATE.rings;
+                }
+            }
+
+            // --- VISUAL UPDATES ---
+            playerGroup.position.set(p.x, p.y, 0);
+
+            // Rotate visual mesh based on speed
+            if (p.spindashing) {
+                playerMesh.rotation.z -= 0.5;
+                playerGroup.scale.set(1.2, 0.8, 1);
+            } else if (p.rolling || !p.grounded) {
+                playerMesh.rotation.z -= p.vx * 2;
+                playerGroup.scale.set(1, 1, 1);
+            } else {
+                playerMesh.rotation.z = currentSlope;
+                if (STATE.input.x !== 0) playerMesh.rotation.y = STATE.input.x === 1 ? 0 : Math.PI;
+                playerGroup.scale.set(1, 1, 1);
+            }
+
+            // Animate rings
+            const time = Date.now() * 0.003;
+            for (let ring of rings) {
+                if (ring.active) ring.mesh.rotation.y = time;
+            }
+
+            // Smooth Camera Follow
+            camera.position.x += (p.x + (p.vx * 15) - camera.position.x) * 0.1;
+            camera.position.y += (Math.max(p.y + 3, 2) - camera.position.y) * 0.1;
+            camera.position.z = 16;
+            camera.lookAt(camera.position.x, camera.position.y - 2, 0);
+
+            // Update UI
+            document.getElementById('speed-val').innerText = Math.abs(Math.round(p.vx * 100));
+        }
+
+        // --- RENDER LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePhysics();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start Game
+        animate();
+    </script>
+</body>
+</html>
