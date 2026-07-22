@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL 2D Platformer</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #222;
+            color: white;
+            font-family: sans-serif;
+            padding-top: 10px;
+            touch-action: none; /* Prevents pull-to-refresh on mobile */
+        }
+        canvas {
+            background-color: #87CEEB; /* Sky blue */
+            box-shadow: 0px 0px 20px rgba(0,0,0,0.5);
+            border: 2px solid #555;
+            max-width: 100%; /* Make canvas responsive */
+            height: auto;
+        }
+        .instructions {
+            margin-top: 10px;
+            text-align: center;
+        }
+        
+        /* Mobile Controls Styling */
+        #mobile-controls {
+            display: flex;
+            width: 100%;
+            max-width: 800px;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .d-pad {
+            display: flex;
+            gap: 15px;
+        }
+        .control-btn {
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 2px solid #aaa;
+            color: white;
+            font-size: 28px;
+            width: 65px;
+            height: 65px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none; /* Crucial for immediate touch response */
+            cursor: pointer;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.3);
+        }
+        .control-btn:active, .control-btn.active {
+            background-color: rgba(255, 255, 255, 0.5);
+            transform: scale(0.95);
+        }
+        
+        /* Hide mobile controls on larger desktop screens if desired */
+        @media (min-width: 850px) {
+            #mobile-controls {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <!-- Mobile Touch Controls -->
+    <div id="mobile-controls">
+        <div class="d-pad">
+            <div class="control-btn" id="btn-left">◀</div>
+            <div class="control-btn" id="btn-right">▶</div>
+        </div>
+        <div class="control-btn" id="btn-jump">▲</div>
+    </div>
+    
+    <div class="instructions">
+        <h3>Controls:</h3>
+        <p><strong>Left / Right Arrows</strong>: Move | <strong>Up Arrow</strong>: Jump</p>
+        <p><em>Push the brown box onto the orange conveyor belt!</em></p>
+    </div>
+
+    <script>
+        // --- WEBGL SETUP ---
+        const canvas = document.getElementById("gameCanvas");
+        const gl = canvas.getContext("webgl");
+
+        if (!gl) {
+            alert("WebGL not supported in your browser.");
+        }
+
+        // Vertex Shader: Converts pixel coordinates to WebGL clip space (-1 to 1)
+        const vertexShaderSource = `
+            attribute vec2 a_position;
+            uniform vec2 u_resolution;
+            void main() {
+                vec2 zeroToOne = a_position / u_resolution;
+                vec2 zeroToTwo = zeroToOne * 2.0;
+                vec2 clipSpace = zeroToTwo - 1.0;
+                gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+            }
+        `;
+
+        // Fragment Shader: Colors the rectangle
+        const fragmentShaderSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+        const resolutionUniformLocation = gl.getUniformLocation(program, "u_resolution");
+        const colorUniformLocation = gl.getUniformLocation(program, "u_color");
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+        // --- GAME LOGIC & PHYSICS ---
+
+        const keys = {};
+        
+        // Keyboard Support
+        window.addEventListener("keydown", (e) => keys[e.code] = true);
+        window.addEventListener("keyup", (e) => keys[e.code] = false);
+
+        // Mobile Touch Support
+        const setupTouchControl = (buttonId, keyCode) => {
+            const btn = document.getElementById(buttonId);
+            
+            const handleStart = (e) => {
+                e.preventDefault(); // Prevent scrolling/zooming
+                keys[keyCode] = true;
+                btn.classList.add('active');
+            };
+            
+            const handleEnd = (e) => {
+                e.preventDefault();
+                keys[keyCode] = false;
+                btn.classList.remove('active');
+            };
+
+            btn.addEventListener("touchstart", handleStart, { passive: false });
+            btn.addEventListener("touchend", handleEnd, { passive: false });
+            btn.addEventListener("touchcancel", handleEnd, { passive: false });
+            
+            // Allow mouse clicks on the buttons for testing on desktop
+            btn.addEventListener("mousedown", handleStart);
+            window.addEventListener("mouseup", () => {
+                keys[keyCode] = false;
+                btn.classList.remove('active');
+            });
+        };
+
+        setupTouchControl("btn-left", "ArrowLeft");
+        setupTouchControl("btn-right", "ArrowRight");
+        setupTouchControl("btn-jump", "ArrowUp");
+
+        // Entity definitions
+        const player = { x: 50, y: 300, w: 30, h: 40, vx: 0, vy: 0, color: [0.1, 0.3, 0.8, 1], onGround: false };
+        const box = { x: 250, y: 300, w: 40, h: 40, vx: 0, vy: 0, color: [0.6, 0.4, 0.2, 1], onGround: false };
+        
+        const platforms = [
+            // Floor
+            { x: 0, y: 550, w: 800, h: 50, color: [0.3, 0.3, 0.3, 1] },
+            // Left Platform
+            { x: 0, y: 400, w: 300, h: 20, color: [0.4, 0.4, 0.4, 1] },
+            // Right Platform
+            { x: 600, y: 400, w: 200, h: 20, color: [0.4, 0.4, 0.4, 1] }
+        ];
+
+        // Conveyor belt bridging the platforms
+        const conveyor = { x: 300, y: 400, w: 300, h: 20, speed: 2, color: [1.0, 0.5, 0.0, 1] };
+
+        const GRAVITY = 0.6;
+        const JUMP_FORCE = -10;
+        const MOVE_SPEED = 5;
+
+        function checkCollision(r1, r2) {
+            return r1.x < r2.x + r2.w &&
+                   r1.x + r1.w > r2.x &&
+                   r1.y < r2.y + r2.h &&
+                   r1.y + r1.h > r2.y;
+        }
+
+        function resolvePlatformCollisions(entity, platforms, conveyor) {
+            entity.onGround = false;
+            const allSurfaces = [...platforms, conveyor];
+
+            for (let surface of allSurfaces) {
+                if (checkCollision(entity, surface)) {
+                    // Coming from above
+                    if (entity.vy > 0 && entity.y + entity.h - entity.vy <= surface.y + 0.1) {
+                        entity.y = surface.y - entity.h;
+                        entity.vy = 0;
+                        entity.onGround = true;
+                        
+                        // Conveyor effect
+                        if (surface === conveyor) {
+                            entity.x += surface.speed; // Move entity along belt
+                        }
+                    }
+                    // Coming from below (hitting head)
+                    else if (entity.vy < 0 && entity.y - entity.vy >= surface.y + surface.h - 0.1) {
+                        entity.y = surface.y + surface.h;
+                        entity.vy = 0;
+                    }
+                    // Hitting sides
+                    else {
+                        if (entity.vx > 0) entity.x = surface.x - entity.w;
+                        else if (entity.vx < 0) entity.x = surface.x + surface.w;
+                    }
+                }
+            }
+        }
+
+        function update() {
+            // Player horizontal movement
+            if (keys["ArrowLeft"]) player.vx = -MOVE_SPEED;
+            else if (keys["ArrowRight"]) player.vx = MOVE_SPEED;
+            else player.vx = 0;
+
+            // Player jump
+            if (keys["ArrowUp"] && player.onGround) {
+                player.vy = JUMP_FORCE;
+                player.onGround = false;
+            }
+
+            // Apply gravity
+            player.vy += GRAVITY;
+            box.vy += GRAVITY;
+
+            // Move player X and check Box push
+            player.x += player.vx;
+            
+            // Box Pushing Logic
+            if (checkCollision(player, box)) {
+                if (player.vx > 0) { // Pushing right
+                    box.x = player.x + player.w;
+                    box.vx = player.vx; 
+                } else if (player.vx < 0) { // Pushing left
+                    box.x = player.x - box.w;
+                    box.vx = player.vx;
+                }
+            } else {
+                box.vx = 0;
+            }
+
+            // Move Y
+            player.y += player.vy;
+            box.y += box.vy;
+
+            // Constrain Box X bounds so it doesn't fall off screen infinitely
+            if (box.x < 0) box.x = 0;
+            if (box.x + box.w > canvas.width) box.x = canvas.width - box.w;
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
+
+            // Resolve collisions with environment
+            resolvePlatformCollisions(player, platforms, conveyor);
+            resolvePlatformCollisions(box, platforms, conveyor);
+        }
+
+        // --- RENDERING ---
+
+        function setRectangle(gl, x, y, width, height) {
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                x, y,
+                x + width, y,
+                x, y + height,
+                x, y + height,
+                x + width, y,
+                x + width, y + height,
+            ]), gl.STATIC_DRAW);
+        }
+
+        function drawRect(x, y, w, h, color) {
+            setRectangle(gl, x, y, w, h);
+            gl.uniform4f(colorUniformLocation, color[0], color[1], color[2], color[3]);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        // Conveyor animation variable
+        let conveyorTick = 0;
+
+        function render() {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            // Clear canvas
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            gl.useProgram(program);
+            gl.enableVertexAttribArray(positionAttributeLocation);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+            gl.uniform2f(resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+
+            // Draw Platforms
+            for (let p of platforms) {
+                drawRect(p.x, p.y, p.w, p.h, p.color);
+            }
+
+            // Draw Conveyor Belt (animate color slightly to show movement)
+            conveyorTick += 0.1;
+            const beltFlash = Math.abs(Math.sin(conveyorTick)) * 0.2;
+            drawRect(
+                conveyor.x, conveyor.y, conveyor.w, conveyor.h, 
+                [conveyor.color[0], conveyor.color[1] + beltFlash, conveyor.color[2], 1.0]
+            );
+
+            // Draw Box
+            drawRect(box.x, box.y, box.w, box.h, box.color);
+
+            // Draw Player
+            drawRect(player.x, player.y, player.w, player.h, player.color);
+        }
+
+        function gameLoop() {
+            update();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
