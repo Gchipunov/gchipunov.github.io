@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>Line Rider Verlet Engine + Mobile/Gamepad Controls</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; touch-action: none; user-select: none; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #121218; font-family: monospace; }
+    #canvas { width: 100vw; height: 100vh; display: block; }
+    
+    #ui {
+      position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.85);
+      color: #00ffcc; padding: 12px; border-radius: 8px; border: 1px solid #00ffcc;
+      font-size: 12px; max-width: 280px; pointer-events: none; box-shadow: 0 0 15px rgba(0,255,204,0.15);
+      z-index: 10;
+    }
+    #ui h2 { margin-bottom: 6px; color: #fff; font-size: 14px; }
+    #ui ul { list-style: none; padding: 0; line-height: 1.5; }
+    #ui span { color: #fff; font-weight: bold; }
+
+    /* Touch Controls Overlay */
+    .touch-btn {
+      position: absolute; background: rgba(255, 255, 255, 0.12);
+      border: 2px solid rgba(255, 255, 255, 0.3); border-radius: 50%;
+      color: #fff; font-weight: bold; font-size: 18px;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 20; -webkit-tap-highlight-color: transparent;
+    }
+    .touch-btn:active, .touch-btn.active {
+      background: rgba(0, 255, 204, 0.4); border-color: #00ffcc; color: #00ffcc;
+    }
+
+    /* Left Side D-Pad Zone */
+    #btn-left { left: 20px; bottom: 30px; width: 65px; height: 65px; }
+    #btn-right { left: 100px; bottom: 30px; width: 65px; height: 65px; }
+
+    /* Right Side Action & Tool Buttons */
+    #btn-jump { right: 25px; bottom: 30px; width: 75px; height: 75px; background: rgba(0, 255, 204, 0.2); border-color: #00ffcc; }
+    #btn-tool { right: 115px; bottom: 35px; width: 55px; height: 55px; font-size: 12px; border-radius: 12px; }
+    #btn-reset { right: 25px; top: 15px; width: 45px; height: 45px; font-size: 12px; border-radius: 8px; }
+    #btn-clear { right: 80px; top: 15px; width: 45px; height: 45px; font-size: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+
+  <div id="ui">
+    <h2>Verlet Physics Controls</h2>
+    <ul>
+      <li><span>[A/D]</span> / <span>Touch Left</span> : Run</li>
+      <li><span>[Space]</span> / <span>Jump Btn</span> : Jump</li>
+      <li><span>[Gamepad]</span> D-Pad / Analog Supported</li>
+      <li><span>[Draw Track]</span> Touch/Drag on Screen</li>
+    </ul>
+  </div>
+
+  <!-- Touch UI Controls -->
+  <div id="btn-left" class="touch-btn">◄</div>
+  <div id="btn-right" class="touch-btn">►</div>
+  <div id="btn-jump" class="touch-btn">JUMP</div>
+  <div id="btn-tool" class="touch-btn">BLUE</div>
+  <div id="btn-reset" class="touch-btn">RST</div>
+  <div id="btn-clear" class="touch-btn">CLR</div>
+
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // --- WebGL Setup ---
+    const vsSource = `
+      attribute vec2 a_position;
+      uniform vec2 u_resolution;
+      uniform vec2 u_camera;
+      
+      void main() {
+        vec2 worldPos = a_position - u_camera;
+        vec2 zeroToOne = worldPos / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+      }
+    `;
+
+    const fsSource = `
+      precision mediump float;
+      uniform vec4 u_color;
+      void main() {
+        gl_FragColor = u_color;
+      }
+    `;
+
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl');
+    if (!gl) alert('WebGL not supported!');
+
+    function createShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(program);
+
+    const positionLoc = gl.getAttribLocation(program, 'a_position');
+    const resolutionLoc = gl.getUniformLocation(program, 'u_resolution');
+    const cameraLoc = gl.getUniformLocation(program, 'u_camera');
+    const colorLoc = gl.getUniformLocation(program, 'u_color');
+    const buffer = gl.createBuffer();
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- Line Rider Track World ---
+    let lines = [
+      { x1: -500, y1: 300, x2: 100, y2: 300, type: 0 },
+      { x1: 100, y1: 300, x2: 500, y2: 450, type: 0 },
+      { x1: 500, y1: 450, x2: 900, y2: 300, type: 1 },
+      { x1: 900, y1: 300, x2: 1300, y2: 0, type: 0 },
+      { x1: 1300, y1: 0, x2: 1700, y2: 300, type: 0 }
+    ];
+
+    let currentTool = 0; // 0: Normal (Blue), 1: Boost (Red)
+    let drawing = false;
+    let lineStart = { x: 0, y: 0 };
+    let currentMouse = { x: 0, y: 0 };
+
+    // --- Verlet Point & Cloth Definition ---
+    class Point {
+      constructor(x, y) {
+        this.x = x; this.y = y;
+        this.oldX = x; this.oldY = y;
+        this.radius = 4;
+      }
+      update(gravity, friction) {
+        const vx = (this.x - this.oldX) * friction;
+        const vy = (this.y - this.oldY) * friction;
+        this.oldX = this.x; this.oldY = this.y;
+        this.x += vx; this.y += vy + gravity;
+      }
+    }
+
+    class Constraint {
+      constructor(p1, p2, distance) {
+        this.p1 = p1; this.p2 = p2;
+        this.distance = distance || Math.hypot(p1.x - p2.x, p1.y - p2.y);
+      }
+      solve() {
+        const dx = this.p2.x - this.p1.x;
+        const dy = this.p2.y - this.p1.y;
+        const currentDist = Math.hypot(dx, dy);
+        if (currentDist === 0) return;
+        const delta = (this.distance - currentDist) / currentDist * 0.5;
+        this.p1.x -= dx * delta; this.p1.y -= dy * delta;
+        this.p2.x += dx * delta; this.p2.y += dy * delta;
+      }
+    }
+
+    const gravity = 0.35;
+    const friction = 0.985;
+    const playerPoint = new Point(-300, 200);
+    playerPoint.radius = 12;
+
+    // Cloth Mesh Setup
+    const clothCols = 6, clothRows = 8, clothSpacing = 9;
+    const clothPoints = [], clothConstraints = [];
+    for (let r = 0; r < clothRows; r++) {
+      for (let c = 0; c < clothCols; c++) {
+        clothPoints.push(new Point(playerPoint.x - c * clothSpacing, playerPoint.y + r * clothSpacing));
+      }
+    }
+    for (let r = 0; r < clothRows; r++) {
+      for (let c = 0; c < clothCols; c++) {
+        const idx = r * clothCols + c;
+        if (c < clothCols - 1) clothConstraints.push(new Constraint(clothPoints[idx], clothPoints[idx + 1]));
+        if (r < clothRows - 1) clothConstraints.push(new Constraint(clothPoints[idx], clothPoints[idx + clothCols]));
+        if (c < clothCols - 1 && r < clothRows - 1) clothConstraints.push(new Constraint(clothPoints[idx], clothPoints[idx + clothCols + 1]));
+      }
+    }
+
+    // --- Input Control State ---
+    const input = { left: false, right: false, jump: false };
+    const keys = {};
+
+    window.addEventListener('keydown', e => {
+      keys[e.key.toLowerCase()] = true;
+      if (e.key === '1') setTool(0);
+      if (e.key === '2') setTool(1);
+      if (e.key.toLowerCase() === 'r') resetPlayer();
+      if (e.key.toLowerCase() === 'c') lines = [];
+    });
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+    // --- Mobile Touch Controls Configuration ---
+    const btnLeft = document.getElementById('btn-left');
+    const btnRight = document.getElementById('btn-right');
+    const btnJump = document.getElementById('btn-jump');
+    const btnTool = document.getElementById('btn-tool');
+    const btnReset = document.getElementById('btn-reset');
+    const btnClear = document.getElementById('btn-clear');
+
+    function bindTouchButton(elem, onPress, onRelease) {
+      elem.addEventListener('touchstart', e => { e.preventDefault(); elem.classList.add('active'); onPress(); });
+      elem.addEventListener('touchend', e => { e.preventDefault(); elem.classList.remove('active'); if(onRelease) onRelease(); });
+    }
+
+    bindTouchButton(btnLeft, () => input.left = true, () => input.left = false);
+    bindTouchButton(btnRight, () => input.right = true, () => input.right = false);
+    bindTouchButton(btnJump, () => input.jump = true, () => input.jump = false);
+    
+    function setTool(toolId) {
+      currentTool = toolId;
+      btnTool.innerText = currentTool === 0 ? 'BLUE' : 'RED';
+      btnTool.style.borderColor = currentTool === 0 ? '#00ffcc' : '#ff0055';
+      btnTool.style.color = currentTool === 0 ? '#00ffcc' : '#ff0055';
+    }
+
+    bindTouchButton(btnTool, () => setTool(currentTool === 0 ? 1 : 0));
+    bindTouchButton(btnReset, () => resetPlayer());
+    bindTouchButton(btnClear, () => lines = []);
+
+    // Canvas Drawing via Touch (Ignores UI overlay zones)
+    function getCanvasCoords(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: clientX - rect.left + camera.x - canvas.width / 2,
+        y: clientY - rect.top + camera.y - canvas.height / 2
+      };
+    }
+
+    window.addEventListener('touchstart', e => {
+      for (let i = 0; i < e.touches.length; i++) {
+        const touch = e.touches[i];
+        if (touch.target === canvas) {
+          drawing = true;
+          const pos = getCanvasCoords(touch.clientX, touch.clientY);
+          lineStart = pos; currentMouse = pos;
+          break;
+        }
+      }
+    });
+
+    window.addEventListener('touchmove', e => {
+      if (drawing) {
+        for (let i = 0; i < e.touches.length; i++) {
+          if (e.touches[i].target === canvas) {
+            currentMouse = getCanvasCoords(e.touches[i].clientX, e.touches[i].clientY);
+            break;
+          }
+        }
+      }
+    });
+
+    window.addEventListener('touchend', e => {
+      if (drawing) {
+        const dist = Math.hypot(currentMouse.x - lineStart.x, currentMouse.y - lineStart.y);
+        if (dist > 5) {
+          lines.push({ x1: lineStart.x, y1: lineStart.y, x2: currentMouse.x, y2: currentMouse.y, type: currentTool });
+        }
+        drawing = false;
+      }
+    });
+
+    // Mouse Fallbacks
+    window.addEventListener('mousedown', e => {
+      if (e.button === 0 && e.target === canvas) {
+        drawing = true;
+        const pos = getCanvasCoords(e.clientX, e.clientY);
+        lineStart = pos; currentMouse = pos;
+      }
+    });
+    window.addEventListener('mousemove', e => { if (drawing) currentMouse = getCanvasCoords(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', e => {
+      if (drawing && e.button === 0) {
+        if (Math.hypot(currentMouse.x - lineStart.x, currentMouse.y - lineStart.y) > 5) {
+          lines.push({ x1: lineStart.x, y1: lineStart.y, x2: currentMouse.x, y2: currentMouse.y, type: currentTool });
+        }
+        drawing = false;
+      }
+    });
+
+    // --- HTML5 Gamepad Input Polling ---
+    function pollGamepad() {
+      const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (let gp of gamepads) {
+        if (!gp) continue;
+        
+        // Left Stick or D-Pad
+        const axisX = gp.axes[0];
+        const dpadLeft = gp.buttons[14] && gp.buttons[14].pressed;
+        const dpadRight = gp.buttons[15] && gp.buttons[15].pressed;
+
+        if (axisX < -0.3 || dpadLeft) input.left = true;
+        if (axisX > 0.3 || dpadRight) input.right = true;
+
+        // Jump (A / Cross button = index 0)
+        if (gp.buttons[0] && gp.buttons[0].pressed) input.jump = true;
+
+        // Reset / Clear buttons (Select/Start or Triggers)
+        if (gp.buttons[8] && gp.buttons[8].pressed) resetPlayer();
+        if (gp.buttons[9] && gp.buttons[9].pressed) lines = [];
+      }
+    }
+
+    function resetPlayer() {
+      playerPoint.x = -300; playerPoint.y = 200;
+      playerPoint.oldX = -300; playerPoint.oldY = 200;
+      for (let r = 0; r < clothRows; r++) {
+        for (let c = 0; c < clothCols; c++) {
+          const pt = clothPoints[r * clothCols + c];
+          pt.x = playerPoint.x - c * clothSpacing; pt.y = playerPoint.y + r * clothSpacing;
+          pt.oldX = pt.x; pt.oldY = pt.y;
+        }
+      }
+    }
+
+    function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1, dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return { x: x1, y: y1, t: 0 };
+      let t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+      return { x: x1 + t * dx, y: y1 + t * dy, t: t };
+    }
+
+    function collidePointWithLines(pt) {
+      for (let line of lines) {
+        const closest = closestPointOnSegment(pt.x, pt.y, line.x1, line.y1, line.x2, line.y2);
+        const dist = Math.hypot(pt.x - closest.x, pt.y - closest.y);
+
+        if (dist < pt.radius) {
+          const lx = line.x2 - line.x1, ly = line.y2 - line.y1;
+          const lineLen = Math.hypot(lx, ly);
+          if (lineLen === 0) continue;
+
+          const nx = -ly / lineLen, ny = lx / lineLen;
+          pt.x = closest.x + nx * pt.radius;
+          pt.y = closest.y + ny * pt.radius;
+
+          if (line.type === 1) { // Boost Line
+            pt.x += (lx / lineLen) * 1.5;
+            pt.y += (ly / lineLen) * 1.5;
+          }
+        }
+      }
+    }
+
+    // --- Physics Update Step ---
+    function updatePhysics() {
+      pollGamepad();
+
+      // Combine Keyboard, Touch, and Gamepad States
+      const moveLeft = keys['a'] || keys['arrowleft'] || input.left;
+      const moveRight = keys['d'] || keys['arrowright'] || input.right;
+      const jump = keys[' '] || keys['w'] || keys['arrowup'] || input.jump;
+
+      if (moveLeft) playerPoint.oldX += 0.8;
+      if (moveRight) playerPoint.oldX -= 0.8;
+      if (jump) playerPoint.oldY += 1.2;
+
+      playerPoint.update(gravity, friction);
+      for (let pt of clothPoints) pt.update(gravity, friction);
+
+      // Attach Cloth Top Edge to Player Mass Point
+      for (let c = 0; c < clothCols; c++) {
+        const pt = clothPoints[c];
+        pt.x = playerPoint.x - c * (clothSpacing * 0.6);
+        pt.y = playerPoint.y + (c * 2);
+      }
+
+      // Solve Cloth Distance Constraints
+      for (let i = 0; i < 5; i++) {
+        for (let constraint of clothConstraints) constraint.solve();
+      }
+
+      // Resolve Track Collisions
+      collidePointWithLines(playerPoint);
+      for (let pt of clothPoints) collidePointWithLines(pt);
+    }
+
+    const camera = { x: playerPoint.x, y: playerPoint.y };
+    function updateCamera() {
+      camera.x += (playerPoint.x - camera.x) * 0.08;
+      camera.y += (playerPoint.y - camera.y) * 0.08;
+    }
+
+    // --- Drawing Render Helpers ---
+    function drawLines(verts, color, mode = gl.LINES) {
+      gl.useProgram(program);
+      gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
+      gl.uniform2f(cameraLoc, camera.x - canvas.width / 2, camera.y - canvas.height / 2);
+      gl.uniform4fv(colorLoc, color);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+
+      gl.enableVertexAttribArray(positionLoc);
+      gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(mode, 0, verts.length / 2);
+    }
+
+    function drawCircle(cx, cy, r, color) {
+      const segs = 20; const verts = [];
+      for (let i = 0; i < segs; i++) {
+        const a1 = (i / segs) * Math.PI * 2;
+        const a2 = ((i + 1) / segs) * Math.PI * 2;
+        verts.push(cx, cy);
+        verts.push(cx + Math.cos(a1) * r, cy + Math.sin(a1) * r);
+        verts.push(cx + Math.cos(a2) * r, cy + Math.sin(a2) * r);
+      }
+      drawLines(verts, color, gl.TRIANGLES);
+    }
+
+    function render() {
+      updatePhysics();
+      updateCamera();
+
+      gl.clearColor(0.07, 0.07, 0.09, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      // Track Lines
+      const blueVerts = [], redVerts = [];
+      for (let l of lines) {
+        if (l.type === 0) blueVerts.push(l.x1, l.y1, l.x2, l.y2);
+        else redVerts.push(l.x1, l.y1, l.x2, l.y2);
+      }
+      if (blueVerts.length > 0) drawLines(blueVerts, [0.0, 0.6, 1.0, 1.0]);
+      if (redVerts.length > 0) drawLines(redVerts, [1.0, 0.2, 0.3, 1.0]);
+
+      // Drawing Line Preview
+      if (drawing) {
+        const color = currentTool === 0 ? [0.0, 0.6, 1.0, 0.5] : [1.0, 0.2, 0.3, 0.5];
+        drawLines([lineStart.x, lineStart.y, currentMouse.x, currentMouse.y], color);
+      }
+
+      // Cloth Cape Wireframe
+      const clothVerts = [];
+      for (let c of clothConstraints) clothVerts.push(c.p1.x, c.p1.y, c.p2.x, c.p2.y);
+      drawLines(clothVerts, [0.9, 0.1, 0.4, 0.8]);
+
+      // Player Mass Point
+      drawCircle(playerPoint.x, playerPoint.y, playerPoint.radius, [0.0, 0.9, 1.0, 1.0]);
+
+      requestAnimationFrame(render);
+    }
+
+    render();
+  </script>
+</body>
+</html>
