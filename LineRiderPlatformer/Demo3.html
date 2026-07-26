@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Line Rider x Sonic Physics Engine (WebGL)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #1a1a24; font-family: monospace; }
+    #canvas { width: 100vw; height: 100vh; display: block; }
+    #ui {
+      position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.8);
+      color: #00ffcc; padding: 15px; border-radius: 8px; border: 1px solid #00ffcc;
+      font-size: 13px; max-width: 300px; pointer-events: none; box-shadow: 0 0 15px rgba(0,255,204,0.2);
+    }
+    #ui h2 { margin-bottom: 8px; color: #fff; font-size: 16px; }
+    #ui ul { list-style: none; padding: 0; line-height: 1.6; }
+    #ui span { color: #fff; font-weight: bold; }
+    .tool-active { color: #ff0055 !important; }
+  </style>
+</head>
+<body>
+
+  <div id="ui">
+    <h2>Line Physics Engine</h2>
+    <ul>
+      <li><span>[A / D]</span> or <span>[← / →]</span> : Run</li>
+      <li><span>[Space]</span> : Jump</li>
+      <li><span>[Left Click + Drag]</span> : Draw Line</li>
+      <li><span>[1]</span> Blue (Solid/Normal)</li>
+      <li><span>[2]</span> Red (Boost Line)</li>
+      <li><span>[R]</span> : Reset to Spawn</li>
+      <li><span>[C]</span> : Clear All Lines</li>
+    </ul>
+  </div>
+
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // --- WebGL Shaders ---
+    const vsSource = `
+      attribute vec2 a_position;
+      uniform vec2 u_resolution;
+      uniform vec2 u_camera;
+      
+      void main() {
+        vec2 worldPos = a_position - u_camera;
+        vec2 zeroToOne = worldPos / u_resolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        gl_Position = vecvec4(clipSpace * vec2(1, -1), 0, 1);
+      }
+    `.replace('vecvec4', 'vec4'); // Typo safeguard
+
+    const fsSource = `
+      precision mediump float;
+      uniform vec4 u_color;
+      void main() {
+        gl_FragColor = u_color;
+      }
+    `;
+
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl');
+
+    if (!gl) alert('WebGL not supported!');
+
+    function createShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+    gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+    gl.linkProgram(program);
+
+    const positionLoc = gl.getAttribLocation(program, 'a_position');
+    const resolutionLoc = gl.getUniformLocation(program, 'u_resolution');
+    const cameraLoc = gl.getUniformLocation(program, 'u_camera');
+    const colorLoc = gl.getUniformLocation(program, 'u_color');
+
+    const buffer = gl.createBuffer();
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // --- Line Data Structure ---
+    // Types: 0 = Normal (Blue), 1 = Boost (Red)
+    let lines = [
+      // Default initial ground ramp
+      { x1: -500, y1: 400, x2: 200, y2: 400, type: 0 },
+      { x1: 200, y1: 400, x2: 600, y2: 500, type: 0 },
+      { x1: 600, y1: 500, x2: 1000, y2: 350, type: 1 },
+      { x1: 1000, y1: 350, x2: 1400, y2: 100, type: 0 },
+      { x1: 1400, y1: 100, x2: 1800, y2: 400, type: 0 }
+    ];
+
+    let currentTool = 0; // 0: Blue, 1: Red
+    let drawing = false;
+    let lineStart = { x: 0, y: 0 };
+    let currentMouse = { x: 0, y: 0 };
+
+    // --- Sonic/Mario Physics Constants ---
+    const player = {
+      x: -300, y: 350,
+      vx: 0, vy: 0,
+      radius: 14,
+      grounded: false,
+      groundLine: null,
+      accel: 0.5,
+      friction: 0.98,
+      airFriction: 0.99,
+      gravity: 0.4,
+      jumpForce: -10.5,
+      maxSpeed: 22
+    };
+
+    const keys = {};
+
+    window.addEventListener('keydown', e => {
+      keys[e.key.toLowerCase()] = true;
+      if (e.key === '1') currentTool = 0;
+      if (e.key === '2') currentTool = 1;
+      if (e.key.toLowerCase() === 'r') resetPlayer();
+      if (e.key.toLowerCase() === 'c') lines = [];
+    });
+    window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+    // Mouse to World coordinates
+    function getMouseWorldPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      return {
+        x: screenX + camera.x - canvas.width / 2,
+        y: screenY + camera.y - canvas.height / 2
+      };
+    }
+
+    window.addEventListener('mousedown', e => {
+      if (e.button === 0) {
+        drawing = true;
+        const pos = getMouseWorldPos(e);
+        lineStart = pos;
+        currentMouse = pos;
+      }
+    });
+
+    window.addEventListener('mousemove', e => {
+      if (drawing) currentMouse = getMouseWorldPos(e);
+    });
+
+    window.addEventListener('mouseup', e => {
+      if (drawing && e.button === 0) {
+        const pos = getMouseWorldPos(e);
+        // Only add if segment has real length
+        const dist = Math.hypot(pos.x - lineStart.x, pos.y - lineStart.y);
+        if (dist > 5) {
+          lines.push({
+            x1: lineStart.x, y1: lineStart.y,
+            x2: pos.x, y2: pos.y,
+            type: currentTool
+          });
+        }
+        drawing = false;
+      }
+    });
+
+    function resetPlayer() {
+      player.x = -300;
+      player.y = 300;
+      player.vx = 0;
+      player.vy = 0;
+      player.grounded = false;
+    }
+
+    // --- Vector Physics Helper Functions ---
+    function closestPointOnSegment(px, py, x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return { x: x1, y: y1, t: 0 };
+      
+      let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      
+      return { x: x1 + t * dx, y: y1 + t * dy, t: t };
+    }
+
+    // --- Physics Engine Update ---
+    function updatePhysics() {
+      // Inputs
+      const moveLeft = keys['a'] || keys['arrowleft'];
+      const moveRight = keys['d'] || keys['arrowright'];
+      const jump = keys[' '] || keys['w'] || keys['arrowup'];
+
+      // Horizontal Acceleration
+      if (moveLeft) player.vx -= player.accel;
+      if (moveRight) player.vx += player.accel;
+
+      // Apply Gravity
+      player.vy += player.gravity;
+
+      // Apply Friction
+      if (player.grounded) {
+        player.vx *= player.friction;
+        player.vy *= player.friction;
+      } else {
+        player.vx *= player.airFriction;
+      }
+
+      // Speed Limit
+      const currentSpeed = Math.hypot(player.vx, player.vy);
+      if (currentSpeed > player.maxSpeed) {
+        player.vx = (player.vx / currentSpeed) * player.maxSpeed;
+        player.vy = (player.vy / currentSpeed) * player.maxSpeed;
+      }
+
+      // Predict Next Position
+      let nextX = player.x + player.vx;
+      let nextY = player.y + player.vy;
+
+      player.grounded = false;
+
+      // --- Line Rider Collision & Slope Physics ---
+      for (let line of lines) {
+        const closest = closestPointOnSegment(nextX, nextY, line.x1, line.y1, line.x2, line.y2);
+        const distX = nextX - closest.x;
+        const distY = nextY - closest.y;
+        const dist = Math.hypot(distX, distY);
+
+        if (dist < player.radius) {
+          // Line Normal Vector
+          const lx = line.x2 - line.x1;
+          const ly = line.y2 - line.y1;
+          const lineLen = Math.hypot(lx, ly);
+          if (lineLen === 0) continue;
+
+          // Normal facing up/out
+          let nx = -ly / lineLen;
+          let ny = lx / lineLen;
+
+          // Dot product to check collision direction
+          const dot = player.vx * nx + player.vy * ny;
+          if (dot < 0) { 
+            player.grounded = true;
+            player.groundLine = line;
+
+            // Push Player to Surface
+            nextX = closest.x + nx * player.radius;
+            nextY = closest.y + ny * player.radius;
+
+            // Slide physics: Project velocity onto line tangent
+            const tx = lx / lineLen;
+            const ty = ly / lineLen;
+            const dpTangent = player.vx * tx + player.vy * ty;
+
+            player.vx = tx * dpTangent;
+            player.vy = ty * dpTangent;
+
+            // Boost Line Mechanic (Red Lines acceleration)
+            if (line.type === 1) {
+              player.vx += tx * 0.8;
+              player.vy += ty * 0.8;
+            }
+
+            // Jump Action
+            if (jump) {
+              player.vx += nx * Math.abs(player.jumpForce);
+              player.vy += ny * player.jumpForce;
+              player.grounded = false;
+            }
+          }
+        }
+      }
+
+      player.x = nextX;
+      player.y = nextY;
+    }
+
+    // --- Dynamic Camera ---
+    const camera = { x: player.x, y: player.y };
+    function updateCamera() {
+      // Smooth lerp follow
+      camera.x += (player.x - camera.x) * 0.08;
+      camera.y += (player.y - camera.y) * 0.08;
+    }
+
+    // --- WebGL Primitive Drawing Helpers ---
+    function drawLines(verts, color, mode = gl.LINES, lineWidth = 2) {
+      gl.useProgram(program);
+      gl.uniform2f(resolutionLoc, canvas.width, canvas.height);
+      gl.uniform2f(cameraLoc, camera.x - canvas.width / 2, camera.y - canvas.height / 2);
+      gl.uniform4fv(colorLoc, color);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+
+      gl.enableVertexAttribArray(positionLoc);
+      gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.drawArrays(mode, 0, verts.length / 2);
+    }
+
+    function drawCircle(cx, cy, r, color) {
+      const segments = 24;
+      const verts = [];
+      for (let i = 0; i < segments; i++) {
+        const theta1 = (i / segments) * Math.PI * 2;
+        const theta2 = ((i + 1) / segments) * Math.PI * 2;
+        verts.push(cx, cy);
+        verts.push(cx + Math.cos(theta1) * r, cy + Math.sin(theta1) * r);
+        verts.push(cx + Math.cos(theta2) * r, cy + Math.sin(theta2) * r);
+      }
+      drawLines(verts, color, gl.TRIANGLES);
+    }
+
+    // --- Render Loop ---
+    function render() {
+      updatePhysics();
+      updateCamera();
+
+      // Clear Screen
+      gl.clearColor(0.1, 0.1, 0.14, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      // 1. Draw Environment Lines
+      const blueVerts = [];
+      const redVerts = [];
+
+      for (let l of lines) {
+        if (l.type === 0) blueVerts.push(l.x1, l.y1, l.x2, l.y2);
+        else redVerts.push(l.x1, l.y1, l.x2, l.y2);
+      }
+
+      if (blueVerts.length > 0) drawLines(blueVerts, [0.0, 0.6, 1.0, 1.0]); // Blue Normal
+      if (redVerts.length > 0) drawLines(redVerts, [1.0, 0.2, 0.3, 1.0]);   // Red Boost
+
+      // 2. Draw Currently Drawn Line Preview
+      if (drawing) {
+        const previewColor = currentTool === 0 ? [0.0, 0.6, 1.0, 0.5] : [1.0, 0.2, 0.3, 0.5];
+        drawLines([lineStart.x, lineStart.y, currentMouse.x, currentMouse.y], previewColor);
+      }
+
+      // 3. Draw Player Character (Sonic-style Cyan/Blue Orb)
+      drawCircle(player.x, player.y, player.radius, [0.0, 0.9, 1.0, 1.0]);
+
+      requestAnimationFrame(render);
+    }
+
+    render();
+  </script>
+</body>
+</html>
