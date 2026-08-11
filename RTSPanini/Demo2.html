@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>WebGL Panini RTS with Destructible Voxels</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: monospace; touch-action: none; }
+        #canvas { width: 100vw; height: 100vh; display: block; }
+        
+        #ui {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column; justify-content: space-between;
+            padding: 10px; color: #00ffcc; text-shadow: 0 0 4px #000;
+        }
+        .panel {
+            background: rgba(10, 20, 30, 0.85); border: 1px solid #00ffcc;
+            padding: 10px; border-radius: 4px; pointer-events: auto;
+            box-shadow: 0 0 10px rgba(0,255,204,0.2);
+        }
+        #top-bar { display: flex; justify-content: space-between; align-items: center; }
+        #resources { font-size: 16px; font-weight: bold; }
+        
+        .controls-grid { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        button {
+            background: #00332a; color: #00ffcc; border: 1px solid #00ffcc;
+            padding: 8px 12px; font-family: inherit; font-size: 12px; font-weight: bold;
+            cursor: pointer; border-radius: 3px; touch-action: manipulation;
+        }
+        button:active, button.active { background: #00ffcc; color: #000; }
+        button:disabled { opacity: 0.3; border-color: #555; color: #888; }
+        
+        .slider-box { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+        input[type=range] { accent-color: #00ffcc; width: 90px; }
+
+        /* Virtual Joystick for Mobile */
+        #joystick-container {
+            position: absolute; bottom: 20px; left: 20px; width: 100px; height: 100px;
+            background: rgba(0, 255, 204, 0.1); border: 2px solid #00ffcc; border-radius: 50%;
+            pointer-events: auto; display: none; touch-action: none;
+        }
+        #joystick-stick {
+            position: absolute; top: 35px; left: 35px; width: 30px; height: 30px;
+            background: #00ffcc; border-radius: 50%; pointer-events: none;
+        }
+        #selection-box {
+            position: absolute; border: 1px dashed #00ffcc; background: rgba(0, 255, 204, 0.15);
+            pointer-events: none; display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="ui">
+        <div id="top-bar">
+            <div class="panel">
+                <div id="resources">ORE: <span id="res-val">600</span></div>
+            </div>
+            <div class="panel slider-box">
+                <label>Panini Dist ($d$):</label>
+                <input type="range" id="panini-d" min="0.0" max="3.0" step="0.1" value="1.5">
+                <span id="panini-val">1.5</span>
+            </div>
+        </div>
+
+        <div class="panel" style="align-self: center; margin-bottom: 5px;">
+            <div class="controls-grid">
+                <button id="btn-mcv">Build Harvester (100)</button>
+                <button id="btn-tank">Build Tank (150)</button>
+                <button id="btn-digger">Build Digger (120)</button>
+                <button id="btn-dozer">Build Dozer (120)</button>
+                <span style="border-left: 1px solid #00ffcc; height: 20px; margin: 0 4px;"></span>
+                <button id="btn-action" style="background:#552200; border-color:#ffaa00; color:#ffaa00;">Action Tool</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="joystick-container">
+        <div id="joystick-stick"></div>
+    </div>
+    <div id="selection-box"></div>
+
+<script>
+// --- WebGL Shaders: Raymarched Dual Contouring SDF Terrain + Panini Lens Compression ---
+const VS_SOURCE = `
+    attribute vec2 a_position;
+    varying vec2 v_uv;
+    void main() {
+        v_uv = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+    }
+`;
+
+const FS_SOURCE = `
+    precision highp float;
+    varying vec2 v_uv;
+
+    uniform vec2 u_resolution;
+    uniform vec3 u_camPos;
+    uniform vec3 u_camTarget;
+    uniform float u_paniniD;
+
+    // Dynamic Voxel Sculpt Modification Uniforms (Up to 16 edits)
+    uniform vec4 u_edits[16]; // xyz = pos, w = radius (positive = add/smooth, negative = carve/dig)
+    uniform int u_editCount;
+
+    // CSG / Dual-Contouring SDF Operators
+    float sdBox(vec3 p, vec3 b) {
+        vec3 q = abs(p) - b;
+        return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+    }
+
+    // Base dual contouring voxel map (sharp cliffs + smooth rolling hills)
+    float mapTerrain(vec3 p) {
+        // Smooth rolling hills base
+        float hills = p.y - (sin(p.x * 0.15) * cos(p.z * 0.15) * 2.0 + sin(p.x * 0.05) * 4.0);
+        
+        // Sharp dual-contour terraces/cliffs
+        vec3 boxP = mod(p + 10.0, 20.0) - 10.0;
+        float sharpMesa = sdBox(boxP - vec3(0.0, 1.0, 0.0), vec3(4.0, 3.0, 4.0)) - 0.2;
+        
+        // Combine smooth terrain with sharp geometric features
+        float d = min(hills, sharpMesa);
+
+        // Apply Real-Time Dynamic Excavations / Carvings / Tunnels
+        for (int i = 0; i < 16; i++) {
+            if (i >= u_editCount) break;
+            vec3 editPos = u_edits[i].xyz;
+            float r = abs(u_edits[i].w);
+            float sphereD = length(p - editPos) - r;
+
+            if (u_edits[i].w < 0.0) {
+                // Carve Out (Tunnels, Tank Explosions, Digger Holes)
+                d = max(d, -sphereD);
+            } else {
+                // Flatten / Bulldoze Smooth Additions
+                d = min(d, sphereD);
+            }
+        }
+        return d;
+    }
+
+    vec3 calcNormal(vec3 p) {
+        vec2 e = vec2(0.05, 0.0);
+        return normalize(vec3(
+            mapTerrain(p + e.xyy) - mapTerrain(p - e.xyy),
+            mapTerrain(p + e.yxy) - mapTerrain(p - e.yxy),
+            mapTerrain(p + e.yyx) - mapTerrain(p - e.yyx)
+        ));
+    }
+
+    // Panini Cylindrical Projection transformation on Ray Direction
+    vec3 getPaniniRay(vec2 uv, float d) {
+        vec2 st = (uv * 2.0 - 1.0) * vec2(u_resolution.x / u_resolution.y, 1.0);
+        
+        // Panini Cylindrical Lens Equations
+        float foV = 1.2; 
+        float x = st.x * foV;
+        float y = st.y * foV;
+
+        if (d > 0.001) {
+            float S = (d + 1.0) / (d + sqrt(1.0 + x * x));
+            x *= S;
+            y *= S;
+        }
+
+        // Camera Matrix Setup
+        vec3 forward = normalize(u_camTarget - u_camPos);
+        vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+        vec3 up = cross(right, forward);
+
+        return normalize(forward + right * x + up * y);
+    }
+
+    void main() {
+        vec3 rayDir = getPaniniRay(v_uv, u_paniniD);
+        
+        // Raymarch Scene
+        float t = 0.0;
+        float tMax = 120.0;
+        vec3 p = u_camPos;
+        bool hit = false;
+
+        for (int i = 0; i < 96; i++) {
+            p = u_camPos + rayDir * t;
+            float d = mapTerrain(p);
+            if (d < 0.03) { hit = true; break; }
+            t += d * 0.7; // Step size
+            if (t > tMax) break;
+        }
+
+        if (hit) {
+            vec3 N = calcNormal(p);
+            vec3 L = normalize(vec3(0.6, 0.8, 0.4));
+            
+            float diff = max(dot(N, L), 0.15);
+            
+            // Material coloring based on dual contour slope & height
+            vec3 grass = vec3(0.15, 0.45, 0.2);
+            vec3 rock = vec3(0.4, 0.35, 0.3);
+            vec3 dirt = vec3(0.3, 0.2, 0.1);
+
+            vec3 color = mix(rock, grass, smoothstep(0.4, 0.8, N.y));
+            if (p.y < 0.0) color = dirt; // Inner dug-out tunnel dirt
+
+            // Fog
+            color = mix(color, vec3(0.05, 0.1, 0.15), smoothstep(40.0, tMax, t));
+            gl_FragColor = vec4(color * diff, 1.0);
+        } else {
+            // Sky gradient
+            gl_FragColor = vec4(mix(vec3(0.05, 0.1, 0.15), vec3(0.0, 0.2, 0.3), v_uv.y), 1.0);
+        }
+    }
+`;
+
+// --- WebGL Setup ---
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl');
+
+function compile(src, type) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(VS_SOURCE, gl.VERTEX_SHADER));
+gl.attachShader(prog, compile(FS_SOURCE, gl.FRAGMENT_SHADER));
+gl.linkProgram(prog); gl.useProgram(prog);
+
+// Screen Quad
+const quadBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+const aPos = gl.getAttribLocation(prog, 'a_position');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uniforms = {
+    res: gl.getUniformLocation(prog, 'u_resolution'),
+    camPos: gl.getUniformLocation(prog, 'u_camPos'),
+    camTarget: gl.getUniformLocation(prog, 'u_camTarget'),
+    paniniD: gl.getUniformLocation(prog, 'u_paniniD'),
+    edits: gl.getUniformLocation(prog, 'u_edits'),
+    editCount: gl.getUniformLocation(prog, 'u_editCount')
+};
+
+// --- Game Engine & State ---
+let state = {
+    credits: 600,
+    paniniD: 1.5,
+    camera: { x: 0, y: 18, z: 22 },
+    target: { x: 0, y: 0, z: 0 },
+    selectedIds: new Set(),
+    units: [],
+    terrainEdits: [], // {x, y, z, r}
+    nextId: 1
+};
+
+class Unit {
+    constructor(type, x, z) {
+        this.id = state.nextId++;
+        this.type = type; // 'mcv', 'harvester', 'tank', 'digger', 'dozer'
+        this.x = x; this.y = 1.0; this.z = z;
+        this.tx = x; this.tz = z;
+        this.speed = type === 'mcv' ? 0 : 5.0;
+        this.actionCooldown = 0;
+    }
+}
+
+// Initial MCV and Harvester
+state.units.push(new Unit('mcv', 0, 0));
+
+// --- Touch & Mouse Input Handlers ---
+let joyTouchId = null, joyCenter = { x: 0, y: 0 }, joyDir = { x: 0, y: 0 };
+const joyContainer = document.getElementById('joystick-container');
+const joyStick = document.getElementById('joystick-stick');
+
+// Mobile Detection & Touch Controls
+if ('ontouchstart' in window) {
+    joyContainer.style.display = 'block';
+    
+    joyContainer.addEventListener('touchstart', e => {
+        let t = e.changedTouches[0];
+        joyTouchId = t.identifier;
+        let rect = joyContainer.getBoundingClientRect();
+        joyCenter = { x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+    }, {passive: false});
+
+    window.addEventListener('touchmove', e => {
+        for (let t of e.changedTouches) {
+            if (t.identifier === joyTouchId) {
+                let dx = t.clientX - joyCenter.x, dy = t.clientY - joyCenter.y;
+                let dist = Math.hypot(dx, dy);
+                let maxDist = 35;
+                if (dist > maxDist) { dx = (dx/dist)*maxDist; dy = (dy/dist)*maxDist; }
+                joyStick.style.transform = `translate(${dx}px, ${dy}px)`;
+                joyDir = { x: dx / maxDist, y: dy / maxDist };
+            }
+        }
+    }, {passive: false});
+
+    const resetJoy = e => {
+        for (let t of e.changedTouches) {
+            if (t.identifier === joyTouchId) {
+                joyTouchId = null; joyDir = { x: 0, y: 0 };
+                joyStick.style.transform = 'translate(0px, 0px)';
+            }
+        }
+    };
+    window.addEventListener('touchend', resetJoy);
+    window.addEventListener('touchcancel', resetJoy);
+}
+
+// Raycast approximation to terrain plane
+function screenToWorld(sx, sy) {
+    let nx = (sx / window.innerWidth) * 2 - 1;
+    let ny = 1 - (sy / window.innerHeight) * 2;
+    return { x: state.target.x + nx * 20.0, z: state.target.z - ny * 20.0 };
+}
+
+// Action Trigger (Destruction & Building)
+function triggerAction(u) {
+    if (!u) return;
+    if (u.type === 'tank') {
+        // Tank fires shell: Creates crater
+        state.terrainEdits.push(u.x + (Math.random()*4-2), 0.5, u.z + 4.0, -2.5);
+    } else if (u.type === 'digger') {
+        // Digger digs tunnel/hole under position
+        state.terrainEdits.push(u.x, u.y - 1.0, u.z, -3.2);
+    } else if (u.type === 'dozer') {
+        // Dozer smooths/builds ramp
+        state.terrainEdits.push(u.x, u.y + 0.5, u.z, 2.8);
+    }
+}
+
+// Input Buttons
+document.getElementById('panini-d').oninput = e => {
+    state.paniniD = parseFloat(e.target.value);
+    document.getElementById('panini-val').innerText = state.paniniD.toFixed(1);
+};
+
+document.getElementById('btn-mcv').onclick = () => spawnUnit('harvester', 100);
+document.getElementById('btn-tank').onclick = () => spawnUnit('tank', 150);
+document.getElementById('btn-digger').onclick = () => spawnUnit('digger', 120);
+document.getElementById('btn-dozer').onclick = () => spawnUnit('dozer', 120);
+document.getElementById('btn-action').onclick = () => {
+    state.selectedIds.forEach(id => triggerAction(state.units.find(u => u.id === id)));
+};
+
+function spawnUnit(type, cost) {
+    if (state.credits >= cost) {
+        state.credits -= cost;
+        let mcv = state.units.find(u => u.type === 'mcv');
+        state.units.push(new Unit(type, mcv.x + (Math.random()*6-3), mcv.z + (Math.random()*6-3)));
+        updateUI();
+    }
+}
+
+function updateUI() {
+    document.getElementById('res-val').innerText = state.credits;
+}
+
+// Pointer selection
+window.addEventListener('pointerdown', e => {
+    if (e.target !== canvas) return;
+    let pos = screenToWorld(e.clientX, e.clientY);
+    
+    if (e.button === 0) { // Select
+        state.selectedIds.clear();
+        let hit = state.units.find(u => Math.hypot(u.x - pos.x, u.z - pos.z) < 3.0);
+        if (hit) state.selectedIds.add(hit.id);
+    } else if (e.button === 2) { // Command Move
+        state.selectedIds.forEach(id => {
+            let u = state.units.find(x => x.id === id);
+            if (u) { u.tx = pos.x; u.tz = pos.z; }
+        });
+    }
+});
+window.addEventListener('contextmenu', e => e.preventDefault());
+
+// --- Main Loop ---
+let lastTime = performance.now();
+
+function animate() {
+    let now = performance.now();
+    let dt = Math.min((now - lastTime) / 1000, 0.1);
+    lastTime = now;
+
+    // Camera move via Touch Joystick
+    state.camera.x += joyDir.x * 15.0 * dt;
+    state.camera.z += joyDir.y * 15.0 * dt;
+    state.target.x = state.camera.x;
+    state.target.z = state.camera.z - 22.0;
+
+    // Unit Movement Update
+    state.units.forEach(u => {
+        let dx = u.tx - u.x, dz = u.tz - u.z;
+        let dist = Math.hypot(dx, dz);
+        if (dist > 0.3) {
+            u.x += (dx / dist) * u.speed * dt;
+            u.z += (dz / dist) * u.speed * dt;
+        }
+    });
+
+    // WebGL Canvas Resize
+    if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    gl.useProgram(prog);
+    gl.uniform2f(uniforms.res, canvas.width, canvas.height);
+    gl.uniform3f(uniforms.camPos, state.camera.x, state.camera.y, state.camera.z);
+    gl.uniform3f(uniforms.camTarget, state.target.x, state.target.y, state.target.z);
+    gl.uniform1f(uniforms.paniniD, state.paniniD);
+
+    // Pass Dynamic Voxel Sculpt/Tunneling Data
+    let editArray = new Float32Array(16 * 4);
+    let count = Math.min(state.terrainEdits.length / 4, 16);
+    for (let i = 0; i < count * 4; i++) editArray[i] = state.terrainEdits[i];
+    
+    gl.uniform4fv(uniforms.edits, editArray);
+    gl.uniform1i(uniforms.editCount, count);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>
