@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pezzy Invites Drunk1985 to GmailGroup List Unassignable by Farts</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d0d0d;
+            font-family: 'Courier New', Courier, monospace;
+            color: #d1d1d1;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            image-rendering: pixelated;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 20px;
+        }
+        .hud-panel {
+            background: rgba(15, 15, 18, 0.75);
+            border: 1px solid #3a3a42;
+            padding: 15px;
+            border-radius: 4px;
+            width: 280px;
+            max-width: 45vw;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            pointer-events: auto;
+        }
+        .panel-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #a0a0ab;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #2a2a35;
+            padding-bottom: 4px;
+        }
+        .stat-row {
+            margin-bottom: 10px;
+        }
+        .stat-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .bar-outer {
+            width: 100%;
+            height: 12px;
+            background: #1a1a20;
+            border: 1px solid #2a2a35;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .bar-inner {
+            height: 100%;
+            width: 100%;
+            transition: width 0.1s linear, background-color 0.3s ease;
+        }
+        #bar-hunger { background-color: #c28d32; }
+        #bar-nicotine { background-color: #d1d1d1; }
+        #bar-inebriation { background-color: #e6ca65; }
+        #bar-sadness { background-color: #3b6291; }
+        
+        #message-log, #social-log {
+            font-size: 11px;
+            color: #8a8a93;
+            max-height: 90px;
+            overflow-y: hidden;
+            display: flex;
+            flex-direction: column-reverse;
+        }
+        #social-log {
+            color: #5c93bd;
+        }
+        .log-entry {
+            margin-top: 4px;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(5, 5, 5, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: auto;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 1s ease;
+            z-index: 10;
+        }
+        #game-over-screen.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+        h1 {
+            font-size: 32px;
+            letter-spacing: 4px;
+            color: #a83232;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        p {
+            font-size: 14px;
+            color: #777;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #222;
+            border: 1px solid #444;
+            color: #ccc;
+            padding: 10px 20px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #333;
+            color: #fff;
+            border-color: #666;
+        }
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(15, 15, 18, 0.75);
+            border: 1px solid #3a3a42;
+            padding: 10px 15px;
+            font-size: 11px;
+            color: #6a6a75;
+            border-radius: 4px;
+        }
+
+        /* Touch Controls Overlay */
+        #touch-controls {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+        .touch-btn {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            color: rgba(255, 255, 255, 0.7);
+            border-radius: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 18px;
+            pointer-events: auto;
+            backdrop-filter: blur(2px);
+            -webkit-tap-highlight-color: transparent;
+        }
+        .touch-btn:active {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.6);
+            color: #fff;
+        }
+
+        #btn-left { bottom: 30px; left: 20px; width: 65px; height: 65px; }
+        #btn-right { bottom: 30px; left: 95px; width: 65px; height: 65px; }
+        #btn-jump { bottom: 30px; right: 20px; width: 75px; height: 75px; font-size: 14px; }
+        #btn-eat { bottom: 115px; right: 20px; width: 55px; height: 55px; font-size: 11px; }
+        #btn-smoke { bottom: 115px; right: 85px; width: 55px; height: 55px; font-size: 10px; }
+        #btn-vodka { bottom: 180px; right: 20px; width: 55px; height: 55px; font-size: 10px; }
+        #btn-fart { bottom: 180px; right: 85px; width: 55px; height: 55px; font-size: 10px; }
+
+        @media (min-width: 800px) {
+            #touch-controls {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="glcanvas"></canvas>
+    <div id="ui-layer">
+        <!-- Left Panel: Friends & Checkpoints Log -->
+        <div class="hud-panel">
+            <div class="panel-title">Network & Progress</div>
+            <div id="social-log"></div>
+        </div>
+
+        <!-- Right Panel: Player Status -->
+        <div class="hud-panel">
+            <div class="stat-row">
+                <div class="stat-label"><span>Hunger</span><span id="txt-hunger">100%</span></div>
+                <div class="bar-outer"><div id="bar-hunger" class="bar-inner"></div></div>
+            </div>
+            <div class="stat-row">
+                <div class="stat-label"><span>Nicotine</span><span id="txt-nicotine">100%</span></div>
+                <div class="bar-outer"><div id="bar-nicotine" class="bar-inner"></div></div>
+            </div>
+            <div class="stat-row">
+                <div class="stat-label"><span>C99 Banana Vodka</span><span id="txt-inebriation">0%</span></div>
+                <div class="bar-outer"><div id="bar-inebriation" class="bar-inner"></div></div>
+            </div>
+            <div class="stat-row">
+                <div class="stat-label"><span>Sadness</span><span id="txt-sadness">0%</span></div>
+                <div class="bar-outer"><div id="bar-sadness" class="bar-inner"></div></div>
+            </div>
+            <div id="message-log"></div>
+        </div>
+
+        <div id="controls-hint">
+            [A/D] Move &bull; [W/Space] Jump &bull; [E] Eat &bull; [Shift] Smoke &bull; [Q] Drink Vodka &bull; [F] Fart
+        </div>
+    </div>
+
+    <!-- Touch Controls Layer -->
+    <div id="touch-controls">
+        <div id="btn-left" class="touch-btn">&larr;</div>
+        <div id="btn-right" class="touch-btn">&rarr;</div>
+        <div id="btn-jump" class="touch-btn">JUMP</div>
+        <div id="btn-eat" class="touch-btn">EAT</div>
+        <div id="btn-smoke" class="touch-btn">SMOKE</div>
+        <div id="btn-vodka" class="touch-btn">VODKA</div>
+        <div id="btn-fart" class="touch-btn">FART</div>
+    </div>
+
+    <div id="game-over-screen">
+        <h1 id="death-cause">YOU COLLAPSED</h1>
+        <p>The damp earth consumes another weary soul.</p>
+        <button onclick="resetGame()">Try Again</button>
+    </div>
+</div>
+
+<script>
+// --- SHADER SOURCES ---
+const VS_SOURCE = `
+    attribute vec2 aPosition;
+    attribute vec2 aTexCoord;
+    
+    uniform vec2 uResolution;
+    uniform vec2 uTranslation;
+    uniform vec2 uScale;
+    uniform float uTime;
+    uniform float uDrunk;
+    
+    varying vec2 vTexCoord;
+    
+    void main() {
+        vec2 scaledPosition = aPosition * uScale;
+        
+        // Drunk wave distortion applied directly to vertex positions
+        if (uDrunk > 0.0) {
+            scaledPosition.x += sin(uTime * 4.0 + scaledPosition.y * 0.05) * (uDrunk * 6.0);
+            scaledPosition.y += cos(uTime * 3.0 + scaledPosition.x * 0.05) * (uDrunk * 4.0);
+        }
+
+        vec2 position = scaledPosition + uTranslation;
+        vec2 zeroToOne = position / uResolution;
+        vec2 zeroToTwo = zeroToOne * 2.0;
+        vec2 clipSpace = zeroToTwo - 1.0;
+        
+        gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+        vTexCoord = aTexCoord;
+    }
+`;
+
+const FS_SOURCE = `
+    precision mediump float;
+    
+    varying vec2 vTexCoord;
+    
+    uniform vec4 uColor;
+    uniform float uTime;
+    uniform float uSadness;
+    uniform float uCraving;
+    uniform float uDrunk;
+    
+    void main() {
+        vec4 color = uColor;
+        
+        if (uSadness > 0.0) {
+            float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+            vec3 coldBlue = vec3(gray * 0.5, gray * 0.6, gray * 0.8);
+            color.rgb = mix(color.rgb, coldBlue, clamp(uSadness * 0.8, 0.0, 0.85));
+        }
+        
+        if (uCraving > 0.5) {
+            float jitter = sin(uTime * 15.0 + gl_FragCoord.y * 0.1) * (uCraving - 0.5) * 0.1;
+            color.rgb += vec3(jitter);
+        }
+
+        if (uDrunk > 0.1) {
+            // C99 Banana drunkenness tint & subtle yellow-green vision shift
+            float pulse = sin(uTime * 2.5) * 0.15 + 0.15;
+            color.rgb += vec3(pulse * uDrunk, pulse * uDrunk * 0.8, 0.0);
+        }
+        
+        gl_FragColor = color;
+    }
+`;
+
+// --- ENGINE & GAME STATE ---
+const canvas = document.getElementById('glcanvas');
+let gl;
+let programInfo;
+let buffers;
+
+const TILE_SIZE = 32;
+const GRAVITY = 0.45;
+
+let gameTime = 0;
+let isGameOver = false;
+
+// Input tracking
+const keys = {
+    left: false,
+    right: false,
+    jump: false
+};
+
+// Player Object
+const player = {
+    x: 100,
+    y: 100,
+    vx: 0,
+    vy: 0,
+    width: 20,
+    height: 30,
+    grounded: false,
+    facingLeft: false,
+    
+    // Survival Stats
+    hunger: 100.0,
+    nicotine: 80.0,
+    inebriation: 0.0,
+    sadness: 10.0,
+    
+    // Inventory
+    foodRations: 3,
+    cigarettes: 5,
+    vodkaBottles: 2,
+
+    // Respawn / Checkpoint mechanics
+    respawnX: 100,
+    respawnY: 100,
+    reachedCheckpoints: new Set()
+};
+
+// Gas/Fart Particles
+let particles = [];
+
+// Level Architecture
+let level = {
+    width: 100,
+    height: 20,
+    data: [] // 0: empty, 1: ground, 2: hazard, 3: food, 4: cigs, 5: checkpoint, 6: C99 Banana Vodka
+};
+
+const FRIENDS_LIST = ["Slayer", "Evil", "Russian1985", "pezzy", "borikAcholic", "Fatguy"];
+
+// --- INITIALIZATION ---
+function initWebGL() {
+    gl = canvas.getContext('webgl');
+    if (!gl) {
+        alert('Unable to initialize WebGL. Your browser or machine may not support it.');
+        return;
+    }
+
+    const shaderProgram = initShaderProgram(gl, VS_SOURCE, FS_SOURCE);
+
+    programInfo = {
+        program: shaderProgram,
+        attribLocations: {
+            position: gl.getAttribLocation(shaderProgram, 'aPosition'),
+            texCoord: gl.getAttribLocation(shaderProgram, 'aTexCoord'),
+        },
+        uniformLocations: {
+            resolution: gl.getUniformLocation(shaderProgram, 'uResolution'),
+            translation: gl.getUniformLocation(shaderProgram, 'uTranslation'),
+            scale: gl.getUniformLocation(shaderProgram, 'uScale'),
+            color: gl.getUniformLocation(shaderProgram, 'uColor'),
+            time: gl.getUniformLocation(shaderProgram, 'uTime'),
+            sadness: gl.getUniformLocation(shaderProgram, 'uSadness'),
+            craving: gl.getUniformLocation(shaderProgram, 'uCraving'),
+            drunk: gl.getUniformLocation(shaderProgram, 'uDrunk'),
+        },
+    };
+
+    buffers = initBuffers(gl);
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    setupTouchControls();
+}
+
+function initShaderProgram(gl, vsSource, fsSource) {
+    const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+
+    const shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vertexShader);
+    gl.attachShader(shaderProgram, fragmentShader);
+    gl.linkProgram(shaderProgram);
+
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        console.error('Unable to initialize shader program: ' + gl.getProgramInfoLog(shaderProgram));
+        return null;
+    }
+    return shaderProgram;
+}
+
+function loadShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compilation error: ' + gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
+}
+
+function initBuffers(gl) {
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    const positions = [
+        0.0, 0.0,
+        1.0, 0.0,
+        0.0, 1.0,
+        0.0, 1.0,
+        1.0, 0.0,
+        1.0, 1.0,
+    ];
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+    return {
+        position: positionBuffer,
+    };
+}
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+}
+
+// --- PROCEDURAL LEVEL GENERATION ---
+function generateLevel() {
+    level.data = new Array(level.width * level.height).fill(0);
+    
+    let height = 14;
+    for (let x = 0; x < level.width; x++) {
+        if (x > 5 && x % 8 === 0 && Math.random() > 0.4) {
+            let gapWidth = Math.floor(Math.random() * 2) + 1;
+            for (let g = 0; g < gapWidth && x < level.width; g++) {
+                level.data[x + (height + 1) * level.width] = 2;
+                x++;
+            }
+        }
+        
+        if (x % 5 === 0) {
+            height += Math.floor(Math.random() * 3) - 1;
+            height = Math.max(8, Math.min(level.height - 3, height));
+        }
+
+        for (let y = height; y < level.height; y++) {
+            level.data[x + y * level.width] = 1;
+        }
+
+        if (Math.random() < 0.08 && level.data[x + (height - 1) * level.width] === 0) {
+            let roll = Math.random();
+            if (roll < 0.4) level.data[x + (height - 1) * level.width] = 3; // Food
+            else if (roll < 0.7) level.data[x + (height - 1) * level.width] = 4; // Cigarettes
+            else level.data[x + (height - 1) * level.width] = 6; // C99 Banana Vodka
+        }
+    }
+
+    // Place checkpoints
+    for (let pct = 10; pct < 100; pct += 10) {
+        let xTile = Math.floor((pct / 100) * level.width);
+        for (let y = 0; y < level.height - 1; y++) {
+            if (getTile(xTile, y) === 0 && getTile(xTile, y + 1) === 1) {
+                setTile(xTile, y, 5);
+                break;
+            }
+        }
+    }
+}
+
+// --- INPUT HANDLING ---
+window.addEventListener('keydown', (e) => {
+    if (isGameOver) return;
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') { keys.left = true; player.facingLeft = true; }
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') { keys.right = true; player.facingLeft = false; }
+    if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') keys.jump = true;
+    if (e.code === 'KeyE') consumeFood();
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') consumeCigarette();
+    if (e.code === 'KeyQ') consumeVodka();
+    if (e.code === 'KeyF') triggerFart();
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = false;
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = false;
+    if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') keys.jump = false;
+});
+
+function setupTouchControls() {
+    const bindTouch = (id, onStart, onEnd) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        
+        btn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (isGameOver) return;
+            onStart();
+        }, { passive: false });
+
+        btn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (onEnd) onEnd();
+        }, { passive: false });
+
+        btn.addEventListener('touchcancel', (e) => {
+            e.preventDefault();
+            if (onEnd) onEnd();
+        }, { passive: false });
+    };
+
+    bindTouch('btn-left', () => { keys.left = true; player.facingLeft = true; }, () => keys.left = false);
+    bindTouch('btn-right', () => { keys.right = true; player.facingLeft = false; }, () => keys.right = false);
+    bindTouch('btn-jump', () => keys.jump = true, () => keys.jump = false);
+    bindTouch('btn-eat', () => consumeFood());
+    bindTouch('btn-smoke', () => consumeCigarette());
+    bindTouch('btn-vodka', () => consumeVodka());
+    bindTouch('btn-fart', () => triggerFart());
+}
+
+function logMessage(msg) {
+    const log = document.getElementById('message-log');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerText = msg;
+    log.prepend(entry);
+    if (log.children.length > 5) log.removeChild(log.lastChild);
+}
+
+function logSocialMessage(msg) {
+    const log = document.getElementById('social-log');
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerText = msg;
+    log.prepend(entry);
+    if (log.children.length > 5) log.removeChild(log.lastChild);
+}
+
+// --- CONSUMABLES & FART MECHANICS ---
+function consumeFood() {
+    if (player.foodRations > 0 && player.hunger < 95) {
+        player.foodRations--;
+        player.hunger = Math.min(100, player.hunger + 35);
+        player.sadness = Math.max(0, player.sadness - 5);
+        logMessage(`Ate stale rations. (+35 Hunger) [Rations left: ${player.foodRations}]`);
+    } else if (player.foodRations === 0) {
+        logMessage("No rations left...");
+    }
+}
+
+function consumeCigarette() {
+    if (player.cigarettes > 0) {
+        player.cigarettes--;
+        player.nicotine = Math.min(100, player.nicotine + 60);
+        player.sadness = Math.max(0, player.sadness - 15);
+        logMessage(`Lit a cigarette. (-15 Sadness) [Cigs left: ${player.cigarettes}]`);
+    } else {
+        logMessage("Out of cigarettes. Cravings intensify...");
+    }
+}
+
+function consumeVodka() {
+    if (player.vodkaBottles > 0) {
+        player.vodkaBottles--;
+        player.inebriation = Math.min(100, player.inebriation + 55);
+        player.sadness = Math.max(0, player.sadness - 40);
+        logMessage(`Drank C99 Banana Vodka! Sweet relief. (-40 Sadness) [Vodka left: ${player.vodkaBottles}]`);
+    } else {
+        logMessage("No C99 Banana Vodka remaining...");
+    }
+}
+
+function triggerFart() {
+    if (player.hunger < 5) {
+        logMessage("Too weak to fart...");
+        return;
+    }
+
+    // Spend hunger to generate propulsion and reduce sadness
+    player.hunger = Math.max(0, player.hunger - 3);
+    player.sadness = Math.max(0, player.sadness - 2);
+
+    let directionMultiplier = player.facingLeft ? 1 : -1;
+    player.vx += directionMultiplier * 5.0;
+    player.vy -= 2.5;
+
+    // Spawn green/brown gas cloud particles
+    for (let i = 0; i < 8; i++) {
+        particles.push({
+            x: player.x + player.width / 2,
+            y: player.y + player.height - 5,
+            vx: (Math.random() - 0.5) * 2 + (directionMultiplier * 2),
+            vy: (Math.random() - 0.5) * 2,
+            life: 1.0,
+            size: Math.random() * 8 + 6,
+            color: [0.4 + Math.random() * 0.2, 0.35 + Math.random() * 0.1, 0.1, 0.8]
+        });
+    }
+
+    logMessage("*FART!* Gas propulsion engaged.");
+}
+
+function updateStats() {
+    player.hunger = Math.max(0, player.hunger - 0.025);
+    player.nicotine = Math.max(0, player.nicotine - 0.035);
+    player.inebriation = Math.max(0, player.inebriation - 0.02);
+
+    let sadnessAccrual = 0.01;
+    if (player.hunger < 20) sadnessAccrual += 0.04;
+    if (player.nicotine < 25) sadnessAccrual += 0.05;
+
+    player.sadness = Math.min(100, player.sadness + sadnessAccrual);
+
+    document.getElementById('bar-hunger').style.width = player.hunger + '%';
+    document.getElementById('txt-hunger').innerText = Math.round(player.hunger) + '%';
+
+    document.getElementById('bar-nicotine').style.width = player.nicotine + '%';
+    document.getElementById('txt-nicotine').innerText = Math.round(player.nicotine) + '%';
+
+    document.getElementById('bar-inebriation').style.width = player.inebriation + '%';
+    document.getElementById('txt-inebriation').innerText = Math.round(player.inebriation) + '%';
+
+    document.getElementById('bar-sadness').style.width = player.sadness + '%';
+    document.getElementById('txt-sadness').innerText = Math.round(player.sadness) + '%';
+
+    if (player.sadness >= 100) {
+        triggerGameOver("SUCCUMBED TO DESPAIR");
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.025;
+        if (p.life <= 0) {
+            particles.splice(i, 1);
+        }
+    }
+}
+
+function updatePhysics() {
+    let moveSpeed = 3.5;
+    if (player.hunger < 15) moveSpeed *= 0.6;
+    if (player.nicotine < 10) moveSpeed *= 0.8;
+    if (player.inebriation > 50) moveSpeed *= 1.1; // Drunk boldness boost
+
+    if (keys.left) player.vx = -moveSpeed;
+    else if (keys.right) player.vx = moveSpeed;
+    else player.vx *= 0.7;
+
+    if (keys.jump && player.grounded) {
+        let jumpPower = 9.5 - (player.sadness / 100) * 2;
+        player.vy = -jumpPower;
+        player.grounded = false;
+    }
+
+    player.vy += GRAVITY;
+
+    player.x += player.vx;
+    collideHorizontal();
+
+    player.y += player.vy;
+    collideVertical();
+
+    if (player.y > level.height * TILE_SIZE) {
+        triggerGameOver("SWALLOWED BY THE MUD");
+    }
+}
+
+function collideHorizontal() {
+    let leftTile = Math.floor(player.x / TILE_SIZE);
+    let rightTile = Math.floor((player.x + player.width) / TILE_SIZE);
+    let topTile = Math.floor(player.y / TILE_SIZE);
+    let bottomTile = Math.floor((player.y + player.height - 1) / TILE_SIZE);
+
+    for (let y = topTile; y <= bottomTile; y++) {
+        for (let x = leftTile; x <= rightTile; x++) {
+            if (getTile(x, y) === 1) {
+                if (player.vx > 0) player.x = x * TILE_SIZE - player.width;
+                else if (player.vx < 0) player.x = (x + 1) * TILE_SIZE;
+            }
+        }
+    }
+}
+
+function collideVertical() {
+    let leftTile = Math.floor(player.x / TILE_SIZE);
+    let rightTile = Math.floor((player.x + player.width - 1) / TILE_SIZE);
+    let topTile = Math.floor(player.y / TILE_SIZE);
+    let bottomTile = Math.floor((player.y + player.height) / TILE_SIZE);
+
+    player.grounded = false;
+
+    for (let y = topTile; y <= bottomTile; y++) {
+        for (let x = leftTile; x <= rightTile; x++) {
+            let tile = getTile(x, y);
+            if (tile === 1) {
+                if (player.vy > 0) {
+                    player.y = y * TILE_SIZE - player.height;
+                    player.vy = 0;
+                    player.grounded = true;
+                } else if (player.vy < 0) {
+                    player.y = (y + 1) * TILE_SIZE;
+                    player.vy = 0;
+                }
+            } else if (tile === 2 && player.vy > 0) {
+                player.sadness += 0.1;
+                player.vx *= 0.5;
+            } else if (tile === 3) {
+                setTile(x, y, 0);
+                player.foodRations++;
+                logMessage("Found canned food in the mud.");
+            } else if (tile === 4) {
+                setTile(x, y, 0);
+                player.cigarettes += 2;
+                logMessage("Found a wet pack of cigarettes.");
+            } else if (tile === 5) {
+                let currentPct = Math.round((x / level.width) * 100);
+                if (!player.reachedCheckpoints.has(currentPct)) {
+                    player.reachedCheckpoints.add(currentPct);
+                    player.respawnX = player.x;
+                    player.respawnY = player.y;
+                    logMessage(`Checkpoint reached (${currentPct}%). Progress saved.`);
+                    logSocialMessage(`got ${currentPct}% progress, updating friends: ${FRIENDS_LIST.join(', ')}`);
+                }
+            } else if (tile === 6) {
+                setTile(x, y, 0);
+                player.vodkaBottles++;
+                logMessage("Found a bottle of C99 Banana Vodka!");
+            }
+        }
+    }
+}
+
+function getTile(x, y) {
+    if (x < 0 || x >= level.width || y < 0 || y >= level.height) return 0;
+    return level.data[x + y * level.width];
+}
+
+function setTile(x, y, val) {
+    if (x >= 0 && x < level.width && y >= 0 && y < level.height) {
+        level.data[x + y * level.width] = val;
+    }
+}
+
+function triggerGameOver(reason) {
+    isGameOver = true;
+    document.getElementById('death-cause').innerText = reason;
+    document.getElementById('game-over-screen').classList.add('visible');
+}
+
+function resetGame() {
+    player.x = player.respawnX;
+    player.y = player.respawnY;
+    player.vx = 0;
+    player.vy = 0;
+    player.hunger = 100;
+    player.nicotine = 80;
+    player.inebriation = 0;
+    player.sadness = 10;
+    player.foodRations = 3;
+    player.cigarettes = 5;
+    player.vodkaBottles = 2;
+    particles = [];
+    keys.left = false;
+    keys.right = false;
+    keys.jump = false;
+    isGameOver = false;
+
+    document.getElementById('game-over-screen').classList.remove('visible');
+    document.getElementById('message-log').innerHTML = '';
+    logMessage("Respawned at the last saved checkpoint.");
+}
+
+// --- RENDER ENGINE ---
+function drawQuad(x, y, width, height, color) {
+    gl.uniform2f(programInfo.uniformLocations.translation, x, y);
+    gl.uniform2f(programInfo.uniformLocations.scale, width, height);
+    gl.uniform4fv(programInfo.uniformLocations.color, color);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function render() {
+    gameTime += 0.016;
+
+    let baseBg = 0.05 - (player.sadness / 100) * 0.03;
+    gl.clearColor(baseBg, baseBg + 0.01, baseBg + 0.02, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(programInfo.program);
+
+    gl.uniform2f(programInfo.uniformLocations.resolution, canvas.width, canvas.height);
+    gl.uniform1f(programInfo.uniformLocations.time, gameTime);
+    gl.uniform1f(programInfo.uniformLocations.sadness, player.sadness / 100.0);
+    gl.uniform1f(programInfo.uniformLocations.craving, player.nicotine < 30 ? (30 - player.nicotine) / 30 : 0.0);
+    gl.uniform1f(programInfo.uniformLocations.drunk, player.inebriation / 100.0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+    gl.vertexAttribPointer(programInfo.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(programInfo.attribLocations.position);
+
+    let cameraX = -player.x + canvas.width / 2;
+    let cameraY = -player.y + canvas.height / 2;
+
+    // Draw Map Tiles
+    for (let y = 0; y < level.height; y++) {
+        for (let x = 0; x < level.width; x++) {
+            let tile = getTile(x, y);
+            if (tile === 0) continue;
+
+            let renderX = x * TILE_SIZE + cameraX;
+            let renderY = y * TILE_SIZE + cameraY;
+
+            if (renderX + TILE_SIZE < 0 || renderX > canvas.width || renderY + TILE_SIZE < 0 || renderY > canvas.height) {
+                continue;
+            }
+
+            if (tile === 1) {
+                drawQuad(renderX, renderY, TILE_SIZE, TILE_SIZE, [0.25, 0.2, 0.15, 1.0]);
+            } else if (tile === 2) {
+                drawQuad(renderX, renderY + 16, TILE_SIZE, 16, [0.15, 0.08, 0.05, 1.0]);
+            } else if (tile === 3) {
+                drawQuad(renderX + 8, renderY + 8, 16, 16, [0.8, 0.6, 0.2, 1.0]);
+            } else if (tile === 4) {
+                drawQuad(renderX + 10, renderY + 12, 12, 12, [0.9, 0.9, 0.9, 1.0]);
+            } else if (tile === 5) {
+                drawQuad(renderX + 4, renderY, 4, TILE_SIZE, [0.3, 0.7, 0.8, 1.0]);
+                drawQuad(renderX + 8, renderY, 16, 12, [0.2, 0.9, 0.7, 1.0]);
+            } else if (tile === 6) {
+                // C99 Banana Vodka Bottle (Golden Yellow)
+                drawQuad(renderX + 10, renderY + 6, 12, 20, [0.95, 0.85, 0.2, 1.0]);
+                drawQuad(renderX + 13, renderY + 2, 6, 4, [0.8, 0.8, 0.8, 1.0]);
+            }
+        }
+    }
+
+    // Draw Particles (Fart gas)
+    for (let p of particles) {
+        let pColor = [p.color[0], p.color[1], p.color[2], p.life * p.color[3]];
+        drawQuad(p.x + cameraX, p.y + cameraY, p.size, p.size, pColor);
+    }
+
+    // Draw Player
+    let playerColor = [0.4, 0.45, 0.5, 1.0];
+    if (player.nicotine < 20) {
+        let flash = Math.sin(gameTime * 10.0) * 0.2;
+        playerColor = [0.5 + flash, 0.5 + flash, 0.4, 1.0];
+    }
+    drawQuad(player.x + cameraX, player.y + cameraY, player.width, player.height, playerColor);
+}
+
+// --- MAIN LOOP ---
+function gameLoop() {
+    if (!isGameOver) {
+        updatePhysics();
+        updateStats();
+        updateParticles();
+    }
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+// Start Game
+initWebGL();
+generateLevel();
+logMessage("Awakened in the dreary sludge.");
+logSocialMessage("Connected to Network. Monitoring progress...");
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
