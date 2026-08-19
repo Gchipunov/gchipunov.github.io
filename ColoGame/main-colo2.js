@@ -408,8 +408,8 @@ function initMainBackground()
 alert('initMainBackground div1');
 
 var div1 = document.getElementById('div1');
-div1.style.backgroundImage =  "url("+ GBL.Media + "levelstart4.png)" ;
-
+//div1.style.backgroundImage =  "url("+ GBL.Media + "levelstart4.png)" ;
+div1.style.backgroundImage = "url('levelstart5.png')";
 var div2text = document.createElement('div');
 //div2text.innerText = 'Wo zhaoqian - I am looking for money (I am looking for work).â–€â–„â–ˆâ–Œâ–â–‘â–’â–“â– â–¡â–ªâ–«â–¬â–²â–ºâ–¼â—„â—Šâ—‹â—Œâ—â—˜â—™â—¦â˜ºâ˜»â˜¼â™ â™£â™¥â™¦â™ª';
 div2text.innerText = 'Our Wifi Toilet broke and the toilets Wifi broke';
