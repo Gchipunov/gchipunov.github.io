@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Character Creator & MUD Simulation</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background: #121212; color: #e0e0e0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+        /* Navigation Tabs */
+        nav { display: flex; background: #1e1e1e; border-bottom: 2px solid #333; }
+        nav button { background: none; border: none; color: #888; padding: 14px 24px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        nav button:hover { color: #fff; background: #252525; }
+        nav button.active { color: #00e676; border-bottom: 3px solid #00e676; background: #2a2a2a; }
+
+        /* Tab Content Containers */
+        .tab-content { display: none; flex: 1; height: calc(100vh - 51px); }
+        .tab-content.active { display: flex; }
+
+        /* Tab 1: Character Creator Layout */
+        #creator-tab { display: none; }
+        #creator-tab.active { display: flex; width: 100%; height: 100%; }
+        #canvas-container { flex: 1; height: 100%; background: #000; position: relative; }
+        #webgl-canvas { width: 100%; height: 100%; display: block; }
+
+        /* UI Sidebar Panel */
+        .ui-panel { width: 340px; background: #1a1a1a; padding: 20px; border-left: 1px solid #333; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+        .ui-panel h2 { color: #00e676; font-size: 20px; margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+        
+        .form-group { display: flex; flex-direction: column; gap: 6px; }
+        .form-group label { font-size: 13px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-group input[type="text"], .form-group select { background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 4px; outline: none; }
+        .form-group input[type="text"]:focus, .form-group select:focus { border-color: #00e676; }
+
+        /* Counter Controls [+] [-] */
+        .stat-control { display: flex; align-items: center; justify-content: space-between; background: #252525; padding: 6px 12px; border-radius: 4px; border: 1px solid #333; }
+        .stat-control label { font-size: 14px; font-weight: bold; color: #ddd; }
+        .stat-btns { display: flex; align-items: center; gap: 8px; }
+        .stat-btns button { background: #333; color: #fff; border: 1px solid #555; width: 28px; height: 28px; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .stat-btns button:hover { background: #00e676; color: #000; border-color: #00e676; }
+        .stat-value { min-width: 24px; text-align: center; font-weight: bold; color: #00e676; }
+
+        .btn-action { background: #00e676; color: #121212; font-weight: bold; border: none; padding: 10px; border-radius: 4px; cursor: pointer; text-transform: uppercase; margin-top: 10px; }
+        .btn-action:hover { background: #00c853; }
+
+        /* Tab 2: MUD Terminal */
+        #mud-tab { flex-direction: column; background: #0d0d0d; font-family: 'Courier New', Courier, monospace; padding: 15px; }
+        #mud-terminal { flex: 1; background: #000; border: 1px solid #333; border-radius: 6px; padding: 15px; overflow-y: auto; color: #33ff33; font-size: 14px; line-height: 1.4; display: flex; flex-direction: column; gap: 6px; }
+        .mud-entry { word-break: break-word; }
+        .mud-entry.sys { color: #888; italic: true; }
+        .mud-entry.p1 { color: #00e676; }
+        .mud-entry.p2 { color: #ff9100; }
+        .mud-entry.user { color: #00b0ff; }
+        
+        #mud-input-container { display: flex; gap: 10px; margin-top: 10px; }
+        #mud-input { flex: 1; background: #1a1a1a; border: 1px solid #333; color: #33ff33; padding: 10px; font-family: 'Courier New', Courier, monospace; border-radius: 4px; outline: none; }
+        #mud-input:focus { border-color: #00e676; }
+    </style>
+    <!-- Three.js Engine & GLTFLoader -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+    <nav>
+        <button class="active" onclick="switchTab('creator-tab', this)">Character Creator</button>
+        <button onclick="switchTab('mud-tab', this)">MUD Telnet Server</button>
+    </nav>
+
+    <!-- TAB 1: CHARACTER CREATOR -->
+    <div id="creator-tab" class="tab-content active">
+        <div id="canvas-container">
+            <canvas id="webgl-canvas"></canvas>
+        </div>
+
+        <div class="ui-panel">
+            <h2>Character Creator</h2>
+
+            <div class="form-group">
+                <label for="char-name">Character Name</label>
+                <input type="text" id="char-name" value="ShadowWalker" placeholder="Enter name...">
+            </div>
+
+            <!-- Stat Controls -->
+            <div class="stat-control">
+                <label>Health</label>
+                <div class="stat-btns">
+                    <button onclick="adjustStat('health', -5)">-</button>
+                    <span id="stat-health" class="stat-value">100</span>
+                    <button onclick="adjustStat('health', 5)">+</button>
+                </div>
+            </div>
+
+            <div class="stat-control">
+                <label>Speed</label>
+                <div class="stat-btns">
+                    <button onclick="adjustStat('speed', -1)">-</button>
+                    <span id="stat-speed" class="stat-value">10</span>
+                    <button onclick="adjustStat('speed', 1)">+</button>
+                </div>
+            </div>
+
+            <div class="stat-control">
+                <label>Kick</label>
+                <div class="stat-btns">
+                    <button onclick="adjustStat('kick', -1)">-</button>
+                    <span id="stat-kick" class="stat-value">15</span>
+                    <button onclick="adjustStat('kick', 1)">+</button>
+                </div>
+            </div>
+
+            <div class="stat-control">
+                <label>Punch</label>
+                <div class="stat-btns">
+                    <button onclick="adjustStat('punch', -1)">-</button>
+                    <span id="stat-punch" class="stat-value">12</span>
+                    <button onclick="adjustStat('punch', 1)">+</button>
+                </div>
+            </div>
+
+            <!-- Picklists -->
+            <div class="form-group">
+                <label for="fightstyle">Fight Style</label>
+                <select id="fightstyle">
+                    <option value="Kickboxing">Kickboxing</option>
+                    <option value="Kung Fu">Kung Fu</option>
+                    <option value="Street Brawler">Street Brawler</option>
+                    <option value="Taekwondo">Taekwondo</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="gamemovement">Game Movement</label>
+                <select id="gamemovement">
+                    <option value="Tactical Dash">Tactical Dash</option>
+                    <option value="Parkour Free Run">Parkour Free Run</option>
+                    <option value="Stealth Glide">Stealth Glide</option>
+                    <option value="Standard Walk">Standard Walk</option>
+                </select>
+            </div>
+
+            <button class="btn-action" onclick="triggerSpray()">Spray Paint</button>
+        </div>
+    </div>
+
+    <!-- TAB 2: MUD TERMINAL -->
+    <div id="mud-tab" class="tab-content">
+        <div id="mud-terminal">
+            <div class="mud-entry sys">[SYSTEM] Connecting to MUD Realm Telnet Server (v2.4.1)...</div>
+            <div class="mud-entry sys">[SYSTEM] Connection established. 2 Virtual Simulated Clients Online.</div>
+        </div>
+        <div id="mud-input-container">
+            <input type="text" id="mud-input" placeholder="Type MUD command (e.g. 'say hello', 'look', 'kick')..." onkeydown="handleMudInput(event)">
+        </div>
+    </div>
+
+    <script>
+        // --- TAB SWITCHING LOGIC ---
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+            if (tabId === 'creator-tab') onWindowResize();
+        }
+
+        // --- STAT CONTROLS LOGIC ---
+        const stats = { health: 100, speed: 10, kick: 15, punch: 12 };
+        function adjustStat(stat, amount) {
+            stats[stat] = Math.max(0, stats[stat] + amount);
+            document.getElementById(`stat-${stat}`).innerText = stats[stat];
+        }
+
+        function triggerSpray() {
+            const name = document.getElementById('char-name').value;
+            logMudMessage(`[SPRAY] ${name} sprayed a tag onto the nearest wall!`, 'user');
+            alert(`${name} sprayed a tag!`);
+        }
+
+        // --- THREE.JS WEBGL & GLTFLOADER SETUP ---
+        let scene, camera, renderer, model, mixer;
+        const clock = new THREE.Clock();
+
+        function initWebGL() {
+            const container = document.getElementById('canvas-container');
+            
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x141414);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 1.2, 3);
+
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            // Lighting Setup
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0x00e676, 1.5);
+            dirLight.position.set(2, 4, 3);
+            scene.add(dirLight);
+
+            const fillLight = new THREE.DirectionalLight(0xff007f, 0.8);
+            fillLight.position.set(-2, 2, -2);
+            scene.add(fillLight);
+
+            // Grid Floor
+            const grid = new THREE.GridHelper(10, 20, 0x00e676, 0x444444);
+            grid.position.y = -0.8;
+            scene.add(grid);
+
+            // Load Model via GLTFLoader
+            const loader = new THREE.GLTFLoader();
+            // Relative path or local asset reference based on repo structure
+            const modelUrl = 'Animation_Walking_Woman_withSkin.glb'; 
+
+            loader.load(modelUrl, (gltf) => {
+                model = gltf.scene;
+                model.position.set(0, -0.8, 0);
+                scene.add(model);
+
+                if (gltf.animations && gltf.animations.length) {
+                    mixer = new THREE.AnimationMixer(model);
+                    const action = mixer.clipAction(gltf.animations[0]);
+                    action.play();
+                }
+            }, undefined, (error) => {
+                // Fallback 3D Mesh if file fetch is unavailable offline
+                const geometry = new THREE.BoxGeometry(0.6, 1.6, 0.4);
+                const material = new THREE.MeshStandardMaterial({ color: 0x00e676, wireframe: true });
+                model = new THREE.Mesh(geometry, material);
+                model.position.y = 0;
+                scene.add(model);
+            });
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta);
+            if (model && !mixer) model.rotation.y += 0.01; // Idle spin for fallback mesh
+            renderer.render(scene, camera);
+        }
+
+        // --- MUD TELNET & VIRTUAL CLIENT SIMULATION ---
+        const terminal = document.getElementById('mud-terminal');
+
+        function logMudMessage(msg, cls = 'sys') {
+            const div = document.createElement('div');
+            div.className = `mud-entry ${cls}`;
+            div.innerText = msg;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function handleMudInput(e) {
+            if (e.key === 'Enter') {
+                const input = e.target;
+                const name = document.getElementById('char-name').value || 'Player';
+                if (input.value.trim() !== '') {
+                    logMudMessage(`[${name}]: ${input.value}`, 'user');
+                    input.value = '';
+                }
+            }
+        }
+
+        // Virtual Client Simulations
+        const vClient1Actions = [
+            "V_Client_Alpha enters the training arena.",
+            "V_Client_Alpha executes a Taekwondo High Kick!",
+            "V_Client_Alpha drinks a Health Potion [+20 HP].",
+            "V_Client_Alpha says: 'Who dares challenge the grid?'",
+            "V_Client_Alpha sprays a glowing dragon tag on the wall."
+        ];
+
+        const vClient2Actions = [
+            "V_Client_Beta performs a Parkour Vault over the barrier.",
+            "V_Client_Beta throws a rapid Punch combo at the dummy!",
+            "V_Client_Beta says: 'Nice stats, Alpha!'",
+            "V_Client_Beta enters stealth mode.",
+            "V_Client_Beta checks character equipment."
+        ];
+
+        setInterval(() => {
+            const randAct1 = vClient1Actions[Math.floor(Math.random() * vClient1Actions.length)];
+            logMudMessage(`[CLIENT 1] ${randAct1}`, 'p1');
+        }, 4500);
+
+        setInterval(() => {
+            const randAct2 = vClient2Actions[Math.floor(Math.random() * vClient2Actions.length)];
+            logMudMessage(`[CLIENT 2] ${randAct2}`, 'p2');
+        }, 6000);
+
+        // Initialize WebGL Scene on load
+        window.onload = initWebGL;
+    </script>
+</body>
+</html>
