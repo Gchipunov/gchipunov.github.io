@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mini WebGL/JS RTS Game - Mobile & Scrollable</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #111;
+            font-family: Arial, sans-serif;
+            color: #fff;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; /* Prevents default browser panning/zooming */
+        }
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            pointer-events: auto;
+            width: 250px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        button {
+            background: #2a2a2a;
+            color: white;
+            border: 1px solid #555;
+            padding: 10px 12px; /* Slightly larger for touch targets */
+            margin: 4px 0;
+            width: 100%;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        button:hover { background: #444; }
+        button:active { background: #666; }
+        .stat { margin-bottom: 8px; font-size: 14px; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <h3>RTS Command</h3>
+        <div class="stat">Credits: <span id="credits">150</span></div>
+        <div class="stat">Power: <span id="power">10</span> / <span id="maxPower">10</span></div>
+        <hr style="border-color: #444;">
+        <h4>Build Structures</h4>
+        <button onclick="setMode('build_refinery')">Build Refinery (100c)</button>
+        <button onclick="setMode('build_power')">Build Power Plant (50c)</button>
+        <button onclick="setMode('build_barracks')">Build Barracks (150c)</button>
+        <hr style="border-color: #444;">
+        <h4>Train Units</h4>
+        <button onclick="trainUnit('conscript')">Train Conscript (25c)</button>
+        <div class="stat" style="margin-top:10px; font-size:11px; color:#aaa;">
+            * Drag to pan the camera.<br>
+            * Tap/Click ground to build.
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert('WebGL not supported!');
+        }
+
+        // Camera State
+        let camera = { x: 0, y: 0 };
+
+        // Resize Canvas
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Game State
+        let credits = 150;
+        let power = 10;
+        let maxPower = 10;
+        let buildMode = null; 
+
+        // Start coordinates centered
+        const startX = canvas.width / 2;
+        const startY = canvas.height / 2;
+
+        // Entities (World Coordinates)
+        let structures = [
+            { type: 'refinery', x: startX - 120, y: startY, size: 35, color: [0.2, 0.6, 0.9] },
+            { type: 'power', x: startX + 120, y: startY, size: 30, color: [0.9, 0.8, 0.2] },
+            { type: 'barracks', x: startX, y: startY + 120, size: 40, color: [0.8, 0.3, 0.2] }
+        ];
+        
+        let collectors = [
+            { x: startX - 50, y: startY, radius: 10, state: 'seeking', targetResource: null, carrying: false }
+        ];
+
+        let conscripts = [];
+        let resources = [];
+
+        // Generate large resource fields across a wide map
+        for (let i = 0; i < 80; i++) {
+            resources.push({
+                x: startX + (Math.random() * 3000 - 1500),
+                y: startY + (Math.random() * 3000 - 1500),
+                radius: 12,
+                amount: 50
+            });
+        }
+
+        function setMode(mode) {
+            buildMode = mode;
+        }
+
+        function trainUnit(type) {
+            if (type === 'conscript') {
+                if (credits >= 25) {
+                    credits -= 25;
+                    let barracks = structures.find(s => s.type === 'barracks');
+                    let spawnX = barracks ? barracks.x + 45 : startX;
+                    let spawnY = barracks ? barracks.y : startY;
+                    conscripts.push({ x: spawnX, y: spawnY, radius: 8, targetX: spawnX + 50, targetY: spawnY });
+                } else {
+                    alert('Not enough credits!');
+                }
+            }
+            updateUI();
+        }
+
+        function updateUI() {
+            document.getElementById('credits').innerText = credits;
+            document.getElementById('power').innerText = power;
+            document.getElementById('maxPower').innerText = maxPower;
+        }
+
+        // --- Input Handling (Mouse & Touch panning + building) ---
+        let isDragging = false;
+        let hasDragged = false;
+        let dragStart = { x: 0, y: 0 };
+        let cameraStart = { x: 0, y: 0 };
+
+        function getPointerPos(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        function onPointerDown(e) {
+            if (e.target !== canvas) return;
+            const pos = getPointerPos(e);
+            isDragging = true;
+            hasDragged = false;
+            dragStart = { x: pos.x, y: pos.y };
+            cameraStart = { x: camera.x, y: camera.y };
+        }
+
+        function onPointerMove(e) {
+            if (!isDragging) return;
+            const pos = getPointerPos(e);
+            const dx = pos.x - dragStart.x;
+            const dy = pos.y - dragStart.y;
+            
+            // If moved more than 5 pixels, consider it a drag/pan
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                hasDragged = true;
+            }
+
+            camera.x = cameraStart.x - dx;
+            camera.y = cameraStart.y - dy;
+        }
+
+        function onPointerUp(e) {
+            if (!isDragging) return;
+            isDragging = false;
+
+            if (!hasDragged && buildMode) {
+                // Was a tap/click, handle building placement
+                const pos = getPointerPos(e);
+                const rect = canvas.getBoundingClientRect();
+                
+                // Convert screen coordinates to world coordinates by adding camera offset
+                const worldX = (pos.x - rect.left) + camera.x;
+                const worldY = (pos.y - rect.top) + camera.y;
+
+                let cost = buildMode === 'build_refinery' ? 100 : buildMode === 'build_power' ? 50 : 150;
+                if (credits >= cost) {
+                    credits -= cost;
+                    if (buildMode === 'build_power') maxPower += 15;
+                    
+                    let type = buildMode.replace('build_', '');
+                    let color = type === 'refinery' ? [0.2, 0.6, 0.9] : type === 'power' ? [0.9, 0.8, 0.2] : [0.8, 0.3, 0.2];
+                    let size = type === 'barracks' ? 40 : type === 'refinery' ? 35 : 30;
+                    
+                    structures.push({ type: type, x: worldX, y: worldY, size: size, color: color });
+                    buildMode = null;
+                    updateUI();
+                } else {
+                    alert('Not enough credits!');
+                    buildMode = null;
+                }
+            }
+        }
+
+        canvas.addEventListener('mousedown', onPointerDown);
+        window.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('mouseup', onPointerUp);
+
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onPointerDown(e); }, { passive: false });
+        window.addEventListener('touchmove', (e) => { if (isDragging) e.preventDefault(); onPointerMove(e); }, { passive: false });
+        window.addEventListener('touchend', onPointerUp);
+
+
+        // --- WebGL Shaders & Rendering ---
+        
+        const vsSource = `
+            attribute vec2 aPosition;
+            uniform vec2 uResolution;
+            uniform vec2 uCamera;
+            void main() {
+                // Apply camera panning offset
+                vec2 worldPos = aPosition - uCamera;
+                vec2 clipSpace = (worldPos / uResolution) * 2.0 - 1.0;
+                gl_Position = vec4(clipSpace * vec2(1, -1), 0.0, 1.0);
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 uColor;
+            void main() {
+                gl_FragColor = uColor;
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+
+        const shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(shaderProgram, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(shaderProgram);
+
+        const aPositionLocation = gl.getAttribLocation(shaderProgram, "aPosition");
+        const uResolutionLocation = gl.getUniformLocation(shaderProgram, "uResolution");
+        const uCameraLocation = gl.getUniformLocation(shaderProgram, "uCamera");
+        const uColorLocation = gl.getUniformLocation(shaderProgram, "uColor");
+
+        const positionBuffer = gl.createBuffer();
+
+        // Polygon Primitive Helper
+        function drawPolygon(points, color) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.DYNAMIC_DRAW);
+
+            gl.useProgram(shaderProgram);
+            gl.uniform2f(uResolutionLocation, canvas.width, canvas.height);
+            gl.uniform2f(uCameraLocation, camera.x, camera.y);
+            gl.uniform4f(uColorLocation, color[0], color[1], color[2], color[3] !== undefined ? color[3] : 1.0);
+
+            gl.enableVertexAttribArray(aPositionLocation);
+            gl.vertexAttribPointer(aPositionLocation, 2, gl.FLOAT, false, 0, 0);
+
+            gl.drawArrays(gl.TRIANGLE_FAN, 0, points.length / 2);
+        }
+
+        function drawRect(x, y, width, height, color) {
+            let halfW = width / 2;
+            let halfH = height / 2;
+            let points = [
+                x - halfW, y - halfH,
+                x + halfW, y - halfH,
+                x + halfW, y + halfH,
+                x - halfW, y + halfH
+            ];
+            drawPolygon(points, color);
+        }
+
+        function drawCircle(x, y, radius, color) {
+            let points = [];
+            let segments = 20;
+            for (let i = 0; i <= segments; i++) {
+                let theta = (i / segments) * Math.PI * 2;
+                points.push(x + Math.cos(theta) * radius, y + Math.sin(theta) * radius);
+            }
+            drawPolygon(points, color);
+        }
+
+        // Draw Geometry-Art Buildings (Iso-Cube & Block Styles)
+        function drawBuilding(s) {
+            const x = s.x;
+            const y = s.y;
+            const sz = s.size;
+            const baseColor = s.color;
+
+            const tint = (c, factor) => [
+                Math.min(1.0, c[0] * factor),
+                Math.min(1.0, c[1] * factor),
+                Math.min(1.0, c[2] * factor)
+            ];
+
+            const cTop = tint(baseColor, 1.2);
+            const cRight = tint(baseColor, 0.7);
+            const cLeft = tint(baseColor, 0.9);
+            const cDark = tint(baseColor, 0.4);
+
+            drawRect(x, y + sz * 0.1, sz * 2.2, sz * 2.2, [0.05, 0.05, 0.08, 0.8]);
+
+            if (s.type === 'refinery') {
+                drawRect(x, y, sz * 1.8, sz * 1.8, cLeft);
+                drawRect(x + sz * 0.2, y + sz * 0.2, sz * 1.4, sz * 1.4, cRight);
+                drawRect(x, y - sz * 0.2, sz * 1.0, sz * 1.0, cTop);
+                drawRect(x + sz * 0.15, y - sz * 0.2, sz * 0.7, sz * 0.7, cDark);
+                drawCircle(x - sz * 0.5, y - sz * 0.5, sz * 0.25, cTop);
+                drawCircle(x + sz * 0.5, y - sz * 0.5, sz * 0.25, cTop);
+
+            } else if (s.type === 'power') {
+                let diamondPoints = [
+                    x, y - sz * 1.1, x + sz * 1.1, y, x, y + sz * 1.1, x - sz * 1.1, y
+                ];
+                drawPolygon(diamondPoints, cLeft);
+                let innerDiamond = [
+                    x, y - sz * 0.8, x + sz * 0.8, y, x, y + sz * 0.8, x - sz * 0.8, y
+                ];
+                drawPolygon(innerDiamond, cRight);
+                drawRect(x - sz * 0.6, y, sz * 0.3, sz * 1.2, cTop);
+                drawRect(x + sz * 0.6, y, sz * 0.3, sz * 1.2, cTop);
+                drawCircle(x, y, sz * 0.35, [1.0, 0.95, 0.4]);
+
+            } else if (s.type === 'barracks') {
+                drawRect(x, y, sz * 2.0, sz * 1.6, cLeft);
+                const offset = sz * 0.8;
+                drawRect(x - offset, y - offset * 0.6, sz * 0.5, sz * 0.5, cDark);
+                drawRect(x + offset, y - offset * 0.6, sz * 0.5, sz * 0.5, cDark);
+                drawRect(x - offset, y + offset * 0.6, sz * 0.5, sz * 0.5, cDark);
+                drawRect(x + offset, y + offset * 0.6, sz * 0.5, sz * 0.5, cDark);
+                drawRect(x, y - sz * 0.1, sz * 1.0, sz * 0.8, cTop);
+                drawRect(x, y - sz * 0.1, sz * 0.6, sz * 0.15, cDark);
+                drawRect(x, y - sz * 0.1, sz * 0.15, sz * 0.6, cDark);
+            }
+        }
+
+        // Game Loop Update Logic
+        function update() {
+            collectors.forEach(c => {
+                let refinery = structures.find(s => s.type === 'refinery');
+                
+                if (!c.carrying) {
+                    if (!c.targetResource || c.targetResource.amount <= 0) {
+                        let closest = null;
+                        let minDist = Infinity;
+                        resources.forEach(r => {
+                            if (r.amount > 0) {
+                                let dist = Math.hypot(r.x - c.x, r.y - c.y);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    closest = r;
+                                }
+                            }
+                        });
+                        c.targetResource = closest;
+                    }
+
+                    if (c.targetResource) {
+                        let dx = c.targetResource.x - c.x;
+                        let dy = c.targetResource.y - c.y;
+                        let dist = Math.hypot(dx, dy);
+                        if (dist < 5) {
+                            c.targetResource.amount -= 10;
+                            c.carrying = true;
+                        } else {
+                            c.x += (dx / dist) * 1.5;
+                            c.y += (dy / dist) * 1.5;
+                        }
+                    }
+                } else {
+                    if (refinery) {
+                        let dx = refinery.x - c.x;
+                        let dy = refinery.y - c.y;
+                        let dist = Math.hypot(dx, dy);
+                        if (dist < 10) {
+                            credits += 25;
+                            c.carrying = false;
+                            updateUI();
+                        } else {
+                            c.x += (dx / dist) * 1.5;
+                            c.y += (dy / dist) * 1.5;
+                        }
+                    }
+                }
+            });
+
+            resources = resources.filter(r => r.amount > 0);
+        }
+
+        // Render Loop
+        function render() {
+            update();
+
+            gl.clearColor(0.1, 0.1, 0.15, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // Culling bounds logic (Optional but good for performance)
+            const viewMargin = 200;
+            const viewLeft = camera.x - viewMargin;
+            const viewRight = camera.x + canvas.width + viewMargin;
+            const viewTop = camera.y - viewMargin;
+            const viewBottom = camera.y + canvas.height + viewMargin;
+
+            // Draw Resources (Green Spheres) - With simple culling
+            resources.forEach(r => {
+                if (r.x > viewLeft && r.x < viewRight && r.y > viewTop && r.y < viewBottom) {
+                    drawCircle(r.x, r.y, r.radius, [0.2, 0.8, 0.2]);
+                }
+            });
+
+            // Draw Geometric 3D Art Structures
+            structures.forEach(s => {
+                if (s.x > viewLeft && s.x < viewRight && s.y > viewTop && s.y < viewBottom) {
+                    drawBuilding(s);
+                }
+            });
+
+            // Draw Collectors (Cyan)
+            collectors.forEach(c => {
+                if (c.x > viewLeft && c.x < viewRight && c.y > viewTop && c.y < viewBottom) {
+                    drawCircle(c.x, c.y, c.radius, [0.0, 0.9, 0.9]);
+                }
+            });
+
+            // Draw Conscripts (Orange)
+            conscripts.forEach(u => drawCircle(u.x, u.y, u.radius, [1.0, 0.5, 0.0]));
+
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
