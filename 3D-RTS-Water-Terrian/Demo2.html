@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RTS Concreate Command + Three.js Ocean + Skybox</title>
+    <title>RTS Concreate Command + Three.js Ocean + Skybox 2</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         #info {
@@ -181,9 +181,30 @@
     </script>
 
     <script type="module">
+	
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { Sky } from 'three/addons/objects/Sky.js'; // Import the Sky shader
+
+
+ // --- GAME CONFIGURATION ---
+        const COLORS = {
+            ground: 0x2a2a2a,
+            grid: 0x444444,
+            selection: 0x00ff00,
+            mcvBody: 0xffaa00, // Construction Yellow
+            mcvParts: 0x333333,
+            base: 0xffcc00,
+            power: 0x44ff44,
+            factory: 0xff4444,
+            silo: 0x8888ff,
+            ghostValid: 0x00ff00,
+            ghostInvalid: 0xff0000
+        };
+
+        const GRID_SIZE = 100;
+        const TILE_SIZE = 10;
+		
 
         // --- 1. Init Renderer ---
         const renderer = new THREE.WebGLRenderer({ antialias: true });
