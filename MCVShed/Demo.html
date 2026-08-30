@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Command & Conquer Style MCV Base Builder</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #05080a;
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #00ffcc;
+        }
+        #webgl-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        /* Tactical HUD Overlay */
+        #hud {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .header-bar {
+            background: linear-gradient(180deg, rgba(8,20,28,0.95) 0%, rgba(5,12,18,0.7) 100%);
+            border-bottom: 2px solid #00ffcc;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: auto;
+            box-shadow: 0 4px 20px rgba(0, 255, 204, 0.15);
+        }
+        .title {
+            font-size: 20px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: #00ffcc;
+            text-shadow: 0 0 8px rgba(0,255,204,0.6);
+        }
+        .stats {
+            display: flex;
+            gap: 25px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .stat-item {
+            background: rgba(0, 255, 204, 0.1);
+            padding: 6px 14px;
+            border: 1px solid #00ffcc;
+            border-radius: 4px;
+        }
+        .stat-value {
+            color: #ffffff;
+            margin-left: 6px;
+        }
+        /* Sidebar Build Panel */
+        .sidebar {
+            position: absolute;
+            right: 15px;
+            top: 70px;
+            width: 260px;
+            background: rgba(8, 20, 28, 0.9);
+            border: 1px solid #00ffcc;
+            border-radius: 6px;
+            padding: 12px;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+            box-shadow: -4px 4px 15px rgba(0,0,0,0.5);
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+        .sidebar-title {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            color: #88ccee;
+            border-bottom: 1px solid rgba(0, 255, 204, 0.3);
+            padding-bottom: 4px;
+        }
+        .btn {
+            width: 100%;
+            background: rgba(0, 40, 50, 0.7);
+            border: 1px solid #00ffcc;
+            color: #00ffcc;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: bold;
+            text-align: left;
+            transition: all 0.15s ease-in-out;
+            border-radius: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .btn:hover:not(:disabled) {
+            background: rgba(0, 255, 204, 0.25);
+            color: #fff;
+            box-shadow: 0 0 10px rgba(0,255,204,0.4);
+            transform: translateX(-2px);
+        }
+        .btn:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+        .btn:disabled {
+            border-color: #445566;
+            color: #445566;
+            background: rgba(20, 30, 40, 0.5);
+            cursor: not-allowed;
+        }
+        .btn.active {
+            background: #00ffcc;
+            color: #05080a;
+            box-shadow: 0 0 12px #00ffcc;
+        }
+        .btn-cost {
+            font-size: 11px;
+            opacity: 0.85;
+            background: rgba(0,0,0,0.4);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        /* Mode Indicator Banner */
+        #status-banner {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(5, 12, 18, 0.9);
+            border: 1px solid #00ffcc;
+            color: #00ffcc;
+            padding: 10px 24px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            pointer-events: auto;
+            box-shadow: 0 0 15px rgba(0,255,204,0.2);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .cancel-btn {
+            background: #ff3366;
+            border: none;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .cancel-btn:hover {
+            background: #ff6688;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="webgl-container"></div>
+    <div id="hud">
+        <div class="header-bar">
+            <div class="title">GLOBAL DEFENSE COMMAND</div>
+            <div class="stats">
+                <div class="stat-item">CREDITS:<span id="credits-display" class="stat-value">$10,000</span></div>
+                <div class="stat-item">POWER:<span id="power-display" class="stat-value">0 / 0</span></div>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="sidebar-title">Command Center</div>
+            <button id="mcv-deploy-btn" class="btn" onclick="deployMCV()">DEPLOY MCV <span class="btn-cost">FREE</span></button>
+            
+            <div class="sidebar-title" style="margin-top: 15px;">Structures</div>
+            <button id="btn-shed" class="btn" disabled onclick="selectBuild('shed')">POWER SHED <span class="btn-cost">$300</span></button>
+            <button id="btn-barracks" class="btn" disabled onclick="selectBuild('barracks')">BARRACKS <span class="btn-cost">$500</span></button>
+            <button id="btn-refinery" class="btn" disabled onclick="selectBuild('refinery')">ORE REFINERY <span class="btn-cost">$1,500</span></button>
+            <button id="btn-warfactory" class="btn" disabled onclick="selectBuild('warfactory')">WAR FACTORY <span class="btn-cost">$2,000</span></button>
+            <button id="btn-radar" class="btn" disabled onclick="selectBuild('radar')">RADAR DOME <span class="btn-cost">$1,000</span></button>
+            <button id="btn-silo" class="btn" disabled onclick="selectBuild('silo')">MISSILE SILO <span class="btn-cost">$3,000</span></button>
+
+            <div class="sidebar-title" style="margin-top: 15px;">Defenses</div>
+            <button id="btn-wall" class="btn" disabled onclick="selectBuild('wall')">WALL ROW/COL <span class="btn-cost">$50/ea</span></button>
+        </div>
+
+        <div id="status-banner">
+            <span id="status-text">Select MCV to deploy Construction Yard</span>
+            <button id="cancel-btn" class="cancel-btn" style="display:none;" onclick="cancelMode()">CANCEL (ESC)</button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME CONFIG & STATE ---
+        const GRID_SIZE = 40;
+        const CELL_SIZE = 3;
+        const GRID_OFFSET = (GRID_SIZE * CELL_SIZE) / 2;
+
+        let credits = 10000;
+        let powerProduced = 0;
+        let powerConsumed = 0;
+        let mcvDeployed = false;
+
+        // Grid occupancy matrix (0 = free, 1 = occupied)
+        const grid = Array(GRID_SIZE).fill(null).map(() => Array(GRID_SIZE).fill(false));
+
+        // Building Types Definition
+        const BUILDINGS = {
+            mcv: { name: 'MCV', sizeX: 2, sizeZ: 2, cost: 0, color: 0x3388ff },
+            conYard: { name: 'Construction Yard', sizeX: 3, sizeZ: 3, cost: 0, color: 0x446688, power: 50 },
+            shed: { name: 'Power Shed', sizeX: 2, sizeZ: 2, cost: 300, color: 0x33aa55, power: 100 },
+            barracks: { name: 'Barracks', sizeX: 2, sizeZ: 2, cost: 500, color: 0xaa6633, power: -10 },
+            refinery: { name: 'Ore Refinery', sizeX: 3, sizeZ: 3, cost: 1500, color: 0xddaa22, power: -30 },
+            warfactory: { name: 'War Factory', sizeX: 4, sizeZ: 3, cost: 2000, color: 0x8844aa, power: -40 },
+            radar: { name: 'Radar Dome', sizeX: 2, sizeZ: 2, cost: 1000, color: 0x22aadd, power: -40 },
+            silo: { name: 'Missile Silo', sizeX: 2, sizeZ: 2, cost: 3000, color: 0xcc3333, power: -60 },
+            wall: { name: 'Wall', sizeX: 1, sizeZ: 1, cost: 50, color: 0x888888, power: 0 }
+        };
+
+        let activeBuildType = null;
+        let wallStartCell = null; // For Wall drag/line placement
+        let animatedObjects = [];
+
+        // --- THREE.JS SETUP ---
+        const container = document.getElementById('webgl-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0f14);
+        scene.fog = new THREE.FogExp2(0x0a0f14, 0.008);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+        camera.position.set(0, 60, 70);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2.1; // Don't go below ground
+        controls.minDistance = 20;
+        controls.maxDistance = 150;
+        controls.target.set(0, 0, 0);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(50, 80, 40);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 200;
+        const d = 60;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+
+        // --- GROUND & GRID ---
+        const groundGeo = new THREE.PlaneGeometry(GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x121a20, roughness: 0.9, metalness: 0.1 });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const gridHelper = new THREE.GridHelper(GRID_SIZE * CELL_SIZE, GRID_SIZE, 0x00ffcc, 0x1a3344);
+        gridHelper.position.y = 0.05;
+        scene.add(gridHelper);
+
+        // Invisible raycast plane
+        const raycastPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(1000, 1000),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        raycastPlane.rotation.x = -Math.PI / 2;
+        scene.add(raycastPlane);
+
+        // --- PREVIEW GHOST MESH ---
+        const previewGroup = new THREE.Group();
+        scene.add(previewGroup);
+
+        // --- MCV INITIAL OBJECT SETUP ---
+        let mcvMesh = createMCVMesh();
+        mcvMesh.position.set(0, 0, 0);
+        scene.add(mcvMesh);
+
+        // Reserve grid spot for MCV
+        occupyGrid(GRID_SIZE/2 - 1, GRID_SIZE/2 - 1, 2, 2, true);
+
+        // --- PROCEDURAL BUILDING GEOMETRY CREATORS ---
+        function createMCVMesh() {
+            const group = new THREE.Group();
+            // Chassis
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(3.5, 1.2, 5),
+                new THREE.MeshStandardMaterial({ color: 0x2266aa, metalness: 0.5, roughness: 0.4 })
+            );
+            body.position.y = 1;
+            body.castShadow = true;
+            group.add(body);
+
+            // Cabin
+            const cab = new THREE.Mesh(
+                new THREE.BoxGeometry(3, 1, 1.8),
+                new THREE.MeshStandardMaterial({ color: 0x111111 })
+            );
+            cab.position.set(0, 1.8, 1.2);
+            group.add(cab);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.5, 12);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            [-1.9, 1.9].forEach(x => {
+                [-1.8, 0, 1.8].forEach(z => {
+                    const w = new THREE.Mesh(wheelGeo, wheelMat);
+                    w.rotation.z = Math.PI / 2;
+                    w.position.set(x, 0.6, z);
+                    group.add(w);
+                });
+            });
+
+            return group;
+        }
+
+        function createBuildingMesh(type) {
+            const group = new THREE.Group();
+            const b = BUILDINGS[type];
+            const w = b.sizeX * CELL_SIZE - 0.4;
+            const d = b.sizeZ * CELL_SIZE - 0.4;
+
+            if (type === 'conYard') {
+                const base = new THREE.Mesh(new THREE.BoxGeometry(w, 1.5, d), new THREE.MeshStandardMaterial({ color: 0x334455 }));
+                base.position.y = 0.75;
+                group.add(base);
+
+                const centerBldg = new THREE.Mesh(new THREE.BoxGeometry(w * 0.6, 2.5, d * 0.6), new THREE.MeshStandardMaterial({ color: 0x00ffcc, metalness: 0.8 }));
+                centerBldg.position.y = 2;
+                group.add(centerBldg);
+
+                // Rotating Dish
+                const dish = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 0.2, 0.4, 8), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+                dish.position.set(0, 3.8, 0);
+                dish.rotation.x = 0.5;
+                group.add(dish);
+                animatedObjects.push({ obj: dish, type: 'rotateY', speed: 0.02 });
+
+            } else if (type === 'shed') {
+                const base = new THREE.Mesh(new THREE.BoxGeometry(w, 1, d), new THREE.MeshStandardMaterial({ color: 0x224433 }));
+                base.position.y = 0.5;
+                group.add(base);
+
+                // Cooling towers
+                const towerGeo = new THREE.CylinderGeometry(1, 1.3, 3, 16);
+                const towerMat = new THREE.MeshStandardMaterial({ color: 0x33aa66, roughness: 0.3 });
+                const t1 = new THREE.Mesh(towerGeo, towerMat);
+                t1.position.set(-w/4, 2, 0);
+                const t2 = t1.clone();
+                t2.position.set(w/4, 2, 0);
+                group.add(t1, t2);
+
+            } else if (type === 'barracks') {
+                const tent = new THREE.Mesh(new THREE.ConeGeometry(w/1.8, 2.8, 4), new THREE.MeshStandardMaterial({ color: 0xaa6633, roughness: 0.8 }));
+                tent.position.y = 1.4;
+                tent.rotation.y = Math.PI / 4;
+                group.add(tent);
+
+            } else if (type === 'refinery') {
+                const main = new THREE.Mesh(new THREE.BoxGeometry(w, 2, d * 0.7), new THREE.MeshStandardMaterial({ color: 0xcc9922 }));
+                main.position.y = 1;
+                group.add(main);
+
+                // Tanks
+                const tank1 = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 3, 16), new THREE.MeshStandardMaterial({ color: 0xdddddd }));
+                tank1.position.set(-w/3, 1.5, d/3);
+                const tank2 = tank1.clone();
+                tank2.position.set(w/3, 1.5, d/3);
+                group.add(tank1, tank2);
+
+            } else if (type === 'warfactory') {
+                const hangar = new THREE.Mesh(new THREE.BoxGeometry(w, 3, d), new THREE.MeshStandardMaterial({ color: 0x664488, metalness: 0.4 }));
+                hangar.position.y = 1.5;
+                group.add(hangar);
+
+                // Open garage door indicator
+                const door = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.5, 2), new THREE.MeshBasicMaterial({ color: 0x111111 }));
+                door.position.set(0, 1, d/2 + 0.01);
+                group.add(door);
+
+            } else if (type === 'radar') {
+                const base = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2, 2, 8), new THREE.MeshStandardMaterial({ color: 0x225577 }));
+                base.position.y = 1;
+                group.add(base);
+
+                const dome = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x22aadd, wireframe: true }));
+                dome.position.y = 2;
+                group.add(dome);
+                animatedObjects.push({ obj: dome, type: 'rotateY', speed: 0.03 });
+
+            } else if (type === 'silo') {
+                const pit = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 0.4, 6), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+                pit.position.y = 0.2;
+                group.add(pit);
+
+                const missile = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3.5, 12), new THREE.MeshStandardMaterial({ color: 0xcc3333, metalness: 0.5 }));
+                missile.position.y = 1.8;
+                group.add(missile);
+
+            } else if (type === 'wall') {
+                const wallBlock = new THREE.Mesh(
+                    new THREE.BoxGeometry(CELL_SIZE - 0.2, 1.8, CELL_SIZE - 0.2),
+                    new THREE.MeshStandardMaterial({ color: 0x778899, roughness: 0.9 })
+                );
+                wallBlock.position.y = 0.9;
+                wallBlock.castShadow = true;
+                group.add(wallBlock);
+            }
+
+            // Enable shadows
+            group.traverse(child => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
+
+            return group;
+        }
+
+        // --- GRID / POSITIONAL HELPERS ---
+        function worldToGrid(x, z) {
+            const gx = Math.floor((x + GRID_OFFSET) / CELL_SIZE);
+            const gz = Math.floor((z + GRID_OFFSET) / CELL_SIZE);
+            return {
+                x: Math.max(0, Math.min(GRID_SIZE - 1, gx)),
+                z: Math.max(0, Math.min(GRID_SIZE - 1, gz))
+            };
+        }
+
+        function gridToWorld(gx, gz, sizeX = 1, sizeZ = 1) {
+            return {
+                x: (gx * CELL_SIZE) - GRID_OFFSET + (sizeX * CELL_SIZE) / 2,
+                z: (gz * CELL_SIZE) - GRID_OFFSET + (sizeZ * CELL_SIZE) / 2
+            };
+        }
+
+        function isAreaFree(gx, gz, sizeX, sizeZ) {
+            if (gx + sizeX > GRID_SIZE || gz + sizeZ > GRID_SIZE) return false;
+            for (let x = gx; x < gx + sizeX; x++) {
+                for (let z = gz; z < gz + sizeZ; z++) {
+                    if (grid[x][z]) return false;
+                }
+            }
+            return true;
+        }
+
+        function occupyGrid(gx, gz, sizeX, sizeZ, state = true) {
+            for (let x = gx; x < gx + sizeX; x++) {
+                for (let z = gz; z < gz + sizeZ; z++) {
+                    grid[x][z] = state;
+                }
+            }
+        }
+
+        // --- MCV DEPLOYMENT LOGIC ---
+        function deployMCV() {
+            if (mcvDeployed) return;
+
+            // Remove MCV unit mesh
+            scene.remove(mcvMesh);
+            occupyGrid(GRID_SIZE/2 - 1, GRID_SIZE/2 - 1, 2, 2, false);
+
+            // Create Construction Yard
+            const conYardPos = gridToWorld(GRID_SIZE/2 - 1, GRID_SIZE/2 - 1, 3, 3);
+            const conYard = createBuildingMesh('conYard');
+            conYard.position.set(conYardPos.x, 0, conYardPos.z);
+            scene.add(conYard);
+
+            occupyGrid(GRID_SIZE/2 - 1, GRID_SIZE/2 - 1, 3, 3, true);
+
+            mcvDeployed = true;
+            powerProduced += BUILDINGS.conYard.power;
+            updateHUD();
+
+            // Enable construction buttons
+            document.querySelectorAll('.sidebar .btn').forEach(b => b.disabled = false);
+            document.getElementById('mcv-deploy-btn').style.display = 'none';
+            setStatus("Construction Yard Deployed! Select structures to build.");
+        }
+
+        // --- INTERACTION & BUILD SELECTION ---
+        function selectBuild(type) {
+            if (!mcvDeployed) return;
+            activeBuildType = type;
+            wallStartCell = null;
+
+            // Highlight button UI
+            document.querySelectorAll('.sidebar .btn').forEach(b => b.classList.remove('active'));
+            const activeBtn = document.getElementById(`btn-${type}`);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            document.getElementById('cancel-btn').style.display = 'inline-block';
+
+            if (type === 'wall') {
+                setStatus("WALL MODE: Click start point, then click end point to build rows or columns.");
+            } else {
+                setStatus(`Placing ${BUILDINGS[type].name}. Click on grid to construct.`);
+            }
+
+            updatePreviewMesh();
+        }
+
+        function cancelMode() {
+            activeBuildType = null;
+            wallStartCell = null;
+            clearPreview();
+            document.querySelectorAll('.sidebar .btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('cancel-btn').style.display = 'none';
+            setStatus("Ready for command.");
+        }
+
+        function setStatus(text) {
+            document.getElementById('status-text').innerText = text;
+        }
+
+        // --- MOUSE & RAYCASTING EVENTS ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function getIntersection(e) {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(raycastPlane);
+            return intersects.length > 0 ? intersects[0].point : null;
+        }
+
+        function clearPreview() {
+            while (previewGroup.children.length > 0) {
+                previewGroup.remove(previewGroup.children[0]);
+            }
+        }
+
+        function updatePreviewMesh() {
+            clearPreview();
+            if (!activeBuildType) return;
+
+            const b = BUILDINGS[activeBuildType];
+            const mesh = createBuildingMesh(activeBuildType);
+
+            // Make semi-transparent ghost mesh
+            mesh.traverse(child => {
+                if (child.isMesh) {
+                    child.material = child.material.clone();
+                    child.material.transparent = true;
+                    child.material.opacity = 0.6;
+                }
+            });
+
+            previewGroup.add(mesh);
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            if (!activeBuildType) return;
+            const pt = getIntersection(e);
+            if (!pt) return;
+
+            const b = BUILDINGS[activeBuildType];
+            const cell = worldToGrid(pt.x, pt.z);
+
+            if (activeBuildType === 'wall' && wallStartCell) {
+                // Wall Drag Preview (Calculate Row or Column line)
+                clearPreview();
+                const lineCells = getWallLineCells(wallStartCell, cell);
+                const canAffordTotal = credits >= lineCells.length * b.cost;
+
+                lineCells.forEach(c => {
+                    const valid = isAreaFree(c.x, c.z, 1, 1) && canAffordTotal;
+                    const pos = gridToWorld(c.x, c.z, 1, 1);
+                    const wallGhost = createBuildingMesh('wall');
+                    
+                    wallGhost.traverse(child => {
+                        if (child.isMesh) {
+                            child.material = new THREE.MeshBasicMaterial({
+                                color: valid ? 0x00ffcc : 0xff3333,
+                                transparent: true,
+                                opacity: 0.5
+                            });
+                        }
+                    });
+                    wallGhost.position.set(pos.x, 0, pos.z);
+                    previewGroup.add(wallGhost);
+                });
+
+            } else {
+                // Single Structure Preview
+                const pos = gridToWorld(cell.x, cell.z, b.sizeX, b.sizeZ);
+                previewGroup.position.set(pos.x, 0, pos.z);
+
+                const valid = isAreaFree(cell.x, cell.z, b.sizeX, b.sizeZ) && credits >= b.cost;
+                const ghostColor = valid ? 0x00ffcc : 0xff3333;
+
+                previewGroup.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.color.setHex(ghostColor);
+                    }
+                });
+            }
+        });
+
+        // Compute row or column cell array based on initial start cell
+        function getWallLineCells(start, end) {
+            const cells = [];
+            const dx = Math.abs(end.x - start.x);
+            const dz = Math.abs(end.z - start.z);
+
+            if (dx >= dz) {
+                // Horizontal Row Wall
+                const step = end.x >= start.x ? 1 : -1;
+                for (let x = start.x; x !== end.x + step; x += step) {
+                    cells.push({ x: x, z: start.z });
+                }
+            } else {
+                // Vertical Column Wall
+                const step = end.z >= start.z ? 1 : -1;
+                for (let z = start.z; z !== end.z + step; z += step) {
+                    cells.push({ x: start.x, z: z });
+                }
+            }
+            return cells;
+        }
+
+        window.addEventListener('click', (e) => {
+            // Prevent clicking when clicking on UI buttons
+            if (e.target.closest('#hud') && !e.target.closest('#status-banner')) return;
+
+            const pt = getIntersection(e);
+            if (!pt) return;
+
+            if (!mcvDeployed) {
+                // Click MCV unit to deploy
+                const cell = worldToGrid(pt.x, pt.z);
+                if (cell.x >= GRID_SIZE/2 - 2 && cell.x <= GRID_SIZE/2 + 1 &&
+                    cell.z >= GRID_SIZE/2 - 2 && cell.z <= GRID_SIZE/2 + 1) {
+                    deployMCV();
+                }
+                return;
+            }
+
+            if (!activeBuildType) return;
+
+            const b = BUILDINGS[activeBuildType];
+            const cell = worldToGrid(pt.x, pt.z);
+
+            if (activeBuildType === 'wall') {
+                if (!wallStartCell) {
+                    // First click: Set row/column start cell
+                    wallStartCell = cell;
+                    setStatus("WALL MODE: Click end point to complete row/column construction.");
+                } else {
+                    // Second click: Confirm Wall placement line
+                    const lineCells = getWallLineCells(wallStartCell, cell);
+                    const totalCost = lineCells.length * b.cost;
+
+                    let allValid = credits >= totalCost;
+                    if (allValid) {
+                        for (let c of lineCells) {
+                            if (!isAreaFree(c.x, c.z, 1, 1)) {
+                                allValid = false;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (allValid) {
+                        credits -= totalCost;
+                        lineCells.forEach(c => {
+                            occupyGrid(c.x, c.z, 1, 1, true);
+                            const wPos = gridToWorld(c.x, c.z, 1, 1);
+                            const wallMesh = createBuildingMesh('wall');
+                            wallMesh.position.set(wPos.x, 0, wPos.z);
+                            scene.add(wallMesh);
+                        });
+                        updateHUD();
+                        wallStartCell = null;
+                        clearPreview();
+                        setStatus("Wall line constructed! Select next action.");
+                    } else {
+                        setStatus("ERROR: Invalid wall placement or insufficient funds!");
+                    }
+                }
+            } else {
+                // Single Structure Placement
+                if (isAreaFree(cell.x, cell.z, b.sizeX, b.sizeZ) && credits >= b.cost) {
+                    credits -= b.cost;
+                    if (b.power > 0) powerProduced += b.power;
+                    if (b.power < 0) powerConsumed += Math.abs(b.power);
+
+                    occupyGrid(cell.x, cell.z, b.sizeX, b.sizeZ, true);
+                    const pos = gridToWorld(cell.x, cell.z, b.sizeX, b.sizeZ);
+                    const newBldg = createBuildingMesh(activeBuildType);
+                    newBldg.position.set(pos.x, 0, pos.z);
+                    scene.add(newBldg);
+
+                    updateHUD();
+                    cancelMode();
+                } else {
+                    setStatus("ERROR: Space occupied or insufficient credits!");
+                }
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') cancelMode();
+        });
+
+        // Dynamic HUD Updates
+        function updateHUD() {
+            document.getElementById('credits-display').innerText = `$${credits.toLocaleString()}`;
+            document.getElementById('power-display').innerText = `${powerConsumed} / ${powerProduced} MW`;
+            
+            // Highlight low power condition
+            const powerSpan = document.getElementById('power-display');
+            powerSpan.style.color = powerConsumed > powerProduced ? '#ff3366' : '#ffffff';
+        }
+
+        // --- RESIZE HANDLER ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- GAME ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate animated structures (Radars, ConYard dishes)
+            animatedObjects.forEach(item => {
+                if (item.type === 'rotateY') item.obj.rotation.y += item.speed;
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
