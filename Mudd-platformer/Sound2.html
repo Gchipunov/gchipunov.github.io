@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL Jump & Smoke Demo</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: #111; 
+            font-family: Arial, sans-serif; 
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ffffff;
+            text-shadow: 1px 1px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="ui">
+        <h2>WebGL Jump Demo</h2>
+        <p>Press <b>SPACE</b> or <b>TAP</b> screen to Jump</p>
+    </div>
+
+    <script>
+        // -------------------------------------------------------------
+        // AUDIO SYNTHESIZER (Web Audio API - No external assets required)
+        // -------------------------------------------------------------
+        let audioCtx = null;
+        let musicInterval = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                startBackgroundMusic();
+            } else if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playJumpSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.15);
+
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function playSmokeSound() {
+            if (!audioCtx) return;
+            const bufferSize = audioCtx.sampleRate * 0.2;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buffer;
+
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(600, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+            noise.connect(filter);
+            filter.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            noise.start();
+        }
+
+        function startBackgroundMusic() {
+            if (musicInterval) return;
+            const notes = [261.63, 329.63, 392.00, 523.25]; // C4, E4, G4, C5
+            let step = 0;
+
+            musicInterval = setInterval(() => {
+                if (audioCtx && audioCtx.state === 'running') {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(notes[step % notes.length], audioCtx.currentTime);
+
+                    gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + 0.25);
+                    step++;
+                }
+            }, 300);
+        }
+
+        // -------------------------------------------------------------
+        // THREE.JS / WEBGL SCENE SETUP
+        // -------------------------------------------------------------
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 3, 7);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        const ambLight = new THREE.AmbientLight(0x404060);
+        scene.add(ambLight);
+
+        // Floor
+        const floorGeo = new THREE.PlaneGeometry(30, 30);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x16213e, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // Player Cube
+        const playerGeo = new THREE.BoxGeometry(1, 1, 1);
+        const playerMat = new THREE.MeshStandardMaterial({ color: 0x00fff5, roughness: 0.3 });
+        const player = new THREE.Mesh(playerGeo, playerMat);
+        player.position.y = 0.5;
+        scene.add(player);
+
+        camera.lookAt(player.position);
+
+        // Physics variables
+        let velocityY = 0;
+        const gravity = -0.015;
+        let isGrounded = true;
+
+        // Smoke System
+        const particles = [];
+        const smokeGeo = new THREE.SphereGeometry(0.12, 8, 8);
+        const smokeMat = new THREE.MeshBasicMaterial({ color: 0xcccccc, transparent: true, opacity: 0.6 });
+
+        function createSmokeBurst() {
+            for (let i = 0; i < 15; i++) {
+                const particle = new THREE.Mesh(smokeGeo, smokeMat.clone());
+                particle.position.set(
+                    player.position.x + (Math.random() - 0.5) * 0.4,
+                    0.1,
+                    player.position.z + (Math.random() - 0.5) * 0.4
+                );
+                particle.userData = {
+                    vx: (Math.random() - 0.5) * 0.03,
+                    vy: Math.random() * 0.02 + 0.01,
+                    vz: (Math.random() - 0.5) * 0.03,
+                    life: 1.0
+                };
+                scene.add(particle);
+                particles.push(particle);
+            }
+        }
+
+        // Jump Logic Core
+        function performJump() {
+            initAudio();
+            if (isGrounded) {
+                velocityY = 0.32;
+                isGrounded = false;
+                playJumpSound();
+                playSmokeSound();
+                createSmokeBurst();
+            }
+        }
+
+        // Desktop & Mobile Controls
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                performJump();
+            }
+        });
+
+        window.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            performJump();
+        }, { passive: false });
+
+        window.addEventListener('click', () => {
+            initAudio();
+        });
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Jump Physics
+            if (!isGrounded) {
+                player.position.y += velocityY;
+                velocityY += gravity;
+
+                if (player.position.y <= 0.5) {
+                    player.position.y = 0.5;
+                    isGrounded = true;
+                    playSmokeSound();
+                    createSmokeBurst();
+                }
+            }
+
+            // Update Smoke Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.x += p.userData.vx;
+                p.position.y += p.userData.vy;
+                p.position.z += p.userData.vz;
+                p.userData.life -= 0.025;
+                p.material.opacity = p.userData.life;
+                p.scale.addScalar(0.015);
+
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
