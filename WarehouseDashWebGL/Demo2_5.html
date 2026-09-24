@@ -87,7 +87,10 @@
     <div id="game-container">
         <!-- Main WebGL Viewport Canvas -->
         <canvas id="glcanvas"></canvas>
-
+<!-- Top-Left Controls Bar Toggle Button -->
+<button id="btn-toggle-controls" class="absolute top-2 left-2 z-30 px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs rounded-md shadow-md border border-slate-700 pointer-events-auto transition-colors">
+    Toggle Controls Bar
+</button>
         <!-- Dynamic Game HUD Overlay -->
         <div id="hud" class="absolute top-0 left-0 w-full p-2 sm:p-4 pointer-events-none flex justify-between items-start z-10 hidden">
             <!-- Left Panel: Status & Collectibles -->
@@ -1181,6 +1184,18 @@ console.log("parseLevelMap();");
             safeBind('btn-restart', startGame);
             console.log("UI Button Hooks");
 
+            // Top-Left Controls Bar Toggle
+            const toggleControlsBtn = document.getElementById('btn-toggle-controls');
+            if (toggleControlsBtn) {
+                toggleControlsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const controlsBar = document.getElementById('controls-bar');
+                    if (controlsBar) {
+                        // Toggle Tailwind's 'hidden' class or check style.display
+                        controlsBar.classList.toggle('hidden');
+                    }
+                });
+            }
             
             // Manual Touch UI Toggle
             document.getElementById('btn-toggle-touch').addEventListener('click', () => {
