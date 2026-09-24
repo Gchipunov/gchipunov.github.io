@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Tunnel Boring & Dump Truck Fleet Simulation</title>
+    <!-- Tailwind CSS for UI controls & dashboard -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js & OrbitControls Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0b0f19;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.5);
+            border-radius: 3px;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .hud-shadow {
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body class="text-slate-100 antialiased">
+
+    <!-- HUD / Controls Overlay Container -->
+    <div id="ui-container" class="absolute inset-0 pointer-events-none flex flex-col justify-between p-4 z-10">
+        
+        <!-- Top Header & Telemetry Bar -->
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pointer-events-auto">
+            <div class="glass-panel px-4 py-2.5 rounded-xl flex items-center space-x-3 hud-shadow">
+                <div class="w-10 h-10 rounded-lg bg-amber-500 flex items-center justify-center text-slate-900 font-bold text-xl shadow-lg shadow-amber-500/30">
+                    <i class="fa-solid fa-bore-hole"></i>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-base tracking-wide text-amber-400">GEO-DIGGER 3D</h1>
+                    <p class="text-[11px] text-slate-400 font-medium">TBM & Logistics Fleet Simulation</p>
+                </div>
+            </div>
+
+            <!-- Live Telemetry Dashboard -->
+            <div class="glass-panel px-5 py-2.5 rounded-xl flex items-center space-x-6 text-sm hud-shadow">
+                <div class="flex items-center space-x-2.5">
+                    <i class="fa-solid fa-ruler-horizontal text-cyan-400 text-lg"></i>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Tunnel Depth</div>
+                        <div id="stat-depth" class="font-mono font-bold text-cyan-300">0.0 m</div>
+                    </div>
+                </div>
+                <div class="h-6 w-px bg-slate-700/80"></div>
+                <div class="flex items-center space-x-2.5">
+                    <i class="fa-solid fa-cubes-stacked text-amber-400 text-lg"></i>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Spoil Excavated</div>
+                        <div id="stat-dirt" class="font-mono font-bold text-amber-300">0 Tons</div>
+                    </div>
+                </div>
+                <div class="h-6 w-px bg-slate-700/80"></div>
+                <div class="flex items-center space-x-2.5">
+                    <i class="fa-solid fa-truck-front text-emerald-400 text-lg"></i>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Fleet Size</div>
+                        <div id="stat-trucks" class="font-mono font-bold text-emerald-300">3 Trucks</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Left Drawer Interactive Controls -->
+        <div class="flex-1 flex items-center my-4">
+            <div class="glass-panel p-4 rounded-2xl w-80 space-y-4 pointer-events-auto hud-shadow max-h-[82vh] overflow-y-auto">
+                <div class="border-b border-slate-700/60 pb-2.5 flex items-center justify-between">
+                    <span class="font-semibold text-xs tracking-wider uppercase text-slate-300 flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-indigo-400"></i> Control Deck
+                    </span>
+                    <span class="text-[10px] bg-indigo-500/20 text-indigo-300 font-semibold px-2 py-0.5 rounded-full border border-indigo-500/30">SIM ACTIVE</span>
+                </div>
+
+                <!-- Camera Perspectives -->
+                <div>
+                    <label class="text-xs font-semibold text-slate-400 block mb-2">Camera Perspective</label>
+                    <div class="grid grid-cols-2 gap-1.5 text-xs">
+                        <button id="btn-cam-orbit" onclick="setCameraView('orbit')" class="cam-btn py-2 px-3 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-500 transition flex items-center justify-center space-x-1.5 shadow">
+                            <i class="fa-solid fa-globe"></i> <span>Orbit Free</span>
+                        </button>
+                        <button id="btn-cam-tbm" onclick="setCameraView('tbm')" class="cam-btn py-2 px-3 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center justify-center space-x-1.5">
+                            <i class="fa-solid fa-bore-hole"></i> <span>TBM Cam</span>
+                        </button>
+                        <button id="btn-cam-truck" onclick="setCameraView('truck')" class="cam-btn py-2 px-3 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center justify-center space-x-1.5">
+                            <i class="fa-solid fa-truck"></i> <span>Driver Cam</span>
+                        </button>
+                        <button id="btn-cam-pit" onclick="setCameraView('pit')" class="cam-btn py-2 px-3 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center justify-center space-x-1.5">
+                            <i class="fa-solid fa-dumpster"></i> <span>Depot Cam</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Soil X-Ray Cutaway Toggle -->
+                <div class="bg-slate-800/60 p-3 rounded-xl border border-slate-700/50 flex items-center justify-between">
+                    <div class="flex items-center space-x-2.5">
+                        <i class="fa-solid fa-eye text-cyan-400 text-lg"></i>
+                        <div>
+                            <div class="text-xs font-semibold text-slate-200">X-Ray Cutaway</div>
+                            <div class="text-[10px] text-slate-400">View underground boring</div>
+                        </div>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="toggle-xray" class="sr-only peer" onchange="toggleXRay(this.checked)">
+                        <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-500"></div>
+                    </label>
+                </div>
+
+                <!-- Range Sliders -->
+                <div class="space-y-3 pt-1">
+                    <!-- TBM Speed Slider -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300 font-medium">Boring Speed</span>
+                            <span id="val-dig-speed" class="text-amber-400 font-mono font-bold">1.0x</span>
+                        </div>
+                        <input type="range" id="slider-dig-speed" min="0" max="3" step="0.1" value="1" oninput="updateDigSpeed(this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500">
+                    </div>
+
+                    <!-- Fleet Size Slider -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300 font-medium">Fleet Size</span>
+                            <span id="val-fleet-size" class="text-emerald-400 font-mono font-bold">3 Trucks</span>
+                        </div>
+                        <input type="range" id="slider-fleet-size" min="1" max="6" step="1" value="3" oninput="updateFleetSize(this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+                    </div>
+
+                    <!-- Time of Day Slider -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-slate-300 font-medium">Sun Angle / Time</span>
+                            <span id="val-sun-pos" class="text-amber-300 font-mono font-bold">Day</span>
+                        </div>
+                        <input type="range" id="slider-sun" min="0" max="3.14" step="0.05" value="0.8" oninput="updateSunPosition(this.value)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-400">
+                    </div>
+                </div>
+
+                <!-- Action Controls -->
+                <div class="pt-2 flex gap-2">
+                    <button onclick="resetTunnel()" class="flex-1 py-2 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 transition text-xs font-semibold flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-rotate-left"></i> <span>Reset Dig</span>
+                    </button>
+                    <button id="btn-pause" onclick="togglePause()" class="flex-1 py-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition text-xs font-semibold flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-pause"></i> <span id="lbl-pause">Pause</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer Bar -->
+        <div class="glass-panel px-4 py-2 rounded-xl pointer-events-auto flex justify-between items-center text-xs text-slate-400 hud-shadow">
+            <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Autonomous Excavation Site Live</span>
+            </div>
+            <div class="hidden sm:block text-[11px]">
+                <span>Mouse Drag: Orbit | Scroll: Zoom | Right Click: Pan</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- WebGL Render Container -->
+    <div id="webgl-container"></div>
+
+    <script>
+        // Global Configuration & State
+        const config = {
+            digSpeed: 1.0,
+            fleetSize: 3,
+            xray: false,
+            paused: false,
+            tbmRadius: 2.3,
+            tunnelLength: 0,
+            maxTunnelLength: 70,
+            totalDirtExcavated: 0
+        };
+
+        let scene, camera, renderer, controls;
+        let tbmGroup, cutterHead, conveyorBelt;
+        let terrainMesh, xrayMesh, tunnelGeometry;
+        let trucks = [];
+        let rockParticles, dustParticles, dirtPileMesh;
+        let lights = {};
+        let activeCamMode = 'orbit';
+
+        // Constants for spatial alignment
+        const TUNNEL_START_X = 25;
+        const TUNNEL_Z = 0;
+        const DEPOT_X = 35;
+        const DEPOT_Z = 20;
+
+        // On window load initialization
+        window.addEventListener('load', () => {
+            initScene();
+            initLights();
+            initTerrain();
+            initTunnelSystem();
+            initTBM();
+            initParticles();
+            initDumpTrucks();
+            initEventListeners();
+            animate();
+        });
+
+        function initScene() {
+            const container = document.getElementById('webgl-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0c1220);
+            scene.fog = new THREE.FogExp2(0x0c1220, 0.008);
+
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(48, 32, 48);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.1;
+            container.appendChild(renderer.domElement);
+
+            // Orbit controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 + 0.08;
+            controls.minDistance = 5;
+            controls.maxDistance = 180;
+            controls.target.set(0, -2, 0);
+        }
+
+        function initLights() {
+            lights.ambient = new THREE.AmbientLight(0xddeeff, 0.45);
+            scene.add(lights.ambient);
+
+            lights.sun = new THREE.DirectionalLight(0xfff5ea, 1.4);
+            lights.sun.position.set(40, 50, 30);
+            lights.sun.castShadow = true;
+            lights.sun.shadow.mapSize.width = 2048;
+            lights.sun.shadow.mapSize.height = 2048;
+            lights.sun.shadow.camera.near = 10;
+            lights.sun.shadow.camera.far = 150;
+            const d = 50;
+            lights.sun.shadow.camera.left = -d;
+            lights.sun.shadow.camera.right = d;
+            lights.sun.shadow.camera.top = d;
+            lights.sun.shadow.camera.bottom = -d;
+            scene.add(lights.sun);
+
+            lights.tunnelSpot = new THREE.SpotLight(0xffaa44, 2.2, 35, Math.PI / 3, 0.5, 1);
+            lights.tunnelSpot.position.set(20, 2, 0);
+            scene.add(lights.tunnelSpot);
+        }
+
+        function initTerrain() {
+            const terrainGeo = new THREE.BoxGeometry(105, 30, 65, 80, 40, 80);
+            const pos = terrainGeo.attributes.position;
+
+            // Procedurally deform top surface and create depot pit
+            for (let i = 0; i < pos.count; i++) {
+                let x = pos.getX(i);
+                let y = pos.getY(i);
+                let z = pos.getZ(i);
+
+                if (y > 10) {
+                    pos.setY(i, y + Math.sin(x * 0.1) * 2.5 + Math.cos(z * 0.12) * 2.5 + Math.sin(x * 0.3 + z * 0.3) * 0.8);
+                }
+                
+                let distToDepot = Math.hypot(x - DEPOT_X, z - DEPOT_Z);
+                if (distToDepot < 13 && y > 0) {
+                    pos.setY(i, y - Math.cos((distToDepot / 13) * Math.PI * 0.5) * 8.5);
+                }
+            }
+            terrainGeo.computeVertexNormals();
+
+            // Vertex colors for soil strata
+            const count = pos.count;
+            const colors = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                let y = pos.getY(i);
+                let c = new THREE.Color();
+                if (y > 12) {
+                    c.setHSL(0.24, 0.35, 0.32);
+                } else if (y > 0) {
+                    c.setHSL(0.08, 0.45, 0.28);
+                } else if (y > -10) {
+                    c.setHSL(0.05, 0.25, 0.22);
+                } else {
+                    c.setHSL(0.0, 0.0, 0.16);
+                }
+                colors[i * 3] = c.r;
+                colors[i * 3 + 1] = c.g;
+                colors[i * 3 + 2] = c.b;
+            }
+            terrainGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const terrainMat = new THREE.MeshStandardMaterial({
+                vertexColors: true,
+                roughness: 0.9,
+                metalness: 0.1,
+                flatShading: true
+            });
+
+            terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+            terrainMesh.position.set(0, -10, 0);
+            terrainMesh.receiveShadow = true;
+            terrainMesh.castShadow = true;
+            scene.add(terrainMesh);
+
+            // X-Ray transparent wireframe terrain
+            const xrayMat = new THREE.MeshStandardMaterial({
+                vertexColors: true,
+                roughness: 0.5,
+                transparent: true,
+                opacity: 0.22,
+                wireframe: true
+            });
+            xrayMesh = new THREE.Mesh(terrainGeo, xrayMat);
+            xrayMesh.position.copy(terrainMesh.position);
+            xrayMesh.visible = false;
+            scene.add(xrayMesh);
+
+            // Spoil Dump Pile Mesh at Depot
+            const pileGeo = new THREE.ConeGeometry(4.5, 3.5, 16);
+            const pileMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.95 });
+            dirtPileMesh = new THREE.Mesh(pileGeo, pileMat);
+            dirtPileMesh.position.set(DEPOT_X, 1.2, DEPOT_Z);
+            dirtPileMesh.scale.set(1, 0.2, 1);
+            dirtPileMesh.castShadow = true;
+            scene.add(dirtPileMesh);
+        }
+
+        function initTunnelSystem() {
+            tunnelGeometry = new THREE.Group();
+            scene.add(tunnelGeometry);
+        }
+
+        function createTunnelSegment(xPos) {
+            const radius = config.tbmRadius + 0.1;
+            const ringGeo = new THREE.CylinderGeometry(radius, radius, 1.5, 24, 1, true);
+            const ringMat = new THREE.MeshStandardMaterial({
+                color: 0x555d65,
+                roughness: 0.7,
+                side: THREE.BackSide
+            });
+            const segment = new THREE.Mesh(ringGeo, ringMat);
+            segment.rotation.z = Math.PI / 2;
+            segment.position.set(xPos, 0, TUNNEL_Z);
+            segment.receiveShadow = true;
+
+            // Support ring ribs
+            const ribGeo = new THREE.TorusGeometry(radius + 0.05, 0.1, 8, 24);
+            const ribMat = new THREE.MeshStandardMaterial({ color: 0x33383f, roughness: 0.5 });
+            const rib = new THREE.Mesh(ribGeo, ribMat);
+            rib.rotation.y = Math.PI / 2;
+            segment.add(rib);
+
+            // Periodic internal lights
+            if (Math.abs(xPos % 6) < 1.5) {
+                const lightBulb = new THREE.PointLight(0xffaa33, 0.9, 9);
+                lightBulb.position.set(0, radius - 0.3, 0);
+                segment.add(lightBulb);
+
+                const bulbFixt = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.3, 0.2, 0.3),
+                    new THREE.MeshBasicMaterial({ color: 0xffcc66 })
+                );
+                bulbFixt.position.copy(lightBulb.position);
+                segment.add(bulbFixt);
+            }
+
+            tunnelGeometry.add(segment);
+        }
+
+        function initTBM() {
+            tbmGroup = new THREE.Group();
+
+            // 1. Rotary Cutter Head
+            const cutterGeo = new THREE.CylinderGeometry(config.tbmRadius, config.tbmRadius, 0.6, 32);
+            const cutterMat = new THREE.MeshStandardMaterial({ color: 0xc23b22, roughness: 0.4, metalness: 0.6 });
+            cutterHead = new THREE.Mesh(cutterGeo, cutterMat);
+            cutterHead.rotation.z = Math.PI / 2;
+
+            // Cutting teeth
+            const toothGeo = new THREE.BoxGeometry(0.3, 0.3, 0.4);
+            const toothMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.9, roughness: 0.2 });
+            for (let i = 0; i < 18; i++) {
+                const tooth = new THREE.Mesh(toothGeo, toothMat);
+                const angle = (i / 18) * Math.PI * 2;
+                const dist = 0.5 + (i % 4) * 0.45;
+                tooth.position.set((Math.random() - 0.5) * 0.2, Math.cos(angle) * dist, Math.sin(angle) * dist);
+                cutterHead.add(tooth);
+            }
+            tbmGroup.add(cutterHead);
+
+            // 2. Main Cylindrical Shield
+            const shieldGeo = new THREE.CylinderGeometry(config.tbmRadius, config.tbmRadius, 5.2, 32, 1, true);
+            const shieldMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.4, metalness: 0.5 });
+            const shield = new THREE.Mesh(shieldGeo, shieldMat);
+            shield.rotation.z = Math.PI / 2;
+            shield.position.x = 2.6;
+            tbmGroup.add(shield);
+
+            // 3. Hydraulic Extension Arms
+            for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+                const piston = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.12, 0.12, 2.5),
+                    new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.8 })
+                );
+                piston.rotation.z = Math.PI / 2;
+                piston.position.set(4.2, Math.cos(a) * (config.tbmRadius - 0.4), Math.sin(a) * (config.tbmRadius - 0.4));
+                tbmGroup.add(piston);
+            }
+
+            // 4. Rear Conveyor System
+            const convGeo = new THREE.BoxGeometry(7.5, 0.25, 1.2);
+            const convMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+            conveyorBelt = new THREE.Mesh(convGeo, convMat);
+            conveyorBelt.position.set(6.8, -0.5, 0);
+            tbmGroup.add(conveyorBelt);
+
+            // Positioning & TBM Front Work Spotlight
+            tbmGroup.position.set(TUNNEL_START_X, 0, TUNNEL_Z);
+            scene.add(tbmGroup);
+
+            const headLight = new THREE.SpotLight(0xffffff, 3.5, 22, Math.PI / 4, 0.3);
+            headLight.position.set(-0.5, 0, 0);
+            headLight.target.position.set(-12, 0, 0);
+            tbmGroup.add(headLight);
+            tbmGroup.add(headLight.target);
+        }
+
+        function initParticles() {
+            // Rock Spoil Particles
+            const count = 180;
+            const pGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            const velocities = [];
+
+            for (let i = 0; i < count; i++) {
+                positions[i * 3] = 0;
+                positions[i * 3 + 1] = -100;
+                positions[i * 3 + 2] = 0;
+
+                velocities.push({
+                    x: (Math.random() - 0.5) * 0.1,
+                    y: Math.random() * 0.08 + 0.04,
+                    z: (Math.random() - 0.5) * 0.1
+                });
+            }
+
+            pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const pMat = new THREE.PointsMaterial({
+                color: 0xb45309,
+                size: 0.35,
+                transparent: true,
+                opacity: 0.85
+            });
+
+            rockParticles = new THREE.Points(pGeo, pMat);
+            rockParticles.userData = { velocities: velocities };
+            scene.add(rockParticles);
+        }
+
+        function createDumpTruckMesh() {
+            const truck = new THREE.Group();
+
+            // Cab Body
+            const cabGeo = new THREE.BoxGeometry(1.8, 1.6, 2.0);
+            const cabMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.3, metalness: 0.2 });
+            const cab = new THREE.Mesh(cabGeo, cabMat);
+            cab.position.set(1.2, 1.2, 0);
+            cab.castShadow = true;
+            truck.add(cab);
+
+            // Windshield
+            const glass = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.7, 1.8),
+                new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, metalness: 0.9 })
+            );
+            glass.position.set(2.11, 1.4, 0);
+            truck.add(glass);
+
+            // Chassis
+            const chassis = new THREE.Mesh(
+                new THREE.BoxGeometry(4.5, 0.4, 1.8),
+                new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 })
+            );
+            chassis.position.set(0, 0.4, 0);
+            truck.add(chassis);
+
+            // 6 Heavy Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x020617, roughness: 0.9 });
+            wheelGeo.rotateX(Math.PI / 2);
+
+            const wheelOffsets = [
+                [1.4, 0.5, 1.1], [1.4, 0.5, -1.1],
+                [-0.8, 0.5, 1.1], [-0.8, 0.5, -1.1],
+                [-1.8, 0.5, 1.1], [-1.8, 0.5, -1.1]
+            ];
+
+            wheelOffsets.forEach(pos => {
+                const w = new THREE.Mesh(wheelGeo, wheelMat);
+                w.position.set(...pos);
+                w.castShadow = true;
+                truck.add(w);
+            });
+
+            // Tilting Dump Bed Assembly
+            const bedGroup = new THREE.Group();
+            bedGroup.position.set(-1.0, 0.6, 0);
+
+            const bedGeo = new THREE.BoxGeometry(2.8, 1.2, 2.0);
+            const bedMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4 });
+            const bed = new THREE.Mesh(bedGeo, bedMat);
+            bed.position.set(0.2, 0.7, 0);
+            bed.castShadow = true;
+            bedGroup.add(bed);
+
+            // Cargo Payload Inside Bed
+            const cargoGeo = new THREE.BoxGeometry(2.6, 0.8, 1.8);
+            const cargoMat = new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.95 });
+            const cargo = new THREE.Mesh(cargoGeo, cargoMat);
+            cargo.position.set(0.2, 0.8, 0);
+            cargo.visible = false;
+            bedGroup.add(cargo);
+
+            truck.add(bedGroup);
+
+            truck.userData = {
+                bedGroup: bedGroup,
+                cargo: cargo,
+                state: 'DRIVING_TO_TBM',
+                progress: 0,
+                speed: 0.003
+            };
+
+            // Headlights
+            const headlightL = new THREE.SpotLight(0xffffcc, 2.2, 16, Math.PI / 6, 0.5);
+            headlightL.position.set(2.1, 1.0, 0.7);
+            headlightL.target.position.set(10, 0, 0.7);
+            truck.add(headlightL);
+            truck.add(headlightL.target);
+
+            return truck;
+        }
+
+        function initDumpTrucks() {
+            trucks.forEach(t => scene.remove(t.mesh));
+            trucks = [];
+
+            for (let i = 0; i < config.fleetSize; i++) {
+                const truckMesh = createDumpTruckMesh();
+                const initialProgress = (i / config.fleetSize);
+                scene.add(truckMesh);
+
+                trucks.push({
+                    mesh: truckMesh,
+                    progress: initialProgress,
+                    state: i % 2 === 0 ? 'DRIVING_TO_TBM' : 'DRIVING_TO_DEPOT'
+                });
+            }
+        }
+
+        function updateSimulation(delta) {
+            if (config.paused) return;
+
+            // 1. TBM Digging Progress
+            if (config.tunnelLength < config.maxTunnelLength) {
+                const advance = 0.02 * config.digSpeed;
+                config.tunnelLength += advance;
+                tbmGroup.position.x -= advance;
+
+                // Rotate cutter head
+                cutterHead.rotation.x += 0.05 * config.digSpeed;
+
+                // Spawn concrete rings
+                const lastSegmentX = TUNNEL_START_X - (tunnelGeometry.children.length * 1.5);
+                if (tbmGroup.position.x + 3 < lastSegmentX) {
+                    createTunnelSegment(lastSegmentX - 1.5);
+                }
+
+                // Stats Telemetry Update
+                config.totalDirtExcavated += advance * 15;
+                document.getElementById('stat-depth').innerText = `${config.tunnelLength.toFixed(1)} m`;
+                document.getElementById('stat-dirt').innerText = `${Math.floor(config.totalDirtExcavated)} Tons`;
+
+                // Particles at rear conveyor
+                animateParticles(tbmGroup.position.x + 8);
+            }
+
+            // 2. Dump Truck Autonomous Cycle
+            const loadingPointX = tbmGroup.position.x + 8;
+            const tunnelExitX = TUNNEL_START_X + 2;
+
+            trucks.forEach((truckObj) => {
+                const truck = truckObj.mesh;
+                const uData = truck.userData;
+
+                switch (uData.state) {
+                    case 'DRIVING_TO_TBM':
+                        uData.progress += uData.speed * config.digSpeed * 1.2;
+                        if (uData.progress > 1) uData.progress = 1;
+
+                        if (uData.progress < 0.4) {
+                            let t = uData.progress / 0.4;
+                            truck.position.x = THREE.MathUtils.lerp(DEPOT_X, tunnelExitX, t);
+                            truck.position.z = THREE.MathUtils.lerp(DEPOT_Z, TUNNEL_Z, t);
+                            truck.rotation.y = Math.atan2(-DEPOT_Z, tunnelExitX - DEPOT_X) + Math.PI / 2;
+                        } else {
+                            let t = (uData.progress - 0.4) / 0.6;
+                            truck.position.x = THREE.MathUtils.lerp(tunnelExitX, loadingPointX, t);
+                            truck.position.z = TUNNEL_Z;
+                            truck.rotation.y = Math.PI;
+                        }
+
+                        if (uData.progress >= 1) {
+                            uData.state = 'LOADING';
+                            uData.loadTimer = 0;
+                        }
+                        break;
+
+                    case 'LOADING':
+                        uData.loadTimer += delta;
+                        if (uData.loadTimer > 2.0 / (config.digSpeed || 1)) {
+                            uData.cargo.visible = true;
+                            uData.state = 'DRIVING_TO_DEPOT';
+                            uData.progress = 0;
+                        }
+                        break;
+
+                    case 'DRIVING_TO_DEPOT':
+                        uData.progress += uData.speed * config.digSpeed;
+                        if (uData.progress > 1) uData.progress = 1;
+
+                        if (uData.progress < 0.6) {
+                            let t = uData.progress / 0.6;
+                            truck.position.x = THREE.MathUtils.lerp(loadingPointX, tunnelExitX, t);
+                            truck.position.z = TUNNEL_Z;
+                            truck.rotation.y = 0;
+                        } else {
+                            let t = (uData.progress - 0.6) / 0.4;
+                            truck.position.x = THREE.MathUtils.lerp(tunnelExitX, DEPOT_X, t);
+                            truck.position.z = THREE.MathUtils.lerp(TUNNEL_Z, DEPOT_Z, t);
+                            truck.rotation.y = Math.atan2(DEPOT_Z, DEPOT_X - tunnelExitX) - Math.PI / 2;
+                        }
+
+                        if (uData.progress >= 1) {
+                            uData.state = 'UNLOADING';
+                            uData.unloadTimer = 0;
+                        }
+                        break;
+
+                    case 'UNLOADING':
+                        uData.unloadTimer += delta;
+                        if (uData.unloadTimer < 1.5) {
+                            uData.bedGroup.rotation.z = -Math.PI / 6 * (uData.unloadTimer / 1.5);
+                        } else if (uData.unloadTimer < 2.5) {
+                            uData.cargo.visible = false;
+                            dirtPileMesh.scale.y = Math.min(2.5, dirtPileMesh.scale.y + 0.002);
+                        } else if (uData.unloadTimer < 3.5) {
+                            uData.bedGroup.rotation.z = -Math.PI / 6 * (1 - (uData.unloadTimer - 2.5));
+                        } else {
+                            uData.bedGroup.rotation.z = 0;
+                            uData.state = 'DRIVING_TO_TBM';
+                            uData.progress = 0;
+                        }
+                        break;
+                }
+            });
+
+            updateCameraFollow();
+        }
+
+        function animateParticles(emitterX) {
+            const posAttr = rockParticles.geometry.attributes.position;
+            const vels = rockParticles.userData.velocities;
+
+            for (let i = 0; i < posAttr.count; i++) {
+                let x = posAttr.getX(i);
+                let y = posAttr.getY(i);
+                let z = posAttr.getZ(i);
+
+                y -= vels[i].y;
+                x += vels[i].x;
+                z += vels[i].z;
+
+                if (y < -1.5) {
+                    x = emitterX + (Math.random() - 0.5) * 0.8;
+                    y = -0.2;
+                    z = TUNNEL_Z + (Math.random() - 0.5) * 0.8;
+                }
+
+                posAttr.setXYZ(i, x, y, z);
+            }
+            posAttr.needsUpdate = true;
+        }
+
+        function updateCameraFollow() {
+            if (activeCamMode === 'tbm') {
+                const targetPos = new THREE.Vector3(tbmGroup.position.x - 3, 1, TUNNEL_Z + 4);
+                camera.position.lerp(targetPos, 0.05);
+                controls.target.lerp(new THREE.Vector3(tbmGroup.position.x - 2, 0, TUNNEL_Z), 0.05);
+            } else if (activeCamMode === 'truck' && trucks.length > 0) {
+                const truckMesh = trucks[0].mesh;
+                const offset = new THREE.Vector3(-6, 4, 4).applyAxisAngle(new THREE.Vector3(0, 1, 0), truckMesh.rotation.y);
+                camera.position.lerp(truckMesh.position.clone().add(offset), 0.08);
+                controls.target.lerp(truckMesh.position.clone().add(new THREE.Vector3(0, 1, 0)), 0.08);
+            } else if (activeCamMode === 'pit') {
+                camera.position.lerp(new THREE.Vector3(DEPOT_X + 12, 10, DEPOT_Z + 12), 0.05);
+                controls.target.lerp(new THREE.Vector3(DEPOT_X, 2, DEPOT_Z), 0.05);
+            }
+        }
+
+        function setCameraView(mode) {
+            activeCamMode = mode;
+            document.querySelectorAll('.cam-btn').forEach(btn => {
+                btn.classList.remove('bg-indigo-600', 'text-white');
+                btn.classList.add('bg-slate-800', 'text-slate-300');
+            });
+
+            const activeBtn = document.getElementById(`btn-cam-${mode}`);
+            if (activeBtn) {
+                activeBtn.classList.remove('bg-slate-800', 'text-slate-300');
+                activeBtn.classList.add('bg-indigo-600', 'text-white');
+            }
+
+            if (mode === 'orbit') {
+                controls.target.set(0, -2, 0);
+            }
+        }
+
+        function toggleXRay(enabled) {
+            config.xray = enabled;
+            terrainMesh.visible = !enabled;
+            xrayMesh.visible = enabled;
+        }
+
+        function updateDigSpeed(val) {
+            config.digSpeed = parseFloat(val);
+            document.getElementById('val-dig-speed').innerText = `${config.digSpeed.toFixed(1)}x`;
+        }
+
+        function updateFleetSize(val) {
+            config.fleetSize = parseInt(val);
+            document.getElementById('val-fleet-size').innerText = `${config.fleetSize} Trucks`;
+            document.getElementById('stat-trucks').innerText = `${config.fleetSize} Trucks`;
+            initDumpTrucks();
+        }
+
+        function updateSunPosition(val) {
+            const angle = parseFloat(val);
+            lights.sun.position.x = Math.cos(angle) * 60;
+            lights.sun.position.y = Math.sin(angle) * 60;
+            const isDay = angle > 0.2 && angle < 2.9;
+            document.getElementById('val-sun-pos').innerText = isDay ? "Day" : "Dusk / Night";
+            lights.ambient.intensity = isDay ? 0.45 : 0.15;
+        }
+
+        function togglePause() {
+            config.paused = !config.paused;
+            const lbl = document.getElementById('lbl-pause');
+            const btn = document.getElementById('btn-pause');
+            if (config.paused) {
+                lbl.innerText = "Resume";
+                btn.classList.replace('bg-amber-500/20', 'bg-emerald-500/20');
+                btn.classList.replace('text-amber-300', 'text-emerald-300');
+            } else {
+                lbl.innerText = "Pause";
+                btn.classList.replace('bg-emerald-500/20', 'bg-amber-500/20');
+                btn.classList.replace('text-emerald-300', 'text-amber-300');
+            }
+        }
+
+        function resetTunnel() {
+            config.tunnelLength = 0;
+            config.totalDirtExcavated = 0;
+            tbmGroup.position.set(TUNNEL_START_X, 0, TUNNEL_Z);
+
+            while (tunnelGeometry.children.length > 0) {
+                tunnelGeometry.remove(tunnelGeometry.children[0]);
+            }
+
+            dirtPileMesh.scale.set(1, 0.2, 1);
+            initDumpTrucks();
+        }
+
+        function initEventListeners() {
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        let clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            updateSimulation(delta);
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
