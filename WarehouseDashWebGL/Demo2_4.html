@@ -1129,6 +1129,7 @@ console.log("parseLevelMap();");
 
                 if (gameState === 'PLAYING') {
                     if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
+                        e.preventDefault();
                         player.jump();
                     }
                     if (e.code === 'KeyF') {
@@ -1137,8 +1138,18 @@ console.log("parseLevelMap();");
                     if (e.code === 'Escape') {
                         pauseGame();
                     }
-                } else if (gameState === 'PAUSED' && e.code === 'Escape') {
-                    resumeGame();
+                } else {
+                    // Pressing Space or Enter from Menu, Paused, or End screen starts/resumes the game
+                    if (e.code === 'Space' || e.code === 'Enter') {
+                        e.preventDefault();
+                        if (gameState === 'PAUSED') {
+                            resumeGame();
+                        } else {
+                            startGame();
+                        }
+                    } else if (gameState === 'PAUSED' && e.code === 'Escape') {
+                        resumeGame();
+                    }
                 }
             });
 
@@ -1146,12 +1157,30 @@ console.log("parseLevelMap();");
                 keys[e.code] = false;
             });
 
+            // Safe binding helper to prevent null crashes if an element isn't in the DOM yet
+            const safeBind = (id, handler) => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        handler();
+                    });
+                    // Raw mouse fallback
+                    el.addEventListener('mousedown', (e) => {
+                        if (e.button === 0) {
+                            e.stopPropagation();
+                        }
+                    });
+                }
+            };
+
             // UI Button Hooks
-            document.getElementById('btn-start').addEventListener('click', startGame);
-            document.getElementById('btn-resume').addEventListener('click', resumeGame);
-            document.getElementById('btn-restart-pause').addEventListener('click', startGame);
-            document.getElementById('btn-restart').addEventListener('click', startGame);
-console.log("UI Button Books");
+            safeBind('btn-start', startGame);
+            safeBind('btn-resume', resumeGame);
+            safeBind('btn-restart-pause', startGame);
+            safeBind('btn-restart', startGame);
+            console.log("UI Button Hooks");
+
             
             // Manual Touch UI Toggle
             document.getElementById('btn-toggle-touch').addEventListener('click', () => {
