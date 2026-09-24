@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Dash 2D WebGL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Share+Tech+Mono&display=swap');
+
+        body {
+            background-color: #0d0f12;
+            color: #e2e8f0;
+            font-family: 'Chakra Petch', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .mono {
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        /* WebGL Canvas responsiveness */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+        }
+
+        canvas {
+            display: block;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+            image-rendering: pixelated;
+        }
+
+        /* Hazard stripe animation overlay */
+        .hazard-border {
+            background: repeating-linear-gradient(
+                -45deg,
+                #fbbf24,
+                #fbbf24 10px,
+                #18181b 10px,
+                #18181b 20px
+            );
+        }
+
+        /* Glassmorphism panel styling */
+        .glass-panel {
+            background: rgba(18, 22, 28, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Touch Control Button Styling */
+        .touch-btn {
+            background: rgba(30, 41, 59, 0.65);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(6px);
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #f8fafc;
+            font-weight: bold;
+            font-size: 1.25rem;
+            border-radius: 9999px;
+            transition: background-color 0.1s, transform 0.1s, border-color 0.1s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .touch-btn:active, .touch-btn.active {
+            background: rgba(245, 158, 11, 0.45);
+            border-color: rgba(251, 191, 36, 0.8);
+            transform: scale(0.92);
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen bg-slate-950 overflow-hidden">
+
+    <div id="game-container">
+        <!-- Main WebGL Viewport Canvas -->
+        <canvas id="glcanvas"></canvas>
+
+        <!-- Dynamic Game HUD Overlay -->
+        <div id="hud" class="absolute top-0 left-0 w-full p-2 sm:p-4 pointer-events-none flex justify-between items-start z-10 hidden">
+            <!-- Left Panel: Status & Collectibles -->
+            <div class="glass-panel p-2 sm:p-3 rounded-lg flex items-center space-x-3 sm:space-x-6 border-l-4 border-amber-500 shadow-lg pointer-events-auto">
+                <div>
+                    <div class="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider">Sector</div>
+                    <div class="text-xs sm:text-lg font-bold text-amber-400 flex items-center">
+                        <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping mr-1 sm:mr-2"></span>
+                        DOCK 07
+                    </div>
+                </div>
+                <div class="h-6 sm:h-8 w-px bg-slate-700"></div>
+                <div>
+                    <div class="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider">Manifest</div>
+                    <div class="text-sm sm:text-xl font-extrabold text-cyan-400 mono" id="hud-manifest">0 / 8</div>
+                </div>
+                <div class="h-6 sm:h-8 w-px bg-slate-700"></div>
+                <div>
+                    <div class="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider">Wrenches</div>
+                    <div class="text-sm sm:text-xl font-extrabold text-yellow-400 mono" id="hud-wrenches">0</div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Timer & Flashlight Status & Touch Controls Toggle -->
+            <div class="glass-panel p-2 sm:p-3 rounded-lg flex items-center space-x-3 sm:space-x-6 border-r-4 border-cyan-500 shadow-lg pointer-events-auto">
+                <div>
+                    <div class="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-wider">Time</div>
+                    <div class="text-sm sm:text-xl font-extrabold text-slate-100 mono" id="hud-timer">00:00.0</div>
+                </div>
+                <div class="h-6 sm:h-8 w-px bg-slate-700"></div>
+                <div class="hidden sm:flex flex-col items-center">
+                    <div class="text-xs text-slate-400 font-bold uppercase tracking-wider">Flashlight [F]</div>
+                    <span id="hud-flashlight" class="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/50 mt-1">
+                        ACTIVE
+                    </span>
+                </div>
+                <!-- Manual Touch UI Toggle Button -->
+                <button id="btn-toggle-touch" class="p-1.5 sm:p-2 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-lg border border-slate-600 transition text-xs font-bold uppercase tracking-wider">
+                    📱 Touch UI
+                </button>
+            </div>
+        </div>
+
+        <!-- Touch Controls Overlay Container (Mobile/Tablet ergonomic layout) -->
+        <div id="touch-controls" class="absolute inset-0 pointer-events-none z-20 hidden select-none">
+            <!-- Left Thumb Area: Virtual Directional Pad -->
+            <div class="absolute bottom-6 left-6 pointer-events-auto flex flex-col items-center gap-2">
+                <button id="touch-up" class="touch-btn w-14 h-14 text-2xl font-black">▲</button>
+                <div class="flex space-x-3">
+                    <button id="touch-left" class="touch-btn w-16 h-16 text-3xl font-black">◀</button>
+                    <button id="touch-down" class="touch-btn w-14 h-14 text-2xl font-black">▼</button>
+                    <button id="touch-right" class="touch-btn w-16 h-16 text-3xl font-black">▶</button>
+                </div>
+            </div>
+
+            <!-- Right Thumb Area: Jump & Action Buttons -->
+            <div class="absolute bottom-6 right-6 pointer-events-auto flex items-end space-x-4">
+                <button id="touch-flash" class="touch-btn w-14 h-14 text-xl font-bold bg-amber-900/40 border-amber-500/40 text-amber-300">
+                    🔦
+                </button>
+                <button id="touch-jump" class="touch-btn w-20 h-20 text-xl font-black bg-cyan-900/50 border-cyan-400/50 text-cyan-200">
+                    JUMP
+                </button>
+            </div>
+        </div>
+
+        <!-- Controls Helper Bar (Bottom HUD) -->
+        <div id="controls-bar" class="absolute bottom-3 left-1/2 -translate-x-1/2 glass-panel px-6 py-2 rounded-full pointer-events-none text-xs text-slate-300 hidden md:flex space-x-6 shadow-xl z-10">
+
+                <div class="bg-slate-900/80 p-4 rounded-lg text-slate-200 space-y-3 border border-slate-800 mb-6 text-sm">
+                    <div class="flex justify-between border-b border-slate-800 pb-2">
+                        <span class="text-slate-400">Total Time:</span>
+                        <span id="end-time" class="font-bold text-cyan-400 mono">00:00.0</span>
+                    </div>
+                    <div class="flex justify-between border-b border-slate-800 pb-2">
+                        <span class="text-slate-400">Clipboards Logged:</span>
+                        <span id="end-manifests" class="font-bold text-amber-400 mono">0 / 8</span>
+                    </div>
+                    <div class="flex justify-between border-b border-slate-800 pb-2">
+                        <span class="text-slate-400">Wrenches Collected:</span>
+                        <span id="end-wrenches" class="font-bold text-yellow-400 mono">0</span>
+                    </div>
+                    <div class="flex justify-between pt-1 text-base">
+                        <span class="font-bold text-slate-300">Final Efficiency Grade:</span>
+                        <span id="end-score" class="font-extrabold text-amber-400 mono">A+</span>
+                    </div>
+                </div>
+
+                <button id="btn-restart" class="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold rounded-lg shadow-lg transform transition active:scale-95 uppercase tracking-wider text-base cursor-pointer">
+                    Start Next Shift (Restart)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- WEBGLEngine Core Shaders & Renderer Setup ---
+        
+        // Vertex Shader: Standard 2D Quad Transformation with World & Light UV coordinates
+        const VS_SOURCE = `
+            attribute vec2 a_position;
+            attribute vec2 a_texCoord;
+            attribute vec4 a_color;
+
+            uniform vec2 u_resolution;
+            uniform vec2 u_camera;
+
+            varying vec2 v_texCoord;
+            varying vec4 v_color;
+            varying vec2 v_worldPos;
+
+            void main() {
+                // Convert position relative to camera
+                vec2 screenPos = a_position - u_camera;
+                // Convert from pixels to [0, 1] clip space
+                vec2 zeroToOne = screenPos / u_resolution;
+                // Convert from [0, 1] to [-1, 1] (WebGL Normalized Device Coordinates)
+                vec2 zeroToTwo = zeroToOne * 2.0;
+                vec2 clipSpace = zeroToTwo - 1.0;
+
+                // Flip Y for standard top-left screen origin
+                gl_Position = vec4(clipSpace.x, -clipSpace.y, 0.0, 1.0);
+
+                v_texCoord = a_texCoord;
+                v_color = a_color;
+                v_worldPos = a_position;
+            }
+        `;
+
+        // Fragment Shader: 2D Batching with Multi-Light Lighting Model & Ambient Shading
+        const FS_SOURCE = `
+            precision mediump float;
+
+            varying vec2 v_texCoord;
+            varying vec4 v_color;
+            varying vec2 v_worldPos;
+
+            // Texture sampler
+            uniform sampler2D u_texture;
+            uniform float u_useTexture;
+
+            // Lighting system uniforms
+            #define MAX_LIGHTS 16
+            uniform int u_lightCount;
+            uniform vec2 u_lightPos[MAX_LIGHTS];
+            uniform vec3 u_lightColor[MAX_LIGHTS];
+            uniform float u_lightRadius[MAX_LIGHTS];
+            uniform float u_lightIntensity[MAX_LIGHTS];
+
+            // Flashlight Cone Uniforms
+            uniform vec2 u_flashlightPos;
+            uniform vec2 u_flashlightDir;
+            uniform float u_flashlightEnabled;
+
+            uniform vec3 u_ambientLight;
+
+            void main() {
+                vec4 texColor = v_color;
+                if (u_useTexture > 0.5) {
+                    texColor *= texture2D(u_texture, v_texCoord);
+                }
+
+                if (texColor.a < 0.01) discard;
+
+                // Accumulate lighting
+                vec3 totalLighting = u_ambientLight;
+
+                // Point Light Sources (Overhead lamps, hazard glow, collectibles)
+                for (int i = 0; i < MAX_LIGHTS; i++) {
+                    if (i >= u_lightCount) break;
+                    
+                    float dist = distance(v_worldPos, u_lightPos[i]);
+                    if (dist < u_lightRadius[i]) {
+                        float atten = 1.0 - smoothstep(0.0, u_lightRadius[i], dist);
+                        atten = pow(atten, 1.5); // Smoother light falloff
+                        totalLighting += u_lightColor[i] * u_lightIntensity[i] * atten;
+                    }
+                }
+
+                // Spotlight / Flashlight Cone calculation
+                if (u_flashlightEnabled > 0.5) {
+                    vec2 toPixel = normalize(v_worldPos - u_flashlightPos);
+                    float dist = distance(v_worldPos, u_flashlightPos);
+                    float maxDist = 320.0;
+
+                    if (dist < maxDist) {
+                        float dotProd = dot(toPixel, u_flashlightDir);
+                        float coneAngle = 0.85; // Approx ~30 degree cone angle
+                        
+                        if (dotProd > coneAngle) {
+                            float coneIntensity = smoothstep(coneAngle, 1.0, dotProd);
+                            float atten = (1.0 - smoothstep(0.0, maxDist, dist)) * coneIntensity;
+                            totalLighting += vec3(1.0, 0.95, 0.8) * 1.6 * atten;
+                        }
+                    }
+                }
+
+                // Clamp final illumination level to avoid over-exposure
+                totalLighting = min(totalLighting, vec3(2.0));
+
+                gl_FragColor = vec4(texColor.rgb * totalLighting, texColor.a);
+            }
+        `;
+
+        // --- GAME ENGINE STATE & GLOBALS ---
+        let gl, program;
+        let positionBuffer, texCoordBuffer, colorBuffer;
+        let positionLoc, texCoordLoc, colorLoc;
+        let resLoc, cameraLoc, useTexLoc, ambientLoc;
+        let lightCountLoc, lightPosLoc, lightColorLoc, lightRadiusLoc, lightIntensityLoc;
+        let flashPosLoc, flashDirLoc, flashEnableLoc;
+
+        let canvasWidth = 1280;
+        let canvasHeight = 720;
+
+        let gameState = 'MENU'; // MENU, PLAYING, PAUSED, END
+        let gameTime = 0;
+        let lastTimestamp = 0;
+
+        // Dynamic Lighting Storage
+        const lights = [];
+        const MAX_LIGHTS = 16;
+
+        // Particle System Array
+        const particles = [];
+
+        // Dynamic World Entities
+        let player;
+        let camera = { x: 0, y: 0 };
+        const keys = {};
+
+        // Level Map Definition Data
+        const TILE_SIZE = 32;
+        let levelMap = [];
+        let levelWidth = 0;
+        let levelHeight = 0;
+
+        let platforms = [];
+        let movePlatforms = [];
+        let ladders = [];
+        let hazards = [];
+        let collectibles = [];
+        let goalDoor = null;
+
+        // Statistics Tracker
+        let totalManifests = 0;
+        let manifestsCollected = 0;
+        let wrenchesCollected = 0;
+
+        // Mobile Touch Control Tracking State
+        let isTouchDevice = false;
+        let touchUIEnabled = false;
+        const touchState = {
+            left: false,
+            right: false,
+            up: false,
+            down: false,
+            jump: false,
+            flash: false
+        };
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error("Shader compilation failed: ", gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vsSource, fsSource) {
+            const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vs);
+            gl.attachShader(prog, fs);
+            gl.linkProgram(prog);
+            if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+                console.error("Program link failed: ", gl.getProgramInfoLog(prog));
+                return null;
+            }
+            return prog;
+        }
+
+        function initWebGL() {
+            const canvas = document.getElementById('glcanvas');
+            gl = canvas.getContext('webgl', { alpha: false, antialias: false });
+            if (!gl) {
+                alert('WebGL is not supported in your browser context.');
+                return;
+            }
+
+            program = createProgram(gl, VS_SOURCE, FS_SOURCE);
+            gl.useProgram(program);
+
+            // Shader Attribute Locations
+            positionLoc = gl.getAttribLocation(program, 'a_position');
+            texCoordLoc = gl.getAttribLocation(program, 'a_texCoord');
+            colorLoc = gl.getAttribLocation(program, 'a_color');
+
+            // Shader Uniform Locations
+            resLoc = gl.getUniformLocation(program, 'u_resolution');
+            cameraLoc = gl.getUniformLocation(program, 'u_camera');
+            useTexLoc = gl.getUniformLocation(program, 'u_useTexture');
+            ambientLoc = gl.getUniformLocation(program, 'u_ambientLight');
+
+            lightCountLoc = gl.getUniformLocation(program, 'u_lightCount');
+            lightPosLoc = gl.getUniformLocation(program, 'u_lightPos');
+            lightColorLoc = gl.getUniformLocation(program, 'u_lightColor');
+            lightRadiusLoc = gl.getUniformLocation(program, 'u_lightRadius');
+            lightIntensityLoc = gl.getUniformLocation(program, 'u_lightIntensity');
+
+            flashPosLoc = gl.getUniformLocation(program, 'u_flashlightPos');
+            flashDirLoc = gl.getUniformLocation(program, 'u_flashlightDir');
+            flashEnableLoc = gl.getUniformLocation(program, 'u_flashlightEnabled');
+
+            // Create Vertex Buffers for Quad Batching
+            positionBuffer = gl.createBuffer();
+            texCoordBuffer = gl.createBuffer();
+            colorBuffer = gl.createBuffer();
+
+            // Set up WebGL Blend States for 2D Sprites and Particle Effects
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+        }
+
+        function resizeCanvas() {
+            const canvas = document.getElementById('glcanvas');
+            canvasWidth = window.innerWidth;
+            canvasHeight = window.innerHeight;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            gl.viewport(0, 0, canvasWidth, canvasHeight);
+        }
+
+        // Batch Quad Primitive Rendering Helper
+        let batchPositions = [];
+        let batchColors = [];
+
+        function resetBatch() {
+            batchPositions = [];
+            batchColors = [];
+        }
+
+        function drawQuad(x, y, width, height, r, g, b, a = 1.0) {
+            const x1 = x, y1 = y;
+            const x2 = x + width, y2 = y + height;
+
+            // Triangle 1
+            batchPositions.push(
+                x1, y1,
+                x2, y1,
+                x1, y2,
+                // Triangle 2
+                x1, y2,
+                x2, y1,
+                x2, y2
+            );
+
+            for (let i = 0; i < 6; i++) {
+                batchColors.push(r, g, b, a);
+            }
+        }
+
+        function flushBatch() {
+            if (batchPositions.length === 0) return;
+
+            // Uniforms setup
+            gl.uniform2f(resLoc, canvasWidth, canvasHeight);
+            gl.uniform2f(cameraLoc, camera.x, camera.y);
+            gl.uniform1f(useTexLoc, 0.0); // Procedural shapes (no texture Atlas required)
+            gl.uniform3f(ambientLoc, 0.22, 0.24, 0.28); // Warehouse moody dark ambient
+
+            // Dynamic Point Lights array bindings
+            gl.uniform1i(lightCountLoc, Math.min(lights.length, MAX_LIGHTS));
+            const pLocs = [], cLocs = [], rLocs = [], iLocs = [];
+            for (let i = 0; i < MAX_LIGHTS; i++) {
+                if (i < lights.length) {
+                    pLocs.push(lights[i].x, lights[i].y);
+                    cLocs.push(lights[i].r, lights[i].g, lights[i].b);
+                    rLocs.push(lights[i].radius);
+                    iLocs.push(lights[i].intensity);
+                } else {
+                    pLocs.push(0, 0);
+                    cLocs.push(0, 0, 0);
+                    rLocs.push(0);
+                    iLocs.push(0);
+                }
+            }
+            gl.uniform2fv(lightPosLoc, new Float32Array(pLocs));
+            gl.uniform3fv(lightColorLoc, new Float32Array(cLocs));
+            gl.uniform1fv(lightRadiusLoc, new Float32Array(rLocs));
+            gl.uniform1fv(lightIntensityLoc, new Float32Array(iLocs));
+
+            // Player Flashlight Uniforms
+            if (player) {
+                gl.uniform2f(flashPosLoc, player.x + player.width / 2, player.y + player.height / 2);
+                gl.uniform2f(flashDirLoc, player.facingRight ? 1.0 : -1.0, 0.1);
+                gl.uniform1f(flashEnableLoc, player.flashlightOn ? 1.0 : 0.0);
+            } else {
+                gl.uniform1f(flashEnableLoc, 0.0);
+            }
+
+            // Position Buffer Binding
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(batchPositions), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(positionLoc);
+            gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+            // Color Buffer Binding
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(batchColors), gl.DYNAMIC_DRAW);
+            gl.enableVertexAttribArray(colorLoc);
+            gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, 0, 0);
+
+            // Execute Draw Call
+            gl.drawArrays(gl.TRIANGLES, 0, batchPositions.length / 2);
+
+            resetBatch();
+        }
+
+        const RAW_MAP = [
+            "################################################################################",
+            "#                                                                              #",
+            "#  M                                                                           #",
+            "# #####    W                                                                   #",
+            "#         #####                                  M                             #",
+            "#                     WW                        ###                            #",
+            "#                   ######               W             M                       #",
+            "#     M                                 ###          #####                     #",
+            "#   #####        M                                                 M           #",
+            "#               ###               L                               ###          #",
+            "#                                 L             M                              #",
+            "#         M        C C C          L            ###                 M           #",
+            "#        ###      #######         L                               ###          #",
+            "#                                 L        W                                   #",
+            "#   P                   M         L       ###              L                   #",
+            "#  ###                 ###        L                        L        G          #",
+            "#                                 L    C C C C             L       #####       #",
+            "#             S S                 L   #########            L                   #",
+            "#============#####================L                        L==============     #",
+            "#                                 L                        L                   #",
+            "#                                 L                        L                   #",
+            "#          W             M        L            W           L                   #",
+            "#         ###           ###       L           ###          L        M          #",
+            "#                                 L                        L       ###         #",
+            "#                                 L                        L                   #",
+            "#                   S S           L                        L                   #",
+            "################################################################################"
+        ];
+
+        /* Map Tile Key Code Definitions:
+           '#' : Solid Outer Wall / Concrete Floor
+           '=' : Industrial Steel Girder / Platform
+           'P' : Player Start Position
+           'L' : Ladder / Scaffolding
+           'S' : Hazard Steam Vent
+           'C' : Stackable Cargo Crate
+           'M' : Collectible Manifest Clipboard
+           'W' : Collectible Golden Wrench
+           'G' : Dock Bay Goal Exit
+        */
+
+        function parseLevelMap() {
+            levelMap = RAW_MAP;
+            levelHeight = RAW_MAP.length;
+            levelWidth = RAW_MAP[0].length;
+
+            platforms = [];
+            movePlatforms = [];
+            ladders = [];
+            hazards = [];
+            collectibles = [];
+            lights.length = 0;
+            totalManifests = 0;
+            manifestsCollected = 0;
+            wrenchesCollected = 0;
+
+            for (let r = 0; r < levelHeight; r++) {
+                for (let c = 0; c < levelWidth; c++) {
+                    const char = RAW_MAP[r][c];
+                    const x = c * TILE_SIZE;
+                    const y = r * TILE_SIZE;
+
+                    if (char === '#') {
+                        platforms.push({ x, y, width: TILE_SIZE, height: TILE_SIZE, type: 'WALL' });
+                    } else if (char === '=') {
+                        platforms.push({ x, y, width: TILE_SIZE, height: 12, type: 'GIRDER', jumpThrough: true });
+                    } else if (char === 'L') {
+                        ladders.push({ x: x + 8, y, width: 16, height: TILE_SIZE });
+                    } else if (char === 'C') {
+                        platforms.push({ x: x + 2, y: y + 2, width: TILE_SIZE - 4, height: TILE_SIZE - 4, type: 'CRATE' });
+                    } else if (char === 'S') {
+                        hazards.push({ x: x + 4, y: y + 16, width: 24, height: 16, type: 'STEAM', timer: Math.random() * 3 });
+                    } else if (char === 'M') {
+                        collectibles.push({ x: x + 8, y: y + 8, width: 16, height: 16, type: 'MANIFEST', collected: false });
+                        totalManifests++;
+                    } else if (char === 'W') {
+                        collectibles.push({ x: x + 8, y: y + 8, width: 16, height: 16, type: 'WRENCH', collected: false });
+                    } else if (char === 'P') {
+                        player = new Player(x, y);
+                    } else if (char === 'G') {
+                        goalDoor = { x, y: y - 16, width: 32, height: 48 };
+                    }
+                }
+            }
+
+            // Create Dynamic Overhead Warehouse Spotlights
+            const lightSpacing = 12 * TILE_SIZE;
+            for (let lx = lightSpacing; lx < levelWidth * TILE_SIZE; lx += lightSpacing) {
+                lights.push({
+                    x: lx,
+                    y: 64,
+                    r: 0.9, g: 0.85, b: 0.7,
+                    radius: 280,
+                    intensity: 1.1
+                });
+            }
+
+            // Create Freight Moving Platforms
+            movePlatforms.push(new MovingPlatform(14 * TILE_SIZE, 18 * TILE_SIZE, 3 * TILE_SIZE, 14, 0, -180, 1.2));
+            movePlatforms.push(new MovingPlatform(45 * TILE_SIZE, 22 * TILE_SIZE, 3 * TILE_SIZE, 14, 180, 0, 1.5));
+        }
+
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 20;
+                this.height = 30;
+                this.vx = 0;
+                this.vy = 0;
+
+                // Physics Constants
+                this.speed = 4.2;
+                this.accel = 0.6;
+                this.friction = 0.78;
+                this.gravity = 0.45;
+                this.jumpForce = -9.2;
+
+                // Physics States
+                this.isGrounded = false;
+                this.isClimbing = false;
+                this.canDoubleJump = true;
+                this.isWallSliding = false;
+                this.wallDir = 0; // -1 for left wall, 1 for right wall
+                this.facingRight = true;
+                this.flashlightOn = true;
+
+                // Animation Timers
+                this.animTimer = 0;
+            }
+
+            update() {
+                this.animTimer += 0.15;
+
+            // Movement Inputs (Check physical keyboard AND active touch states)
+            let moveX = 0;
+            if (keys['KeyA'] || keys['ArrowLeft'] || touchState.left) moveX -= 1;
+            if (keys['KeyD'] || keys['ArrowRight'] || touchState.right) moveX += 1;
+
+            if (moveX !== 0) {
+                this.vx += moveX * this.accel;
+                this.facingRight = moveX > 0;
+            } else {
+                this.vx *= this.friction;
+            }
+
+            // Clamp Horizontal Velocity
+            this.vx = Math.max(-this.speed, Math.min(this.speed, this.vx));
+
+            // Ladder / Climbing Interactions
+            let onLadder = false;
+            for (let l of ladders) {
+                if (checkAABB(this, l)) {
+                    onLadder = true;
+                    break;
+                }
+            }
+
+            const isClimbUp = keys['KeyW'] || keys['ArrowUp'] || touchState.up;
+            const isClimbDown = keys['KeyS'] || keys['ArrowDown'] || touchState.down;
+
+            if (onLadder && (isClimbUp || isClimbDown)) {
+                this.isClimbing = true;
+            }
+            if (!onLadder) this.isClimbing = false;
+
+            if (this.isClimbing) {
+                this.vy = 0;
+                if (isClimbUp) this.vy = -3;
+                if (isClimbDown) this.vy = 3;
+            } else {
+                // Apply Standard Gravity
+                this.vy += this.gravity;
+            }
+
+            // Wall Slide Detection
+                this.isWallSliding = false;
+                if (!this.isGrounded && !this.isClimbing && this.vy > 0) {
+                    if (this.wallDir !== 0 && ((this.wallDir === -1 && moveX < 0) || (this.wallDir === 1 && moveX > 0))) {
+                        this.isWallSliding = true;
+                        this.vy = Math.min(this.vy, 1.8); // Cap descent speed during wall slide
+                        // Wall slide friction dust
+                        if (Math.random() < 0.3) {
+                            spawnParticle(
+                                this.wallDir === -1 ? this.x : this.x + this.width,
+                                this.y + Math.random() * this.height,
+                                (Math.random() - 0.5) * 0.5,
+                                -Math.random() * 0.5,
+                                0.7, 0.7, 0.7, 2, 20
+                            );
+                        }
+                    }
+                }
+
+                // Horizontal Physics & Collisions
+                this.x += this.vx;
+                this.checkCollisions(true);
+
+                // Vertical Physics & Collisions
+                this.y += this.vy;
+                this.checkCollisions(false);
+
+                // Spawn Footstep Landing Dust
+                if (this.isGrounded && Math.abs(this.vx) > 2 && Math.random() < 0.25) {
+                    spawnParticle(
+                        this.x + this.width / 2,
+                        this.y + this.height,
+                        -this.vx * 0.2,
+                        -Math.random() * 0.5,
+                        0.6, 0.6, 0.6, 2, 15
+                    );
+                }
+            }
+
+            jump() {
+                if (this.isClimbing) {
+                    this.isClimbing = false;
+                    this.vy = this.jumpForce;
+                    return;
+                }
+
+                if (this.isGrounded) {
+                    this.vy = this.jumpForce;
+                    this.isGrounded = false;
+                    this.canDoubleJump = true;
+                    spawnBurstParticles(this.x + this.width / 2, this.y + this.height, 6, 0.8, 0.8, 0.8);
+                } else if (this.isWallSliding) {
+                    this.vy = this.jumpForce * 0.95;
+                    this.vx = -this.wallDir * (this.speed * 1.1);
+                    this.facingRight = this.wallDir < 0;
+                    this.isWallSliding = false;
+                    spawnBurstParticles(this.x + (this.wallDir < 0 ? 0 : this.width), this.y + 15, 8, 0.9, 0.7, 0.4);
+                } else if (this.canDoubleJump) {
+                    this.vy = this.jumpForce * 0.85;
+                    this.canDoubleJump = false;
+                    spawnBurstParticles(this.x + this.width / 2, this.y + this.height, 8, 0.3, 0.8, 1.0);
+                }
+            }
+
+            checkCollisions(isHorizontal) {
+                this.wallDir = 0;
+
+                // Platform Collisions
+                for (let p of platforms) {
+                    if (p.jumpThrough && isHorizontal) continue;
+
+                    if (checkAABB(this, p)) {
+                        if (p.jumpThrough) {
+                            // Only collide when falling down onto girder top
+                            if (this.vy > 0 && (this.y + this.height - this.vy) <= p.y + 6) {
+                                this.y = p.y - this.height;
+                                this.vy = 0;
+                                this.isGrounded = true;
+                            }
+                            continue;
+                        }
+
+                        if (isHorizontal) {
+                            if (this.vx > 0) {
+                                this.x = p.x - this.width;
+                                this.wallDir = 1;
+                            } else if (this.vx < 0) {
+                                this.x = p.x + p.width;
+                                this.wallDir = -1;
+                            }
+                            this.vx = 0;
+                        } else {
+                            if (this.vy > 0) {
+                                this.y = p.y - this.height;
+                                this.isGrounded = true;
+                                this.vy = 0;
+                            } else if (this.vy < 0) {
+                                this.y = p.y + p.height;
+                                this.vy = 0;
+                            }
+                        }
+                    }
+                }
+
+                // Moving Freight Elevator Collisions
+                for (let mp of movePlatforms) {
+                    if (checkAABB(this, mp)) {
+                        if (!isHorizontal && this.vy >= 0 && (this.y + this.height - this.vy) <= mp.y + 8) {
+                            this.y = mp.y - this.height;
+                            this.vy = 0;
+                            this.isGrounded = true;
+                            this.x += mp.vx; // Move along with platform
+                        }
+                    }
+                }
+            }
+        }
+
+        class MovingPlatform {
+            constructor(x, y, width, height, dx, dy, speed) {
+                this.startX = x;
+                this.startY = y;
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.targetX = x + dx;
+                this.targetY = y + dy;
+                this.speed = speed;
+                this.progress = 0;
+                this.direction = 1;
+                this.vx = 0;
+                this.vy = 0;
+            }
+
+            update() {
+                const prevX = this.x;
+                const prevY = this.y;
+
+                this.progress += (this.speed / 1000) * this.direction;
+                if (this.progress >= 1) {
+                    this.progress = 1;
+                    this.direction = -1;
+                } else if (this.progress <= 0) {
+                    this.progress = 0;
+                    this.direction = 1;
+                }
+
+                // Smooth cosine easing movement
+                const ease = 0.5 - Math.cos(this.progress * Math.PI) / 2;
+                this.x = this.startX + (this.targetX - this.startX) * ease;
+                this.y = this.startY + (this.targetY - this.startY) * ease;
+
+                this.vx = this.x - prevX;
+                this.vy = this.y - prevY;
+            }
+        }
+
+        function spawnParticle(x, y, vx, vy, r, g, b, size, life) {
+            particles.push({ x, y, vx, vy, r, g, b, size, life, maxLife: life });
+        }
+
+        function spawnBurstParticles(x, y, count, r, g, b) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const spd = Math.random() * 2.5 + 0.5;
+                spawnParticle(
+                    x, y,
+                    Math.cos(angle) * spd,
+                    Math.sin(angle) * spd,
+                    r, g, b,
+                    Math.random() * 3 + 2,
+                    Math.floor(Math.random() * 20 + 15)
+                );
+            }
+        }
+
+        function updateAndDrawParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+
+                const alpha = p.life / p.maxLife;
+                drawQuad(p.x, p.y, p.size, p.size, p.r, p.g, p.b, alpha);
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // Standard Axis-Aligned Bounding Box Collision Check
+        function checkAABB(rect1, rect2) {
+            return (
+                rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.width > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y
+            );
+        }
+
+        function renderScene() {
+            // Parallax Background Girders & Scaffolding
+            const parallaxX = camera.x * 0.3;
+            for (let bgX = -100; bgX < levelWidth * TILE_SIZE; bgX += 240) {
+                drawQuad(bgX - parallaxX, 100, 16, 500, 0.12, 0.14, 0.18, 1.0); // Vertical steel column
+                drawQuad(bgX - parallaxX - 80, 280, 200, 8, 0.14, 0.16, 0.20, 1.0); // Horizontal strut
+            }
+
+            // Draw Ladders / Industrial Scaffolding
+            for (let l of ladders) {
+                drawQuad(l.x, l.y, 3, l.height, 0.7, 0.45, 0.2, 1.0);
+                drawQuad(l.x + l.width - 3, l.y, 3, l.height, 0.7, 0.45, 0.2, 1.0);
+                for (let ry = l.y + 4; ry < l.y + l.height; ry += 8) {
+                    drawQuad(l.x, ry, l.width, 2, 0.8, 0.5, 0.2, 1.0);
+                }
+            }
+
+            // Draw Platforms & Solid Tiles
+            for (let p of platforms) {
+                if (p.type === 'WALL') {
+                    // Concrete warehouse walls with subtle edge highlight
+                    drawQuad(p.x, p.y, p.width, p.height, 0.2, 0.22, 0.26, 1.0);
+                    drawQuad(p.x, p.y, p.width, 2, 0.35, 0.38, 0.42, 1.0);
+                } else if (p.type === 'GIRDER') {
+                    // Industrial steel beams with hazard stripe accents
+                    drawQuad(p.x, p.y, p.width, p.height, 0.3, 0.35, 0.4, 1.0);
+                    drawQuad(p.x, p.y, p.width, 3, 0.9, 0.65, 0.15, 1.0);
+                } else if (p.type === 'CRATE') {
+                    // Wooden cargo crates
+                    drawQuad(p.x, p.y, p.width, p.height, 0.55, 0.38, 0.2, 1.0);
+                    drawQuad(p.x + 3, p.y + 3, p.width - 6, p.height - 6, 0.45, 0.3, 0.15, 1.0);
+                    // Cross bracing pattern
+                    drawQuad(p.x + 4, p.y + 4, p.width - 8, 2, 0.65, 0.48, 0.28, 1.0);
+                    drawQuad(p.x + 4, p.y + p.height - 6, p.width - 8, 2, 0.65, 0.48, 0.28, 1.0);
+                }
+            }
+
+            // Draw Dynamic Moving Freight Elevators
+            for (let mp of movePlatforms) {
+                drawQuad(mp.x, mp.y, mp.width, mp.height, 0.8, 0.5, 0.1, 1.0);
+                drawQuad(mp.x + 2, mp.y + 2, mp.width - 4, mp.height - 4, 0.2, 0.2, 0.2, 1.0);
+            }
+
+            // Draw Hazards (Steam Vents)
+            for (let h of hazards) {
+                // Steam Vent Base Pipe
+                drawQuad(h.x, h.y, h.width, h.height, 0.4, 0.4, 0.45, 1.0);
+                drawQuad(h.x + 2, h.y - 4, h.width - 4, 4, 0.8, 0.2, 0.2, 1.0); // Red warning flange
+
+                // Emit dynamic steam particle puff
+                h.timer += 0.05;
+                if (Math.random() < 0.6) {
+                    spawnParticle(
+                        h.x + Math.random() * h.width,
+                        h.y - 2,
+                        (Math.random() - 0.5) * 0.8,
+                        -Math.random() * 2.5 - 1.0,
+                        0.85, 0.9, 0.95,
+                        Math.random() * 6 + 4,
+                        Math.floor(Math.random() * 25 + 20)
+                    );
+                }
+            }
+
+            // Draw Goal Door (Loading Dock Elevator)
+            if (goalDoor) {
+                drawQuad(goalDoor.x, goalDoor.y, goalDoor.width, goalDoor.height, 0.15, 0.18, 0.22, 1.0);
+                drawQuad(goalDoor.x + 4, goalDoor.y + 4, goalDoor.width - 8, goalDoor.height - 4, 0.1, 0.8, 0.3, 0.3); // Glowing green dock light interior
+                // Outer yellow frame
+                drawQuad(goalDoor.x, goalDoor.y, goalDoor.width, 3, 0.9, 0.7, 0.1, 1.0);
+                drawQuad(goalDoor.x, goalDoor.y, 3, goalDoor.height, 0.9, 0.7, 0.1, 1.0);
+                drawQuad(goalDoor.x + goalDoor.width - 3, goalDoor.y, 3, goalDoor.height, 0.9, 0.7, 0.1, 1.0);
+            }
+
+            // Draw Collectibles (Clipboards & Golden Wrenches)
+            const bobOffset = Math.sin(gameTime * 4) * 3;
+            for (let c of collectibles) {
+                if (c.collected) continue;
+
+                if (c.type === 'MANIFEST') {
+                    // Clipboard asset
+                    drawQuad(c.x, c.y + bobOffset, c.width, c.height, 0.7, 0.5, 0.3, 1.0);
+                    drawQuad(c.x + 2, c.y + bobOffset + 3, c.width - 4, c.height - 5, 0.95, 0.95, 0.9, 1.0); // Paper
+                    drawQuad(c.x + 5, c.y + bobOffset, 6, 3, 0.3, 0.3, 0.3, 1.0); // Clip
+                } else if (c.type === 'WRENCH') {
+                    // Golden Wrench asset
+                    drawQuad(c.x + 4, c.y + bobOffset, 8, 16, 0.95, 0.8, 0.2, 1.0);
+                    drawQuad(c.x + 2, c.y + bobOffset, 12, 5, 0.95, 0.8, 0.2, 1.0);
+                }
+            }
+
+            // Draw Player Character Sprite Quad
+            if (player) {
+                // Character base suit color (Industrial Orange Coveralls)
+                const charR = 0.95, charG = 0.45, charB = 0.1;
+                drawQuad(player.x, player.y, player.width, player.height, charR, charG, charB, 1.0);
+
+                // Head / Safety Helmet (Yellow)
+                drawQuad(player.x + 2, player.y - 4, player.width - 4, 8, 0.95, 0.85, 0.15, 1.0);
+
+                // Visor / Flashlight Headlamp
+                const visorX = player.facingRight ? player.x + player.width - 6 : player.x + 2;
+                drawQuad(visorX, player.y - 2, 5, 4, 0.2, 0.8, 0.95, 1.0);
+
+                // Walking leg animation representation
+                if (player.isGrounded && Math.abs(player.vx) > 0.5) {
+                    const legOffset = Math.sin(player.animTimer * 2) * 4;
+                    drawQuad(player.x + 3, player.y + player.height - 4, 5, 6 + legOffset, 0.15, 0.15, 0.18, 1.0);
+                    drawQuad(player.x + player.width - 8, player.y + player.height - 4, 5, 6 - legOffset, 0.15, 0.15, 0.18, 1.0);
+                }
+            }
+
+            // Update and render particle system
+            updateAndDrawParticles();
+        }
+
+        function updateGame(deltaTime) {
+            if (gameState !== 'PLAYING') return;
+
+            gameTime += deltaTime;
+
+            // Update Moving Elevators & Player Physics
+            for (let mp of movePlatforms) mp.update();
+            player.update();
+
+            // Smooth Camera Lerp Tracking
+            const targetCamX = player.x + player.width / 2 - canvasWidth / 2;
+            const targetCamY = player.y + player.height / 2 - canvasHeight / 2;
+            camera.x += (targetCamX - camera.x) * 0.08;
+            camera.y += (targetCamY - camera.y) * 0.08;
+
+            // Clamp Camera within Level Boundaries
+            camera.x = Math.max(0, Math.min(levelWidth * TILE_SIZE - canvasWidth, camera.x));
+            camera.y = Math.max(0, Math.min(levelHeight * TILE_SIZE - canvasHeight, camera.y));
+
+            // Hazard Collision Checks (Steam Vents)
+            for (let h of hazards) {
+                const steamBox = { x: h.x, y: h.y - 12, width: h.width, height: h.height + 12 };
+                if (checkAABB(player, steamBox)) {
+                    // Knockback on hazard hit
+                    player.vy = -6;
+                    player.vx = player.facingRight ? -5 : 5;
+                    spawnBurstParticles(player.x + 10, player.y + 15, 12, 1.0, 0.2, 0.2);
+                }
+            }
+
+            // Collectible Pickups Collision Checks
+            for (let c of collectibles) {
+                if (!c.collected && checkAABB(player, c)) {
+                    c.collected = true;
+                    if (c.type === 'MANIFEST') {
+                        manifestsCollected++;
+                        spawnBurstParticles(c.x + 8, c.y + 8, 10, 0.3, 0.9, 1.0);
+                    } else if (c.type === 'WRENCH') {
+                        wrenchesCollected++;
+                        spawnBurstParticles(c.x + 8, c.y + 8, 10, 1.0, 0.85, 0.2);
+                    }
+                    updateHUD();
+                }
+            }
+
+            // Goal/Exit Door Trigger Check
+            if (goalDoor && checkAABB(player, goalDoor)) {
+                if (manifestsCollected >= totalManifests) {
+                    endGame(true);
+                }
+            }
+
+            // Fall OOB Safety Respawn
+            if (player.y > levelHeight * TILE_SIZE + 100) {
+                player.x = 3 * TILE_SIZE;
+                player.y = 3 * TILE_SIZE;
+                player.vx = 0;
+                player.vy = 0;
+            }
+
+            updateHUD();
+        }
+
+        function updateHUD() {
+            document.getElementById('hud-manifest').innerText = `${manifestsCollected} / ${totalManifests}`;
+            document.getElementById('hud-wrenches').innerText = wrenchesCollected;
+
+            const mins = Math.floor(gameTime / 60);
+            const secs = (gameTime % 60).toFixed(1);
+            document.getElementById('hud-timer').innerText = `${mins.toString().padStart(2, '0')}:${secs.padStart(4, '0')}`;
+
+            const flashBadge = document.getElementById('hud-flashlight');
+            if (player.flashlightOn) {
+                flashBadge.innerText = 'ACTIVE';
+                flashBadge.className = 'px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/50 mt-1';
+            } else {
+                flashBadge.innerText = 'OFF';
+                flashBadge.className = 'px-2 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-500 border border-slate-700 mt-1';
+            }
+        }
+
+        function mainLoop(timestamp) {
+            if (!lastTimestamp) lastTimestamp = timestamp;
+            const deltaTime = Math.min((timestamp - lastTimestamp) / 1000, 0.05);
+            lastTimestamp = timestamp;
+
+            gl.clearColor(0.05, 0.06, 0.08, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            if (gameState === 'PLAYING') {
+                updateGame(deltaTime);
+            }
+
+            renderScene();
+            flushBatch();
+
+            requestAnimationFrame(mainLoop);
+        }
+
+        function setupEventListeners() {
+            window.addEventListener('keydown', (e) => {
+                if (e.repeat) return;
+                keys[e.code] = true;
+
+                if (gameState === 'PLAYING') {
+                    if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
+                        player.jump();
+                    }
+                    if (e.code === 'KeyF') {
+                        player.flashlightOn = !player.flashlightOn;
+                    }
+                    if (e.code === 'Escape') {
+                        pauseGame();
+                    }
+                } else if (gameState === 'PAUSED' && e.code === 'Escape') {
+                    resumeGame();
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                keys[e.code] = false;
+            });
+
+            // UI Button Hooks
+            document.getElementById('btn-start').addEventListener('click', startGame);
+            document.getElementById('btn-resume').addEventListener('click', resumeGame);
+            document.getElementById('btn-restart-pause').addEventListener('click', startGame);
+            document.getElementById('btn-restart').addEventListener('click', startGame);
+
+            // Manual Touch UI Toggle
+            document.getElementById('btn-toggle-touch').addEventListener('click', () => {
+                touchUIEnabled = !touchUIEnabled;
+                updateTouchUIVisibility();
+            });
+
+            // Automatic Touch Screen Detection
+            window.addEventListener('touchstart', detectTouchDevice, { once: true });
+
+            setupTouchControls();
+        }
+
+        function detectTouchDevice() {
+            isTouchDevice = true;
+            touchUIEnabled = true;
+            updateTouchUIVisibility();
+        }
+
+        function updateTouchUIVisibility() {
+            const touchContainer = document.getElementById('touch-controls');
+            if (touchUIEnabled && gameState === 'PLAYING') {
+                touchContainer.classList.remove('hidden');
+            } else {
+                touchContainer.classList.add('hidden');
+            }
+        }
+
+        function setupTouchControls() {
+            const buttonMappings = [
+                { id: 'touch-left', action: 'left' },
+                { id: 'touch-right', action: 'right' },
+                { id: 'touch-up', action: 'up' },
+                { id: 'touch-down', action: 'down' },
+                { id: 'touch-jump', action: 'jump', isTrigger: true },
+                { id: 'touch-flash', action: 'flash', isTrigger: true }
+            ];
+
+            buttonMappings.forEach(({ id, action, isTrigger }) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+
+                const startHandler = (e) => {
+                    e.preventDefault();
+                    btn.classList.add('active');
+
+                    if (isTrigger) {
+                        if (gameState === 'PLAYING' && player) {
+                            if (action === 'jump') player.jump();
+                            if (action === 'flash') player.flashlightOn = !player.flashlightOn;
+                        }
+                    } else {
+                        touchState[action] = true;
+                    }
+                };
+
+                const endHandler = (e) => {
+                    e.preventDefault();
+                    btn.classList.remove('active');
+                    if (!isTrigger) {
+                        touchState[action] = false;
+                    }
+                };
+
+                btn.addEventListener('touchstart', startHandler, { passive: false });
+                btn.addEventListener('touchend', endHandler, { passive: false });
+                btn.addEventListener('touchcancel', endHandler, { passive: false });
+
+                // Fallback mouse events for testing touch buttons on desktop
+                btn.addEventListener('mousedown', startHandler);
+                btn.addEventListener('mouseup', endHandler);
+                btn.addEventListener('mouseleave', endHandler);
+            });
+        }
+
+        function startGame() {
+            parseLevelMap();
+            gameTime = 0;
+            gameState = 'PLAYING';
+
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('pause-screen').classList.add('hidden');
+            document.getElementById('end-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('controls-bar').classList.remove('hidden');
+
+            updateTouchUIVisibility();
+        }
+
+        function pauseGame() {
+            gameState = 'PAUSED';
+            document.getElementById('pause-screen').classList.remove('hidden');
+            updateTouchUIVisibility();
+        }
+
+        function resumeGame() {
+            gameState = 'PLAYING';
+            document.getElementById('pause-screen').classList.add('hidden');
+            updateTouchUIVisibility();
+        }
+
+        function endGame(success) {
+            gameState = 'END';
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('controls-bar').classList.add('hidden');
+            document.getElementById('touch-controls').classList.add('hidden');
+
+            const mins = Math.floor(gameTime / 60);
+            const secs = (gameTime % 60).toFixed(1);
+            document.getElementById('end-time').innerText = `${mins.toString().padStart(2, '0')}:${secs.padStart(4, '0')}`;
+            document.getElementById('end-manifests').innerText = `${manifestsCollected} / ${totalManifests}`;
+            document.getElementById('end-wrenches').innerText = wrenchesCollected;
+
+            // Efficiency Grade Calculation
+            let grade = 'S';
+            if (gameTime > 90) grade = 'A';
+            if (gameTime > 150) grade = 'B';
+            if (wrenchesCollected === 0) grade = 'C';
+            document.getElementById('end-score').innerText = grade;
+
+            document.getElementById('end-screen').classList.remove('hidden');
+        }
+
+        // --- ENGINE INITIALIZATION ENTRY POINT ---
+        window.onload = function() {
+            initWebGL();
+            setupEventListeners();
+            requestAnimationFrame(mainLoop);
+        };
+    </script>
+</body>
+</html>
