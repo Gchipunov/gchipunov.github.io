@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGL Conveyor Platformer</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #111;
+      font-family: sans-serif;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    #ui {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      color: #fff;
+      font-size: 18px;
+      text-shadow: 1px 1px 3px #000;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="ui">Level: <span id="level">1</span> | Score: <span id="score">0</span></div>
+  <canvas id="glcanvas"></canvas>
+
+<script>
+// --- WebGL Shaders ---
+const VS_SOURCE = `
+  attribute vec2 a_position;
+  uniform vec2 u_resolution;
+  uniform vec2 u_translation;
+  uniform vec2 u_scale;
+
+  varying vec2 v_uv;
+
+  void main() {
+    vec2 position = a_position * u_scale + u_translation;
+    vec2 zeroToOne = position / u_resolution;
+    vec2 zeroToTwo = zeroToOne * 2.0;
+    vec2 clipSpace = zeroToTwo - 1.0;
+    
+    gl_Position = vec4(clipSpace * vec2(1.0, -1.0), 0.0, 1.0);
+    v_uv = a_position;
+  }
+`;
+
+const FS_SOURCE = `
+  precision mediump float;
+
+  uniform vec4 u_color;
+  uniform int u_type; // 0: Solid, 1: Conveyor, 2: Player, 3: Goal
+  uniform float u_time;
+  uniform float u_speed;
+
+  varying vec2 v_uv;
+
+  void main() {
+    if (u_type == 1) { // Conveyor belt shader
+      float stripe = sin((v_uv.x * 20.0) - (u_time * u_speed * 15.0));
+      vec3 baseColor = u_color.rgb;
+      vec3 stripeColor = baseColor * 0.5;
+      vec3 finalColor = mix(baseColor, stripeColor, step(0.0, stripe));
+      gl_FragColor = vec4(finalColor, u_color.a);
+    } else {
+      gl_FragColor = u_color;
+    }
+  }
+`;
+
+// --- Game Engine Setup ---
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+
+if (!gl) {
+  alert("WebGL not supported!");
+}
+
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error("Shader Compile Error:", gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+const vertexShader = createShader(gl, gl.VERTEX_SHADER, VS_SOURCE);
+const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, FS_SOURCE);
+
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+
+const positionLoc = gl.getAttribLocation(program, "a_position");
+const resolutionLoc = gl.getUniformLocation(program, "u_resolution");
+const translationLoc = gl.getUniformLocation(program, "u_translation");
+const scaleLoc = gl.getUniformLocation(program, "u_scale");
+const colorLoc = gl.getUniformLocation(program, "u_color");
+const typeLoc = gl.getUniformLocation(program, "u_type");
+const timeLoc = gl.getUniformLocation(program, "u_time");
+const speedLoc = gl.getUniformLocation(program, "u_speed");
+
+// Unit quad buffer (0,0 to 1,1)
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  0, 0,  1, 0,  0, 1,
+  0, 1,  1, 0,  1, 1
+]), gl.STATIC_DRAW);
+
+// --- Game State & Input ---
+const keys = {};
+window.addEventListener("keydown", e => keys[e.code] = true);
+window.addEventListener("keyup", e => keys[e.code] = false);
+
+let currentLevel = 0;
+let score = 0;
+
+const player = {
+  x: 50, y: 100, width: 24, height: 32,
+  vx: 0, vy: 0,
+  isGrounded: false,
+  color: [0.2, 0.8, 1.0, 1.0]
+};
+
+const levels = [
+  {
+    goal: { x: 720, y: 120, width: 30, height: 40, color: [0.2, 1.0, 0.3, 1.0] },
+    platforms: [
+      { x: 0, y: 550, width: 800, height: 50, speed: 0, color: [0.3, 0.3, 0.3, 1.0] },
+      { x: 100, y: 450, width: 200, height: 20, speed: 2.0, color: [0.9, 0.6, 0.1, 1.0] }, // Right conveyor
+      { x: 380, y: 340, width: 180, height: 20, speed: -2.5, color: [0.9, 0.6, 0.1, 1.0] }, // Left conveyor
+      { x: 650, y: 220, width: 150, height: 20, speed: 1.5, color: [0.9, 0.6, 0.1, 1.0] }
+    ]
+  },
+  {
+    goal: { x: 50, y: 100, width: 30, height: 40, color: [0.2, 1.0, 0.3, 1.0] },
+    platforms: [
+      { x: 0, y: 550, width: 800, height: 50, speed: 0, color: [0.3, 0.3, 0.3, 1.0] },
+      { x: 50, y: 460, width: 600, height: 20, speed: 3.5, color: [0.9, 0.6, 0.1, 1.0] },
+      { x: 200, y: 320, width: 550, height: 20, speed: -3.5, color: [0.9, 0.6, 0.1, 1.0] },
+      { x: 20, y: 180, width: 150, height: 20, speed: 0, color: [0.3, 0.3, 0.3, 1.0] }
+    ]
+  }
+];
+
+// --- Physics & Logic ---
+function update() {
+  // Movement Logic
+  if (keys["ArrowRight"] || keys["KeyD"]) player.vx = 4;
+  else if (keys["ArrowLeft"] || keys["KeyA"]) player.vx = -4;
+  else player.vx = 0;
+
+  if ((keys["Space"] || keys["ArrowUp"] || keys["KeyW"]) && player.isGrounded) {
+    player.vy = -10;
+    player.isGrounded = false;
+  }
+
+  // Gravity
+  player.vy += 0.45;
+  player.x += player.vx;
+  player.y += player.vy;
+
+  player.isGrounded = false;
+  const currentPlatforms = levels[currentLevel].platforms;
+
+  // Collision detection against platforms
+  for (let plat of currentPlatforms) {
+    if (player.x < plat.x + plat.width &&
+        player.x + player.width > plat.x &&
+        player.y + player.height >= plat.y &&
+        player.y + player.height <= plat.y + 12 &&
+        player.vy >= 0) {
+      
+      player.y = plat.y - player.height;
+      player.vy = 0;
+      player.isGrounded = true;
+
+      // Apply conveyor belt force
+      if (plat.speed !== 0) {
+        player.x += plat.speed;
+      }
+    }
+  }
+
+  // Bounds checking
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.width > 800) player.x = 800 - player.width;
+  if (player.y > 600) resetPlayer();
+
+  // Goal Collision
+  const goal = levels[currentLevel].goal;
+  if (player.x < goal.x + goal.width &&
+      player.x + player.width > goal.x &&
+      player.y < goal.y + goal.height &&
+      player.y + player.height > goal.y) {
+    
+    score += 100;
+    document.getElementById("score").innerText = score;
+    currentLevel = (currentLevel + 1) % levels.length;
+    document.getElementById("level").innerText = currentLevel + 1;
+    resetPlayer();
+  }
+}
+
+function resetPlayer() {
+  player.x = 50;
+  player.y = 100;
+  player.vx = 0;
+  player.vy = 0;
+}
+
+// --- Render Loop ---
+function drawQuad(x, y, width, height, color, type = 0, speed = 0, time = 0) {
+  gl.uniform2f(translationLoc, x, y);
+  gl.uniform2f(scaleLoc, width, height);
+  gl.uniform4fv(colorLoc, color);
+  gl.uniform1i(typeLoc, type);
+  gl.uniform1f(speedLoc, speed);
+  gl.uniform1f(timeLoc, time);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function render(time) {
+  time *= 0.001; // Convert to seconds
+
+  // Resize canvas display size dynamically
+  if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+    canvas.width = 800;
+    canvas.height = 600;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+
+  update();
+
+  gl.clearColor(0.08, 0.08, 0.12, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  gl.useProgram(program);
+  gl.uniform2f(resolutionLoc, 800, 600);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.enableVertexAttribArray(positionLoc);
+  gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+
+  // Draw Goal
+  const goal = levels[currentLevel].goal;
+  drawQuad(goal.x, goal.y, goal.width, goal.height, goal.color, 3);
+
+  // Draw Platforms
+  for (let plat of levels[currentLevel].platforms) {
+    const isConveyor = plat.speed !== 0 ? 1 : 0;
+    drawQuad(plat.x, plat.y, plat.width, plat.height, plat.color, isConveyor, plat.speed, time);
+  }
+
+  // Draw Player
+  drawQuad(player.x, player.y, player.width, player.height, player.color, 2);
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
