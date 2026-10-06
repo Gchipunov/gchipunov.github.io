@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pixel Dash WebGL Platformer & Map Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d1117;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Glassmorphism custom styling */
+        .glass-panel {
+            background: rgba(22, 27, 34, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .btn-touch {
+            active: scale-95;
+            transition: transform 0.05s ease, background-color 0.1s ease;
+        }
+        /* Custom scrollbar for tile palette */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="text-white select-none">
+
+    <!-- Game Viewport Canvas -->
+    <canvas id="glCanvas"></canvas>
+
+    <!-- Top Overlay HUD (Play Mode) -->
+    <div id="hudPlay" class="fixed top-4 left-4 right-4 flex justify-between items-center pointer-events-none z-10">
+        <div class="flex gap-4">
+            <div class="glass-panel px-4 py-2 rounded-xl flex items-center gap-3 shadow-lg">
+                <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Lives</span>
+                <div id="hudLives" class="text-xl font-black text-rose-400 flex gap-1">❤️❤️❤️</div>
+            </div>
+            <div class="glass-panel px-4 py-2 rounded-xl flex items-center gap-3 shadow-lg">
+                <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Coins</span>
+                <span id="hudCoins" class="text-xl font-bold text-amber-300">0</span>
+            </div>
+        </div>
+        <div class="flex gap-3 pointer-events-auto">
+            <button id="btnEditorToggle" class="glass-panel hover:bg-slate-700/60 px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 border border-cyan-500/30 text-cyan-300 shadow-lg active:scale-95 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                Editor Mode
+            </button>
+            <button id="btnResetLevel" class="glass-panel hover:bg-slate-700/60 px-3 py-2 rounded-xl text-sm font-semibold text-slate-300 active:scale-95 transition" title="Reset Level">
+                🔄
+            </button>
+        </div>
+    </div>
+
+    <!-- Map Editor Bar (Edit Mode) -->
+    <div id="hudEditor" class="fixed top-4 left-4 right-4 hidden flex-col gap-3 z-10">
+        <div class="flex flex-wrap justify-between items-center glass-panel p-3 rounded-2xl shadow-xl gap-2">
+            <div class="flex items-center gap-2">
+                <button id="btnPlayToggle" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg active:scale-95 transition">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M4 4l12 6-12 6V4z"></path></svg>
+                    Test Play
+                </button>
+                <div class="h-6 w-px bg-slate-700 mx-1"></div>
+                <button id="toolBrush" class="tool-btn active bg-indigo-600 text-white p-2 rounded-xl text-xs font-semibold shadow" title="Brush Tool">✏️ Paint</button>
+                <button id="toolEraser" class="tool-btn glass-panel text-slate-300 hover:bg-slate-700 p-2 rounded-xl text-xs font-semibold" title="Eraser Tool">🧹 Erase</button>
+                <button id="btnUndo" class="glass-panel text-slate-300 hover:bg-slate-700 px-3 py-2 rounded-xl text-xs font-semibold">↩️ Undo</button>
+                <button id="btnRedo" class="glass-panel text-slate-300 hover:bg-slate-700 px-3 py-2 rounded-xl text-xs font-semibold">↪️ Redo</button>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <select id="selectLevel" class="glass-panel text-xs text-slate-200 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 outline-none">
+                    <option value="0">Level 1: Tutorial</option>
+                    <option value="1">Level 2: Jumps & Hazards</option>
+                    <option value="2">Level 3: Moving Platforms</option>
+                    <option value="custom">Custom Level</option>
+                </select>
+                <button id="btnClearMap" class="glass-panel hover:bg-rose-900/40 text-rose-300 px-3 py-2 rounded-xl text-xs font-semibold border border-rose-500/20">Clear</button>
+                <button id="btnExport" class="glass-panel hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl text-xs font-semibold">Export JSON</button>
+                <button id="btnImport" class="glass-panel hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl text-xs font-semibold">Import JSON</button>
+            </div>
+        </div>
+
+        <!-- Palette Bar -->
+        <div class="glass-panel p-2.5 rounded-2xl flex items-center gap-2 overflow-x-auto no-scrollbar shadow-lg">
+            <span class="text-xs text-slate-400 font-semibold px-2 uppercase tracking-wide">Palette:</span>
+            <div id="paletteContainer" class="flex items-center gap-2"></div>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Overlay Controls -->
+    <div id="touchControls" class="fixed bottom-6 left-6 right-6 flex justify-between items-end pointer-events-none z-20 md:hidden">
+        <!-- Left / Right D-Pad -->
+        <div class="flex gap-3 pointer-events-auto">
+            <button id="btnLeft" class="btn-touch w-16 h-16 glass-panel rounded-2xl flex items-center justify-center text-2xl font-bold active:bg-cyan-600/50 border border-white/20 shadow-2xl">◀</button>
+            <button id="btnRight" class="btn-touch w-16 h-16 glass-panel rounded-2xl flex items-center justify-center text-2xl font-bold active:bg-cyan-600/50 border border-white/20 shadow-2xl">▶</button>
+        </div>
+        <!-- Action / Jump Button -->
+        <div class="flex gap-3 pointer-events-auto">
+            <button id="btnJump" class="btn-touch w-20 h-20 bg-emerald-600/80 active:bg-emerald-500 rounded-3xl flex items-center justify-center text-xl font-black text-white border border-emerald-400/30 shadow-2xl">JUMP</button>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-8 left-1/2 -translate-x-1/2 glass-panel px-6 py-3 rounded-2xl text-sm font-medium text-emerald-400 shadow-2xl transition-all duration-300 opacity-0 pointer-events-none z-30">
+        Notification message
+    </div>
+
+    <!-- Import Modal -->
+    <input type="file" id="fileInput" accept=".json" class="hidden">
+
+    <!-- Game & Renderer Logic Script -->
+    <script>
+    const TILE_SIZE = 32;
+    const CHUNK_WIDTH = 120;
+    const CHUNK_HEIGHT = 40;
+
+    // Tile / Entity Definitions
+    const TILE_TYPES = {
+        EMPTY: 0,
+        DIRT: 1,
+        GRASS: 2,
+        STONE: 3,
+        PLATFORM_ONEWAY: 4,
+        SPIKE: 5,
+        LAVA: 6,
+        COIN: 7,
+        STAR: 8,
+        CHECKPOINT: 9,
+        GOAL: 10,
+        PLAYER_START: 11,
+        ENEMY_SLIME: 12,
+        ENEMY_FLYER: 13,
+        PLATFORM_MOVING: 14
+    };
+
+    const TILE_CONFIG = {
+        [TILE_TYPES.EMPTY]: { name: 'Eraser', color: [0,0,0,0], solid: false },
+        [TILE_TYPES.DIRT]: { name: 'Dirt', color: [0.45, 0.30, 0.20, 1.0], solid: true },
+        [TILE_TYPES.GRASS]: { name: 'Grass Top', color: [0.22, 0.70, 0.28, 1.0], solid: true },
+        [TILE_TYPES.STONE]: { name: 'Stone Block', color: [0.50, 0.55, 0.60, 1.0], solid: true },
+        [TILE_TYPES.PLATFORM_ONEWAY]: { name: 'One-Way', color: [0.85, 0.65, 0.25, 1.0], solid: false, oneway: true },
+        [TILE_TYPES.SPIKE]: { name: 'Spike Hazard', color: [0.85, 0.25, 0.25, 1.0], hazard: true },
+        [TILE_TYPES.LAVA]: { name: 'Lava', color: [0.95, 0.40, 0.10, 1.0], hazard: true },
+        [TILE_TYPES.COIN]: { name: 'Gold Coin', color: [1.0, 0.84, 0.0, 1.0], item: true },
+        [TILE_TYPES.STAR]: { name: 'Bonus Star', color: [0.3, 0.8, 1.0, 1.0], item: true },
+        [TILE_TYPES.CHECKPOINT]: { name: 'Checkpoint', color: [0.3, 0.9, 0.5, 1.0], entity: true },
+        [TILE_TYPES.GOAL]: { name: 'Level Goal', color: [0.9, 0.2, 0.8, 1.0], entity: true },
+        [TILE_TYPES.PLAYER_START]: { name: 'Spawn Point', color: [0.2, 0.6, 1.0, 1.0], entity: true },
+        [TILE_TYPES.ENEMY_SLIME]: { name: 'Patrol Slime', color: [0.2, 0.8, 0.3, 1.0], entity: true },
+        [TILE_TYPES.ENEMY_FLYER]: { name: 'Flying Enemy', color: [0.9, 0.3, 0.3, 1.0], entity: true },
+        [TILE_TYPES.PLATFORM_MOVING]: { name: 'Moving Platform', color: [0.7, 0.5, 0.9, 1.0], entity: true }
+    };
+
+    // Web Audio Synthesizer for zero external file dependencies
+    class SoundFX {
+        constructor() {
+            this.ctx = null;
+        }
+        init() {
+            if (!this.ctx) {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        play(type) {
+            if (!this.ctx) return;
+            const ctx = this.ctx;
+            const now = ctx.currentTime;
+            
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            if (type === 'jump') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(400, now + 0.15);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.15);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } else if (type === 'coin') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(987.77, now); // B5
+                osc.frequency.setValueAtTime(1318.51, now + 0.08); // E6
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.25);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            } else if (type === 'hurt') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, now);
+                osc.frequency.linearRampToValueAtTime(40, now + 0.2);
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            } else if (type === 'win') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(523.25, now);
+                osc.frequency.setValueAtTime(659.25, now + 0.1);
+                osc.frequency.setValueAtTime(783.99, now + 0.2);
+                osc.frequency.setValueAtTime(1046.50, now + 0.3);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0, now + 0.5);
+                osc.start(now);
+                osc.stop(now + 0.5);
+            }
+        }
+    }
+    const sound = new SoundFX();
+
+    // WebGL Shaders (2D Batch Rendering Pipeline)
+    const vsSource = `
+        attribute vec2 a_position;
+        attribute vec2 a_texCoord;
+        attribute vec4 a_color;
+
+        uniform vec2 u_resolution;
+        uniform vec2 u_camera;
+
+        varying vec2 v_texCoord;
+        varying vec4 v_color;
+
+        void main() {
+            vec2 pos = a_position - u_camera;
+            vec2 zeroToOne = pos / u_resolution;
+            vec2 zeroToTwo = zeroToOne * 2.0;
+            vec2 clipSpace = zeroToTwo - 1.0;
+
+            gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
+            v_texCoord = a_texCoord;
+            v_color = a_color;
+        }
+    `;
+
+    const fsSource = `
+        precision mediump float;
+
+        varying vec2 v_texCoord;
+        varying vec4 v_color;
+
+        void main() {
+            // Procedural tile bevel / shadow detail shader logic
+            vec2 uv = v_texCoord;
+            float border = step(0.05, uv.x) * step(0.05, uv.y) * step(uv.x, 0.95) * step(uv.y, 0.95);
+            vec4 col = v_color;
+            if (border < 0.5 && col.a > 0.0) {
+                col.rgb *= 0.8; // Dark border for pixel grid depth
+            }
+            gl_FragColor = col;
+        }
+    `;
+
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error('Shader Compile Error:', gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    const defaultLevels = [
+        // Level 1: Tutorial
+        {
+            width: 60, height: 25,
+            data: (() => {
+                let grid = Array(60 * 25).fill(0);
+                for (let x = 0; x < 60; x++) {
+                    grid[22 * 60 + x] = TILE_TYPES.DIRT;
+                    grid[21 * 60 + x] = TILE_TYPES.GRASS;
+                }
+                grid[20 * 60 + 5] = TILE_TYPES.PLAYER_START;
+                grid[19 * 60 + 12] = TILE_TYPES.COIN;
+                grid[19 * 60 + 14] = TILE_TYPES.COIN;
+                grid[19 * 60 + 16] = TILE_TYPES.COIN;
+                
+                // Platforms and obstacles
+                grid[18 * 60 + 20] = TILE_TYPES.PLATFORM_ONEWAY;
+                grid[18 * 60 + 21] = TILE_TYPES.PLATFORM_ONEWAY;
+                grid[18 * 60 + 22] = TILE_TYPES.PLATFORM_ONEWAY;
+                
+                grid[21 * 60 + 28] = TILE_TYPES.SPIKE;
+                grid[21 * 60 + 29] = TILE_TYPES.SPIKE;
+
+                grid[20 * 60 + 35] = TILE_TYPES.ENEMY_SLIME;
+                grid[20 * 60 + 50] = TILE_TYPES.GOAL;
+                return grid;
+            })()
+        },
+        // Level 2: Precision Jumps
+        {
+            width: 60, height: 25,
+            data: (() => {
+                let grid = Array(60 * 25).fill(0);
+                for (let x = 0; x < 10; x++) {
+                    grid[22 * 60 + x] = TILE_TYPES.DIRT;
+                    grid[21 * 60 + x] = TILE_TYPES.GRASS;
+                }
+                grid[20 * 60 + 2] = TILE_TYPES.PLAYER_START;
+                
+                // Lava Pit
+                for (let x = 10; x < 45; x++) {
+                    grid[23 * 60 + x] = TILE_TYPES.LAVA;
+                }
+
+                // Stepping Stone Pillars
+                [14, 19, 25, 32, 38].forEach((px, idx) => {
+                    grid[21 * 60 + px] = TILE_TYPES.STONE;
+                    grid[20 * 60 + px] = TILE_TYPES.COIN;
+                    if (idx % 2 === 1) {
+                        grid[17 * 60 + px] = TILE_TYPES.PLATFORM_ONEWAY;
+                        grid[16 * 60 + px] = TILE_TYPES.STAR;
+                    }
+                });
+
+                for (let x = 45; x < 60; x++) {
+                    grid[22 * 60 + x] = TILE_TYPES.DIRT;
+                    grid[21 * 60 + x] = TILE_TYPES.GRASS;
+                }
+                grid[20 * 60 + 55] = TILE_TYPES.GOAL;
+                return grid;
+            })()
+        },
+        // Level 3: Moving Platforms & Hazards
+        {
+            width: 60, height: 25,
+            data: (() => {
+                let grid = Array(60 * 25).fill(0);
+                for (let x = 0; x < 8; x++) {
+                    grid[22 * 60 + x] = TILE_TYPES.STONE;
+                }
+                grid[20 * 60 + 2] = TILE_TYPES.PLAYER_START;
+
+                grid[20 * 60 + 12] = TILE_TYPES.PLATFORM_MOVING;
+                grid[18 * 60 + 24] = TILE_TYPES.PLATFORM_MOVING;
+                grid[16 * 60 + 36] = TILE_TYPES.ENEMY_FLYER;
+
+                for (let x = 48; x < 60; x++) {
+                    grid[22 * 60 + x] = TILE_TYPES.STONE;
+                }
+                grid[21 * 60 + 54] = TILE_TYPES.GOAL;
+                return grid;
+            })()
+        }
+    ];
+
+    let gl, program;
+    let positionBuffer, texCoordBuffer, colorBuffer;
+    let uResolution, uCamera;
+
+    let isEditorMode = false;
+    let selectedTile = TILE_TYPES.GRASS;
+    let activeTool = 'brush'; // 'brush' or 'eraser'
+    let currentLevelIndex = 0;
+
+    let mapWidth = CHUNK_WIDTH;
+    let mapHeight = CHUNK_HEIGHT;
+    let mapData = new Array(mapWidth * mapHeight).fill(0);
+
+    let undoStack = [];
+    let redoStack = [];
+
+    // Camera state
+    let camera = { x: 0, y: 0, zoom: 1.0 };
+
+    // Player State
+    let player = {
+        x: 100, y: 100,
+        vx: 0, vy: 0,
+        width: 24, height: 30,
+        grounded: false,
+        spawnX: 100, spawnY: 100,
+        lives: 3,
+        coins: 0
+    };
+
+    // Entities Array
+    let entities = [];
+    let particles = [];
+
+    // Keyboard & Control Input States
+    const keys = { left: false, right: false, jump: false };
+
+    function init() {
+        const canvas = document.getElementById('glCanvas');
+        gl = canvas.getContext('webgl', { antialias: false, alpha: false });
+
+        if (!gl) {
+            alert('WebGL not supported on this device/browser!');
+            return;
+        }
+
+        // Compile Shader Program
+        const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // Attribute Locations
+        program.aPosition = gl.getAttribLocation(program, 'a_position');
+        program.aTexCoord = gl.getAttribLocation(program, 'a_texCoord');
+        program.aColor = gl.getAttribLocation(program, 'a_color');
+
+        // Uniform Locations
+        uResolution = gl.getUniformLocation(program, 'u_resolution');
+        uCamera = gl.getUniformLocation(program, 'u_camera');
+
+        // Create Buffers
+        positionBuffer = gl.createBuffer();
+        texCoordBuffer = gl.createBuffer();
+        colorBuffer = gl.createBuffer();
+
+        // Canvas Resizing
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Input Listeners
+        setupInputHandlers();
+        
+        // Build Editor Palette UI
+        buildPalette();
+
+        // Load Initial Level
+        loadLevel(0);
+
+        // Start Game Loop
+        requestAnimationFrame(gameLoop);
+    }
+
+    function resizeCanvas() {
+        const canvas = document.getElementById('glCanvas');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+    }
+
+    function loadLevel(idx) {
+        let lvl;
+        if (typeof idx === 'number') {
+            lvl = defaultLevels[idx];
+            currentLevelIndex = idx;
+        } else {
+            lvl = idx; // Custom object format
+        }
+
+        mapWidth = lvl.width || CHUNK_WIDTH;
+        mapHeight = lvl.height || CHUNK_HEIGHT;
+        mapData = Array.from(lvl.data);
+
+        // Parse special entities from map layout
+        entities = [];
+        let playerFound = false;
+
+        for (let y = 0; y < mapHeight; y++) {
+            for (let x = 0; x < mapWidth; x++) {
+                const tile = mapData[y * mapWidth + x];
+                if (tile === TILE_TYPES.PLAYER_START) {
+                    player.spawnX = x * TILE_SIZE;
+                    player.spawnY = y * TILE_SIZE - 4;
+                    player.x = player.spawnX;
+                    player.y = player.spawnY;
+                    player.vx = 0;
+                    player.vy = 0;
+                    playerFound = true;
+                } else if (tile === TILE_TYPES.ENEMY_SLIME) {
+                    entities.push({
+                        type: 'slime', x: x * TILE_SIZE, y: y * TILE_SIZE,
+                        vx: 1.5, vy: 0, width: 28, height: 24, alive: true
+                    });
+                    mapData[y * mapWidth + x] = 0; // Clear tile layer
+                } else if (tile === TILE_TYPES.ENEMY_FLYER) {
+                    entities.push({
+                        type: 'flyer', x: x * TILE_SIZE, y: y * TILE_SIZE,
+                        startY: y * TILE_SIZE, vx: 2.0, phase: 0, width: 26, height: 26, alive: true
+                    });
+                    mapData[y * mapWidth + x] = 0;
+                } else if (tile === TILE_TYPES.PLATFORM_MOVING) {
+                    entities.push({
+                        type: 'moving_platform', x: x * TILE_SIZE, y: y * TILE_SIZE,
+                        startX: x * TILE_SIZE, vx: 1.5, width: TILE_SIZE * 2, height: 16
+                    });
+                    mapData[y * mapWidth + x] = 0;
+                }
+            }
+        }
+
+        if (!playerFound) {
+            player.spawnX = 100;
+            player.spawnY = 100;
+            player.x = 100;
+            player.y = 100;
+        }
+
+        undoStack = [];
+        redoStack = [];
+    }
+
+    function setupInputHandlers() {
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            sound.init();
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = true;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = true;
+            if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
+                if (!keys.jump) triggerJump();
+                keys.jump = true;
+            }
+            if (e.code === 'KeyE') toggleEditorMode();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = false;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = false;
+            if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') keys.jump = false;
+        });
+
+        // Touch Control Buttons
+        const setupTouchBtn = (id, keyName) => {
+            const btn = document.getElementById(id);
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                sound.init();
+                if (keyName === 'jump' && !keys.jump) triggerJump();
+                keys[keyName] = true;
+            });
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                keys[keyName] = false;
+            });
+        };
+
+        setupTouchBtn('btnLeft', 'left');
+        setupTouchBtn('btnRight', 'right');
+        setupTouchBtn('btnJump', 'jump');
+
+        // Mouse Painting in Editor Mode
+        const canvas = document.getElementById('glCanvas');
+        let isMouseDown = false;
+
+        const handlePointer = (e) => {
+            if (!isEditorMode || !isMouseDown) return;
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Convert Screen Space to World Space Grid
+            const worldX = mouseX + camera.x;
+            const worldY = mouseY + camera.y;
+
+            const gridX = Math.floor(worldX / TILE_SIZE);
+            const gridY = Math.floor(worldY / TILE_SIZE);
+
+            if (gridX >= 0 && gridX < mapWidth && gridY >= 0 && gridY < mapHeight) {
+                const targetIdx = gridY * mapWidth + gridX;
+                const tileToPlace = activeTool === 'eraser' ? TILE_TYPES.EMPTY : selectedTile;
+
+                if (mapData[targetIdx] !== tileToPlace) {
+                    saveStateForUndo();
+                    mapData[targetIdx] = tileToPlace;
+                }
+            }
+        };
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                isMouseDown = true;
+                handlePointer(e);
+            }
+        });
+        canvas.addEventListener('mousemove', handlePointer);
+        window.addEventListener('mouseup', () => isMouseDown = false);
+
+        // UI Event Listeners
+        document.getElementById('btnEditorToggle').addEventListener('click', toggleEditorMode);
+        document.getElementById('btnPlayToggle').addEventListener('click', toggleEditorMode);
+        document.getElementById('btnResetLevel').addEventListener('click', () => loadLevel(currentLevelIndex));
+
+        document.getElementById('toolBrush').addEventListener('click', () => setTool('brush'));
+        document.getElementById('toolEraser').addEventListener('click', () => setTool('eraser'));
+        document.getElementById('btnUndo').addEventListener('click', undo);
+        document.getElementById('btnRedo').addEventListener('click', redo);
+
+        document.getElementById('selectLevel').addEventListener('change', (e) => {
+            if (e.target.value !== 'custom') {
+                loadLevel(parseInt(e.target.value));
+            }
+        });
+
+        document.getElementById('btnClearMap').addEventListener('click', () => {
+            saveStateForUndo();
+            mapData.fill(0);
+            showToast('Map Cleared!');
+        });
+
+        document.getElementById('btnExport').addEventListener('click', exportLevelJSON);
+        document.getElementById('btnImport').addEventListener('click', () => document.getElementById('fileInput').click());
+        document.getElementById('fileInput').addEventListener('change', importLevelJSON);
+    }
+
+    function buildPalette() {
+        const container = document.getElementById('paletteContainer');
+        container.innerHTML = '';
+
+        Object.keys(TILE_CONFIG).forEach((key) => {
+            const tileId = parseInt(key);
+            if (tileId === TILE_TYPES.EMPTY) return; // Eraser has separate button
+
+            const config = TILE_CONFIG[tileId];
+            const btn = document.createElement('button');
+            btn.className = `palette-item flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${tileId === selectedTile ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' : 'glass-panel border-slate-700 text-slate-300 hover:bg-slate-700'}`;
+            
+            // Color indicator tile preview
+            const [r, g, b] = config.color;
+            const colorCss = `rgb(${r*255}, ${g*255}, ${b*255})`;
+            
+            btn.innerHTML = `<span class="w-3.5 h-3.5 rounded-sm border border-white/30" style="background:${colorCss}"></span> ${config.name}`;
+            btn.onclick = () => {
+                selectedTile = tileId;
+                setTool('brush');
+                document.querySelectorAll('.palette-item').forEach(b => b.classList.remove('bg-indigo-600', 'border-indigo-400'));
+                btn.classList.add('bg-indigo-600', 'border-indigo-400');
+            };
+            container.appendChild(btn);
+        });
+    }
+
+    function setTool(tool) {
+        activeTool = tool;
+        document.getElementById('toolBrush').className = tool === 'brush' 
+            ? 'tool-btn active bg-indigo-600 text-white p-2 rounded-xl text-xs font-semibold shadow' 
+            : 'tool-btn glass-panel text-slate-300 hover:bg-slate-700 p-2 rounded-xl text-xs font-semibold';
+        document.getElementById('toolEraser').className = tool === 'eraser' 
+            ? 'tool-btn active bg-indigo-600 text-white p-2 rounded-xl text-xs font-semibold shadow' 
+            : 'tool-btn glass-panel text-slate-300 hover:bg-slate-700 p-2 rounded-xl text-xs font-semibold';
+    }
+
+    function toggleEditorMode() {
+        isEditorMode = !isEditorMode;
+        if (isEditorMode) {
+            document.getElementById('hudPlay').classList.add('hidden');
+            document.getElementById('hudEditor').classList.remove('hidden');
+            document.getElementById('hudEditor').classList.add('flex');
+            showToast('Editor Mode Active');
+        } else {
+            document.getElementById('hudEditor').classList.add('hidden');
+            document.getElementById('hudEditor').classList.remove('flex');
+            document.getElementById('hudPlay').classList.remove('hidden');
+            // Re-parse dynamic map entities from canvas before testing play
+            loadLevel({ width: mapWidth, height: mapHeight, data: mapData });
+            showToast('Test Play Mode Active');
+        }
+    }
+
+    function saveStateForUndo() {
+        undoStack.push([...mapData]);
+        if (undoStack.length > 30) undoStack.shift();
+        redoStack = [];
+    }
+
+    function undo() {
+        if (undoStack.length === 0) return;
+        redoStack.push([...mapData]);
+        mapData = undoStack.pop();
+        showToast('Undo Action');
+    }
+
+    function redo() {
+        if (redoStack.length === 0) return;
+        undoStack.push([...mapData]);
+        mapData = redoStack.pop();
+        showToast('Redo Action');
+    }
+
+    function exportLevelJSON() {
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+            width: mapWidth,
+            height: mapHeight,
+            data: mapData
+        }));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", "custom_level.json");
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+        showToast('Level Exported!');
+    }
+
+    function importLevelJSON(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const parsed = JSON.parse(event.target.result);
+                if (parsed.width && parsed.height && parsed.data) {
+                    loadLevel(parsed);
+                    document.getElementById('selectLevel').value = 'custom';
+                    showToast('Custom Level Loaded!');
+                }
+            } catch (err) {
+                showToast('Failed to load JSON!');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.innerText = msg;
+        toast.classList.remove('opacity-0');
+        setTimeout(() => toast.classList.add('opacity-0'), 2000);
+    }
+
+    function triggerJump() {
+        if (player.grounded) {
+            player.vy = -11.5;
+            player.grounded = false;
+            sound.play('jump');
+            createParticles(player.x + player.width/2, player.y + player.height, [1,1,1,1], 6);
+        }
+    }
+
+    function updatePhysics() {
+        if (isEditorMode) {
+            // Free movement camera controls in Editor mode
+            if (keys.left) camera.x -= 10;
+            if (keys.right) camera.x += 10;
+            return;
+        }
+
+        // Apply Horizontal Acceleration
+        const accel = 0.8;
+        const maxSpeed = 5.0;
+        const friction = 0.82;
+
+        if (keys.left) player.vx -= accel;
+        if (keys.right) player.vx += accel;
+
+        player.vx *= friction;
+        player.vx = Math.max(-maxSpeed, Math.min(maxSpeed, player.vx));
+
+        // Apply Gravity
+        player.vy += 0.5; // Gravity strength
+        if (player.vy > 12) player.vy = 12; // Terminal velocity
+
+        // Move X & Check Collisions
+        player.x += player.vx;
+        checkTileCollisions(player, true);
+
+        // Move Y & Check Collisions
+        player.y += player.vy;
+        player.grounded = false;
+        checkTileCollisions(player, false);
+
+        // Update Moving Platforms & Dynamic Entities
+        entities.forEach(ent => {
+            if (ent.type === 'slime') {
+                ent.x += ent.vx;
+                // Reverse at edges/walls
+                const frontX = Math.floor((ent.x + (ent.vx > 0 ? ent.width : 0)) / TILE_SIZE);
+                const footY = Math.floor((ent.y + ent.height + 2) / TILE_SIZE);
+                if (getTile(frontX, footY) === TILE_TYPES.EMPTY || getTile(frontX, Math.floor(ent.y / TILE_SIZE)) !== TILE_TYPES.EMPTY) {
+                    ent.vx *= -1;
+                }
+                // Check player collision
+                if (ent.alive && checkAABB(player, ent)) {
+                    if (player.vy > 0 && player.y + player.height - player.vy <= ent.y + 8) {
+                        ent.alive = false;
+                        player.vy = -8;
+                        sound.play('hurt');
+                        createParticles(ent.x, ent.y, [0.2, 0.8, 0.3, 1], 10);
+                    } else {
+                        respawnPlayer();
+                    }
+                }
+            } else if (ent.type === 'flyer') {
+                ent.phase += 0.05;
+                ent.x += ent.vx;
+                ent.y = ent.startY + Math.sin(ent.phase) * 30;
+                if (ent.x < 100 || ent.x > mapWidth * TILE_SIZE - 100) ent.vx *= -1;
+
+                if (ent.alive && checkAABB(player, ent)) {
+                    respawnPlayer();
+                }
+            } else if (ent.type === 'moving_platform') {
+                ent.x += ent.vx;
+                if (Math.abs(ent.x - ent.startX) > 120) ent.vx *= -1;
+
+                // Carry player if standing on platform
+                if (checkAABB(player, ent) && player.y + player.height <= ent.y + 10 && player.vy >= 0) {
+                    player.y = ent.y - player.height;
+                    player.x += ent.vx;
+                    player.vy = 0;
+                    player.grounded = true;
+                }
+            }
+        });
+
+        // Camera Smooth Follow
+        camera.x += (player.x - window.innerWidth / 2 - camera.x) * 0.1;
+        camera.y += (player.y - window.innerHeight / 2 - camera.y) * 0.1;
+
+        // Clamp camera bounds
+        camera.x = Math.max(0, Math.min(mapWidth * TILE_SIZE - window.innerWidth, camera.x));
+        camera.y = Math.max(0, Math.min(mapHeight * TILE_SIZE - window.innerHeight, camera.y));
+
+        // Update Particle lifetime
+        particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 0.03;
+        });
+        particles = particles.filter(p => p.life > 0);
+    }
+
+    function getTile(gx, gy) {
+        if (gx < 0 || gx >= mapWidth || gy < 0 || gy >= mapHeight) return TILE_TYPES.EMPTY;
+        return mapData[gy * mapWidth + gx];
+    }
+
+    function checkTileCollisions(entity, isHorizontal) {
+        const left = Math.floor(entity.x / TILE_SIZE);
+        const right = Math.floor((entity.x + entity.width) / TILE_SIZE);
+        const top = Math.floor(entity.y / TILE_SIZE);
+        const bottom = Math.floor((entity.y + entity.height) / TILE_SIZE);
+
+        for (let gy = top; gy <= bottom; gy++) {
+            for (let gx = left; gx <= right; gx++) {
+                const tile = getTile(gx, gy);
+                if (tile === TILE_TYPES.EMPTY) continue;
+
+                const tileRect = { x: gx * TILE_SIZE, y: gy * TILE_SIZE, width: TILE_SIZE, height: TILE_SIZE };
+                const tileCfg = TILE_CONFIG[tile];
+
+                if (tileCfg.solid) {
+                    if (isHorizontal) {
+                        if (entity.vx > 0) entity.x = tileRect.x - entity.width;
+                        else if (entity.vx < 0) entity.x = tileRect.x + tileRect.width;
+                        entity.vx = 0;
+                    } else {
+                        if (entity.vy > 0) {
+                            entity.y = tileRect.y - entity.height;
+                            entity.grounded = true;
+                        } else if (entity.vy < 0) {
+                            entity.y = tileRect.y + tileRect.height;
+                        }
+                        entity.vy = 0;
+                    }
+                } else if (tileCfg.oneway && !isHorizontal && entity.vy > 0) {
+                    if (entity.y + entity.height - entity.vy <= tileRect.y) {
+                        entity.y = tileRect.y - entity.height;
+                        entity.grounded = true;
+                        entity.vy = 0;
+                    }
+                } else if (tileCfg.item) {
+                    // Collect item
+                    mapData[gy * mapWidth + gx] = TILE_TYPES.EMPTY;
+                    if (tile === TILE_TYPES.COIN) {
+                        player.coins += 1;
+                        document.getElementById('hudCoins').innerText = player.coins;
+                        sound.play('coin');
+                        createParticles(tileRect.x + 16, tileRect.y + 16, [1, 0.84, 0, 1], 8);
+                    }
+                } else if (tileCfg.hazard) {
+                    respawnPlayer();
+                } else if (tile === TILE_TYPES.GOAL) {
+                    sound.play('win');
+                    showToast('Level Completed! 🎉');
+                    setTimeout(() => loadLevel((currentLevelIndex + 1) % defaultLevels.length), 1000);
+                }
+            }
+        }
+    }
+
+    function checkAABB(rect1, rect2) {
+        return rect1.x < rect2.x + rect2.width &&
+               rect1.x + rect1.width > rect2.x &&
+               rect1.y < rect2.y + rect2.height &&
+               rect1.y + rect1.height > rect2.y;
+    }
+
+    function respawnPlayer() {
+        sound.play('hurt');
+        createParticles(player.x + 12, player.y + 15, [0.9, 0.2, 0.2, 1], 15);
+        player.lives -= 1;
+        
+        let hearts = '';
+        for (let i = 0; i < player.lives; i++) hearts += '❤️';
+        document.getElementById('hudLives').innerText = hearts || '💀';
+
+        if (player.lives <= 0) {
+            showToast('Game Over! Restarting level...');
+            player.lives = 3;
+            document.getElementById('hudLives').innerText = '❤️❤️❤️';
+            loadLevel(currentLevelIndex);
+        } else {
+            player.x = player.spawnX;
+            player.y = player.spawnY;
+            player.vx = 0;
+            player.vy = 0;
+        }
+    }
+
+    function createParticles(x, y, color, count) {
+        for (let i = 0; i < count; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 6,
+                vy: (Math.random() - 0.5) * 6,
+                color,
+                life: 1.0,
+                size: Math.random() * 4 + 2
+            });
+        }
+    }
+
+    function render() {
+        gl.clearColor(0.08, 0.10, 0.14, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        gl.uniform2f(uResolution, gl.canvas.width, gl.canvas.height);
+        gl.uniform2f(uCamera, camera.x, camera.y);
+
+        const positions = [];
+        const texCoords = [];
+        const colors = [];
+
+        const addQuad = (x, y, w, h, color) => {
+            const x1 = x, y1 = y;
+            const x2 = x + w, y2 = y + h;
+
+            positions.push(
+                x1, y1,  x2, y1,  x1, y2,
+                x1, y2,  x2, y1,  x2, y2
+            );
+
+            texCoords.push(
+                0, 0,  1, 0,  0, 1,
+                0, 1,  1, 0,  1, 1
+            );
+
+            for (let i = 0; i < 6; i++) {
+                colors.push(...color);
+            }
+        };
+
+        // Render Map Tiles
+        const startX = Math.max(0, Math.floor(camera.x / TILE_SIZE));
+        const endX = Math.min(mapWidth, Math.ceil((camera.x + gl.canvas.width) / TILE_SIZE));
+        const startY = Math.max(0, Math.floor(camera.y / TILE_SIZE));
+        const endY = Math.min(mapHeight, Math.ceil((camera.y + gl.canvas.height) / TILE_SIZE));
+
+        for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+                const tile = mapData[y * mapWidth + x];
+                if (tile !== TILE_TYPES.EMPTY) {
+                    const cfg = TILE_CONFIG[tile] || TILE_CONFIG[TILE_TYPES.DIRT];
+                    addQuad(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE, cfg.color);
+                }
+            }
+        }
+
+        // Render Dynamic Entities
+        entities.forEach(ent => {
+            if (ent.alive !== false) {
+                const col = ent.type === 'slime' ? [0.2, 0.8, 0.3, 1] :
+                            ent.type === 'flyer' ? [0.9, 0.3, 0.3, 1] : [0.7, 0.5, 0.9, 1];
+                addQuad(ent.x, ent.y, ent.width, ent.height, col);
+            }
+        });
+
+        // Render Player
+        if (!isEditorMode) {
+            addQuad(player.x, player.y, player.width, player.height, [0.2, 0.6, 1.0, 1.0]);
+        }
+
+        // Render Particles
+        particles.forEach(p => {
+            const pCol = [...p.color];
+            pCol[3] = p.life; // Fade alpha
+            addQuad(p.x, p.y, p.size, p.size, pCol);
+        });
+
+        // Render Buffer Array to WebGL
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(program.aPosition);
+        gl.vertexAttribPointer(program.aPosition, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(program.aTexCoord);
+        gl.vertexAttribPointer(program.aTexCoord, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(program.aColor);
+        gl.vertexAttribPointer(program.aColor, 4, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.TRIANGLES, 0, positions.length / 2);
+    }
+
+    function gameLoop() {
+        updatePhysics();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    window.onload = init;
+    </script>
+</body>
+</html>
