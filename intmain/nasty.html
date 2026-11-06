@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pure WebGL 3D Rigid Body Physics Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+        }
+        canvas {
+            touch-action: none;
+        }
+        /* Custom scrollbars for controls overlay */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(51, 65, 85, 0.8);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col md:flex-row relative select-none">
+
+    <!-- WebGL Canvas Container -->
+    <div class="relative flex-1 h-full w-full bg-slate-950 overflow-hidden">
+        <canvas id="webgl-canvas" class="w-full h-full block cursor-grab active:cursor-grabbing"></canvas>
+
+        <!-- Overlay HUD & Controls info -->
+        <div class="absolute top-4 left-4 pointer-events-none space-y-2">
+            <div class="bg-slate-900/80 backdrop-blur border border-slate-800 p-3 rounded-xl shadow-lg max-w-xs">
+                <h1 class="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-1">Pure WebGL 3D Physics</h1>
+                <p class="text-xs text-slate-400">Zero External Libraries (No Three.js/Cannon.js)</p>
+                <div class="mt-2 text-[11px] text-slate-300 space-y-1">
+                    <div><span class="font-semibold text-slate-200">Orbit Camera:</span> Drag Left Click</div>
+                    <div><span class="font-semibold text-slate-200">Pan Camera:</span> Drag Right Click</div>
+                    <div><span class="font-semibold text-slate-200">Zoom:</span> Mouse Wheel</div>
+                </div>
+            </div>
+            <!-- Performance Stats -->
+            <div class="bg-slate-900/80 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-lg shadow-lg inline-block text-xs font-mono text-slate-300">
+                <span id="fps-counter">60</span> FPS | <span id="body-counter">0</span> Bodies
+            </div>
+        </div>
+
+        <!-- Quick Action Floating Buttons -->
+        <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-slate-900/90 border border-slate-800 p-2 rounded-2xl shadow-2xl backdrop-blur">
+            <button id="btn-shoot-cube" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-medium rounded-xl transition flex items-center gap-2 shadow-lg shadow-indigo-600/30">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                Shoot Box
+            </button>
+            <button id="btn-shoot-sphere" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-medium rounded-xl transition flex items-center gap-2 shadow-lg shadow-emerald-600/30">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
+                Shoot Sphere
+            </button>
+            <button id="btn-drop-stack" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 active:scale-95 text-white text-xs font-medium rounded-xl transition flex items-center gap-2 shadow-lg shadow-amber-600/30">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                Drop Tower
+            </button>
+            <button id="btn-reset" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white text-xs font-medium rounded-xl transition">
+                Clear
+            </button>
+        </div>
+    </div>
+
+    <!-- Physics & World Controls Drawer Sidebar -->
+    <div class="w-full md:w-80 bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 flex flex-col h-auto md:h-full z-10">
+        <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-slate-200 uppercase tracking-wider">Physics Controls</h2>
+            <span class="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-mono">Scratch Math Engine</span>
+        </div>
+
+        <div class="p-4 overflow-y-auto flex-1 space-y-6 text-xs text-slate-300">
+            <!-- Environment Controls -->
+            <div class="space-y-3">
+                <div class="font-medium text-slate-200 border-b border-slate-800 pb-1">Environment</div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span>Gravity Y:</span>
+                        <span id="val-gravity" class="font-mono text-indigo-400">-9.8 m/s²</span>
+                    </div>
+                    <input type="range" id="param-gravity" min="-25" max="5" step="0.5" value="-9.8" class="w-full accent-indigo-500 bg-slate-800 rounded">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span>Restitution (Bounciness):</span>
+                        <span id="val-restitution" class="font-mono text-indigo-400">0.65</span>
+                    </div>
+                    <input type="range" id="param-restitution" min="0" max="1" step="0.05" value="0.65" class="w-full accent-indigo-500 bg-slate-800 rounded">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span>Friction:</span>
+                        <span id="val-friction" class="font-mono text-indigo-400">0.30</span>
+                    </div>
+                    <input type="range" id="param-friction" min="0" max="1" step="0.05" value="0.3" class="w-full accent-indigo-500 bg-slate-800 rounded">
+                </div>
+            </div>
+
+            <!-- Projectile Controls -->
+            <div class="space-y-3">
+                <div class="font-medium text-slate-200 border-b border-slate-800 pb-1">Cannon / Projectile</div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span>Launch Speed:</span>
+                        <span id="val-speed" class="font-mono text-indigo-400">22 m/s</span>
+                    </div>
+                    <input type="range" id="param-speed" min="5" max="50" step="1" value="22" class="w-full accent-indigo-500 bg-slate-800 rounded">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span>Spawn Size:</span>
+                        <span id="val-size" class="font-mono text-indigo-400">1.0</span>
+                    </div>
+                    <input type="range" id="param-size" min="0.4" max="2.5" step="0.1" value="1.0" class="w-full accent-indigo-500 bg-slate-800 rounded">
+                </div>
+            </div>
+
+            <!-- Visual Options -->
+            <div class="space-y-3">
+                <div class="font-medium text-slate-200 border-b border-slate-800 pb-1">Rendering & Shader</div>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="param-wireframe" class="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-0">
+                    <span>Show Wireframes</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="param-rotate-light" checked class="rounded bg-slate-800 border-slate-700 text-indigo-600 focus:ring-0">
+                    <span>Animate Directional Light</span>
+                </label>
+            </div>
+
+            <!-- Preset Spawners -->
+            <div class="space-y-2 pt-2">
+                <div class="font-medium text-slate-200 border-b border-slate-800 pb-1">Preset Scenes</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btn-preset-pyramid" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-center transition">Pyramid</button>
+                    <button id="btn-preset-wall" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-center transition">Wall Grid</button>
+                    <button id="btn-preset-chaos" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-center transition">Sphere Rain</button>
+                    <button id="btn-preset-mix" class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-center transition">Mixed Collision</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer Info -->
+        <div class="p-4 border-t border-slate-800 text-[10px] text-slate-500 text-center">
+            Linear Algebra & Rigid Impulse Physics calculated directly in JS loops.
+        </div>
+    </div>
+
+    <!-- MAIN JAVASCRIPT SIMULATION LOGIC -->
+    <script>
+        // ====================================================================
+        // 1. CUSTOM 3D MATH ENGINE (Vectors, Matrices, Quaternions)
+        // ====================================================================
+
+        class Vec3 {
+            constructor(x = 0, y = 0, z = 0) {
+                this.x = x; this.y = y; this.z = z;
+            }
+            set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; }
+            clone() { return new Vec3(this.x, this.y, this.z); }
+            copy(v) { this.x = v.x; this.y = v.y; this.z = v.z; return this; }
+            add(v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; }
+            sub(v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; }
+            scale(s) { this.x *= s; this.y *= s; this.z *= s; return this; }
+            dot(v) { return this.x * v.x + this.y * v.y + this.z * v.z; }
+            cross(v) {
+                const rx = this.y * v.z - this.z * v.y;
+                const ry = this.z * v.x - this.x * v.z;
+                const rz = this.x * v.y - this.y * v.x;
+                return new Vec3(rx, ry, rz);
+            }
+            lengthSq() { return this.x * this.x + this.y * this.y + this.z * this.z; }
+            length() { return Math.sqrt(this.lengthSq()); }
+            normalize() {
+                const len = this.length();
+                if (len > 0.00001) this.scale(1 / len);
+                return this;
+            }
+            distanceTo(v) {
+                const dx = this.x - v.x, dy = this.y - v.y, dz = this.z - v.z;
+                return Math.sqrt(dx * dx + dy * dy + dz * dz);
+            }
+
+            static add(a, b) { return new Vec3(a.x + b.x, a.y + b.y, a.z + b.z); }
+            static sub(a, b) { return new Vec3(a.x - b.x, a.y - b.y, a.z - b.z); }
+            static scale(v, s) { return new Vec3(v.x * s, v.y * s, v.z * s); }
+            static cross(a, b) {
+                return new Vec3(
+                    a.y * b.z - a.z * b.y,
+                    a.z * b.x - a.x * b.z,
+                    a.x * b.y - a.y * b.x
+                );
+            }
+            static dot(a, b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+        }
+
+        class Mat4 {
+            constructor() {
+                this.elements = new Float32Array(16);
+                this.identity();
+            }
+            identity() {
+                const e = this.elements;
+                e.fill(0);
+                e[0] = 1; e[5] = 1; e[10] = 1; e[15] = 1;
+                return this;
+            }
+            multiply(b) {
+                const a = this.elements;
+                const be = b.elements;
+                const out = new Float32Array(16);
+
+                for (let i = 0; i < 4; ++i) {
+                    const ai0 = a[i], ai1 = a[i+4], ai2 = a[i+8], ai3 = a[i+12];
+                    out[i]    = ai0 * be[0]  + ai1 * be[1]  + ai2 * be[2]  + ai3 * be[3];
+                    out[i+4]  = ai0 * be[4]  + ai1 * be[5]  + ai2 * be[6]  + ai3 * be[7];
+                    out[i+8]  = ai0 * be[8]  + ai1 * be[9]  + ai2 * be[10] + ai3 * be[11];
+                    out[i+12] = ai0 * be[12] + ai1 * be[13] + ai2 * be[14] + ai3 * be[15];
+                }
+                this.elements.set(out);
+                return this;
+            }
+            static perspective(fovy, aspect, near, far) {
+                const m = new Mat4();
+                const e = m.elements;
+                const f = 1.0 / Math.tan(fovy / 2);
+                const nf = 1 / (near - far);
+
+                e[0] = f / aspect;
+                e[5] = f;
+                e[10] = (far + near) * nf;
+                e[11] = -1;
+                e[14] = (2 * far * near) * nf;
+                e[15] = 0;
+                return m;
+            }
+            static lookAt(eye, center, up) {
+                const m = new Mat4();
+                const e = m.elements;
+
+                const z = Vec3.sub(eye, center).normalize();
+                const x = Vec3.cross(up, z).normalize();
+                const y = Vec3.cross(z, x).normalize();
+
+                e[0] = x.x; e[4] = x.y; e[8]  = x.z; e[12] = -Vec3.dot(x, eye);
+                e[1] = y.x; e[5] = y.y; e[9]  = y.z; e[13] = -Vec3.dot(y, eye);
+                e[2] = z.x; e[6] = z.y; e[10] = z.z; e[14] = -Vec3.dot(z, eye);
+                e[3] = 0;   e[7] = 0;   e[11] = 0;    e[15] = 1;
+                return m;
+            }
+            static compose(position, rotationQuaternion, scale) {
+                const m = new Mat4();
+                const e = m.elements;
+
+                const q = rotationQuaternion;
+                const x2 = q.x + q.x, y2 = q.y + q.y, z2 = q.z + q.z;
+                const xx = q.x * x2,  xy = q.x * y2,  xz = q.x * z2;
+                const yy = q.y * y2,  yz = q.y * z2,  zz = q.z * z2;
+                const wx = q.w * x2,  wy = q.w * y2,  wz = q.w * z2;
+
+                const sx = scale.x, sy = scale.y, sz = scale.z;
+
+                e[0] = (1 - (yy + zz)) * sx;
+                e[1] = (xy + wz) * sx;
+                e[2] = (xz - wy) * sx;
+                e[3] = 0;
+
+                e[4] = (xy - wz) * sy;
+                e[5] = (1 - (xx + zz)) * sy;
+                e[6] = (yz + wx) * sy;
+                e[7] = 0;
+
+                e[8] = (xz + wy) * sz;
+                e[9] = (yz - wx) * sz;
+                e[10] = (1 - (xx + yy)) * sz;
+                e[11] = 0;
+
+                e[12] = position.x;
+                e[13] = position.y;
+                e[14] = position.z;
+                e[15] = 1;
+
+                return m;
+            }
+        }
+
+        class Quaternion {
+            constructor(x = 0, y = 0, z = 0, w = 1) {
+                this.x = x; this.y = y; this.z = z; this.w = w;
+            }
+            set(x, y, z, w) { this.x = x; this.y = y; this.z = z; this.w = w; return this; }
+            normalize() {
+                let l = Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z + this.w * this.w);
+                if (l === 0) { this.x = 0; this.y = 0; this.z = 0; this.w = 1; }
+                else { l = 1 / l; this.x *= l; this.y *= l; this.z *= l; this.w *= l; }
+                return this;
+            }
+            integrateVector(v, dt) {
+                const ax = v.x * dt * 0.5;
+                const ay = v.y * dt * 0.5;
+                const az = v.z * dt * 0.5;
+
+                const qx = this.x, qy = this.y, qz = this.z, qw = this.w;
+
+                this.x += ax * qw + ay * qz - az * qy;
+                this.y += ay * qw + az * qx - ax * qz;
+                this.z += az * qw + ax * qy - ay * qx;
+                this.w += -ax * qx - ay * qy - az * qz;
+                this.normalize();
+            }
+        }
+
+        // ====================================================================
+        // 2. RIGID BODY & COLLISION SYSTEM
+        // ====================================================================
+
+        const SHAPE_CUBE = 0;
+        const SHAPE_SPHERE = 1;
+        const SHAPE_PLANE = 2;
+
+        class RigidBody {
+            constructor(type = SHAPE_CUBE, size = new Vec3(1, 1, 1), mass = 1.0) {
+                this.id = Math.random().toString(36).substr(2, 9);
+                this.type = type;
+                this.size = size.clone(); // Extents/Dimensions
+                this.radius = size.x * 0.5; // Radius if sphere
+
+                this.position = new Vec3();
+                this.velocity = new Vec3();
+                this.angularVelocity = new Vec3();
+                this.rotation = new Quaternion();
+
+                this.mass = mass;
+                this.invMass = mass > 0 ? 1.0 / mass : 0;
+                this.restitution = 0.65;
+                this.friction = 0.3;
+
+                // Color tint for rendering
+                this.color = [0.4, 0.6, 1.0];
+                this.wireframe = false;
+            }
+
+            update(dt, gravityVec) {
+                if (this.invMass === 0) return; // Static body
+
+                // Apply gravity
+                this.velocity.x += gravityVec.x * dt;
+                this.velocity.y += gravityVec.y * dt;
+                this.velocity.z += gravityVec.z * dt;
+
+                // Linear damping
+                this.velocity.scale(0.998);
+                this.angularVelocity.scale(0.98);
+
+                // Integrate position
+                this.position.x += this.velocity.x * dt;
+                this.position.y += this.velocity.y * dt;
+                this.position.z += this.velocity.z * dt;
+
+                // Integrate rotation
+                this.rotation.integrateVector(this.angularVelocity, dt);
+            }
+
+            // Approximate bounding sphere radius for broadphase/fast checks
+            getBoundingRadius() {
+                if (this.type === SHAPE_SPHERE) return this.radius;
+                return Math.sqrt(this.size.x * this.size.x + this.size.y * this.size.y + this.size.z * this.size.z) * 0.5;
+            }
+        }
+
+        class PhysicsWorld {
+            constructor() {
+                this.bodies = [];
+                this.gravity = new Vec3(0, -9.8, 0);
+                this.globalRestitution = 0.65;
+                this.globalFriction = 0.3;
+                this.groundY = 0.0;
+            }
+
+            addBody(body) {
+                this.bodies.push(body);
+                return body;
+            }
+
+            clear() {
+                this.bodies = [];
+            }
+
+            step(dt) {
+                // Substepping for stable physics iteration
+                const steps = 4;
+                const subDt = dt / steps;
+
+                for (let s = 0; s < steps; s++) {
+                    // 1. Integration
+                    for (let i = 0; i < this.bodies.length; i++) {
+                        this.bodies[i].update(subDt, this.gravity);
+                    }
+
+                    // 2. Collision Detection & Response
+                    for (let i = 0; i < this.bodies.length; i++) {
+                        const a = this.bodies[i];
+
+                        // Floor plane collision
+                        this.collideWithGround(a);
+
+                        // Body vs Body collision
+                        for (let j = i + 1; j < this.bodies.length; j++) {
+                            const b = this.bodies[j];
+                            this.collideBodies(a, b);
+                        }
+                    }
+                }
+            }
+
+            collideWithGround(b) {
+                if (b.invMass === 0) return;
+
+                let penetration = 0;
+                let contactNormal = new Vec3(0, 1, 0);
+
+                if (b.type === SHAPE_SPHERE) {
+                    const bottom = b.position.y - b.radius;
+                    if (bottom < this.groundY) {
+                        penetration = this.groundY - bottom;
+                    }
+                } else if (b.type === SHAPE_CUBE) {
+                    const halfH = b.size.y * 0.5;
+                    const bottom = b.position.y - halfH;
+                    if (bottom < this.groundY) {
+                        penetration = this.groundY - bottom;
+                    }
+                }
+
+                if (penetration > 0) {
+                    // Position Correction (prevent sinking)
+                    b.position.y += penetration;
+
+                    // Impulse response
+                    const relVel = b.velocity.y;
+                    if (relVel < 0) {
+                        const rest = Math.min(b.restitution, this.globalRestitution);
+                        b.velocity.y = -relVel * rest;
+
+                        // Friction along floor plane
+                        b.velocity.x *= (1 - this.globalFriction);
+                        b.velocity.z *= (1 - this.globalFriction);
+
+                        // Apply subtle spin on ground contact
+                        b.angularVelocity.x += (Math.random() - 0.5) * b.velocity.z * 0.2;
+                        b.angularVelocity.z -= (Math.random() - 0.5) * b.velocity.x * 0.2;
+                    }
+                }
+            }
+
+            collideBodies(a, b) {
+                if (a.invMass === 0 && b.invMass === 0) return;
+
+                // Broadphase distance check
+                const delta = Vec3.sub(b.position, a.position);
+                const dist = delta.length();
+                const minDist = a.getBoundingRadius() + b.getBoundingRadius();
+
+                if (dist >= minDist || dist === 0) return;
+
+                // Narrowphase resolution (Sphere-Sphere & Cube-Cube simplified bounding collision)
+                const normal = delta.clone().normalize();
+                const penetration = minDist - dist;
+
+                // Separate positions
+                const totalInvMass = a.invMass + b.invMass;
+                if (totalInvMass === 0) return;
+
+                const moveA = (a.invMass / totalInvMass) * penetration;
+                const moveB = (b.invMass / totalInvMass) * penetration;
+
+                a.position.sub(Vec3.scale(normal, moveA));
+                b.position.add(Vec3.scale(normal, moveB));
+
+                // Calculate relative velocity
+                const relVel = Vec3.sub(b.velocity, a.velocity);
+                const velAlongNormal = Vec3.dot(relVel, normal);
+
+                // Do not resolve if velocities are separating
+                if (velAlongNormal > 0) return;
+
+                // Restitution
+                const e = Math.min(a.restitution, b.restitution);
+                let j = -(1 + e) * velAlongNormal;
+                j /= totalInvMass;
+
+                // Apply impulse
+                const impulse = Vec3.scale(normal, j);
+                a.velocity.sub(Vec3.scale(impulse, a.invMass));
+                b.velocity.add(Vec3.scale(impulse, b.invMass));
+
+                // Angular impulse & friction reaction effect
+                const tangent = relVel.clone().sub(Vec3.scale(normal, velAlongNormal)).normalize();
+                if (tangent.lengthSq() > 0.001) {
+                    const jt = -Vec3.dot(relVel, tangent) / totalInvMass;
+                    const friction = Math.sqrt(a.friction * b.friction);
+                    const frictionImpulse = Vec3.scale(tangent, Math.max(-j * friction, Math.min(j * friction, jt)));
+
+                    a.velocity.sub(Vec3.scale(frictionImpulse, a.invMass));
+                    b.velocity.add(Vec3.scale(frictionImpulse, b.invMass));
+
+                    // Generate angular velocity from impact off-center
+                    const angA = Vec3.cross(normal, tangent).scale(jt * 0.3);
+                    const angB = Vec3.cross(normal, tangent).scale(-jt * 0.3);
+                    a.angularVelocity.add(angA);
+                    b.angularVelocity.add(angB);
+                }
+            }
+        }
+
+        // ====================================================================
+        // 3. PURE WEBGL RENDERER & GEOMETRY BUFFERS
+        // ====================================================================
+
+        const vertexShaderSource = `
+            attribute vec3 aPosition;
+            attribute vec3 aNormal;
+
+            uniform mat4 uModelMatrix;
+            uniform mat4 uViewMatrix;
+            uniform mat4 uProjectionMatrix;
+            uniform mat3 uNormalMatrix;
+
+            varying vec3 vNormal;
+            varying vec3 vFragPos;
+
+            void main() {
+                vec4 worldPos = uModelMatrix * vec4(aPosition, 1.0);
+                vFragPos = worldPos.xyz;
+                vNormal = uNormalMatrix * aNormal;
+                gl_Position = uProjectionMatrix * uViewMatrix * worldPos;
+            }
+        `;
+
+        const fragmentShaderSource = `
+            precision mediump float;
+
+            varying vec3 vNormal;
+            varying vec3 vFragPos;
+
+            uniform vec3 uColor;
+            uniform vec3 uLightDirection;
+            uniform vec3 uCameraPos;
+            uniform float uIsWireframe;
+
+            void main() {
+                if (uIsWireframe > 0.5) {
+                    gl_FragColor = vec4(uColor * 1.4, 1.0);
+                    return;
+                }
+
+                vec3 norm = normalize(vNormal);
+                vec3 lightDir = normalize(-uLightDirection);
+
+                // Ambient
+                float ambientStrength = 0.25;
+                vec3 ambient = ambientStrength * vec3(1.0, 1.0, 1.1);
+
+                // Diffuse
+                float diff = max(dot(norm, lightDir), 0.0);
+                vec3 diffuse = diff * vec3(1.0, 0.95, 0.9);
+
+                // Specular
+                float specularStrength = 0.3;
+                vec3 viewDir = normalize(uCameraPos - vFragPos);
+                vec3 reflectDir = reflect(-lightDir, norm);
+                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 16.0);
+                vec3 specular = specularStrength * spec * vec3(1.0);
+
+                // Simple height shadow effect near ground plane
+                float shadowFactor = smoothstep(-0.1, 2.0, vFragPos.y);
+                shadowFactor = mix(0.5, 1.0, shadowFactor);
+
+                vec3 result = (ambient + diffuse + specular) * uColor * shadowFactor;
+                gl_FragColor = vec4(result, 1.0);
+            }
+        `;
+
+        class WebGLRenderer {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.gl = canvas.getContext('webgl', { antialias: true, alpha: false });
+
+                if (!this.gl) {
+                    alert('WebGL is not supported by your browser!');
+                    return;
+                }
+
+                this.initShaders();
+                this.initGeometries();
+                this.initGLState();
+            }
+
+            initGLState() {
+                const gl = this.gl;
+                gl.clearColor(0.06, 0.09, 0.16, 1.0);
+                gl.enable(gl.DEPTH_TEST);
+                gl.depthFunc(gl.LEQUAL);
+                gl.enable(gl.CULL_FACE);
+                gl.cullFace(gl.BACK);
+            }
+
+            createShader(gl, type, source) {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+                    gl.deleteShader(shader);
+                    return null;
+                }
+                return shader;
+            }
+
+            initShaders() {
+                const gl = this.gl;
+                const vs = this.createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+                const fs = this.createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+                this.program = gl.createProgram();
+                gl.attachShader(this.program, vs);
+                gl.attachShader(this.program, fs);
+                gl.linkProgram(this.program);
+
+                if (!gl.getProgramParameter(this.program, gl.LINK_STATUS)) {
+                    console.error('Program link error:', gl.getProgramInfoLog(this.program));
+                }
+
+                // Attributes
+                this.attribs = {
+                    aPosition: gl.getAttribLocation(this.program, 'aPosition'),
+                    aNormal: gl.getAttribLocation(this.program, 'aNormal')
+                };
+
+                // Uniforms
+                this.uniforms = {
+                    uModelMatrix: gl.getUniformLocation(this.program, 'uModelMatrix'),
+                    uViewMatrix: gl.getUniformLocation(this.program, 'uViewMatrix'),
+                    uProjectionMatrix: gl.getUniformLocation(this.program, 'uProjectionMatrix'),
+                    uNormalMatrix: gl.getUniformLocation(this.program, 'uNormalMatrix'),
+                    uColor: gl.getUniformLocation(this.program, 'uColor'),
+                    uLightDirection: gl.getUniformLocation(this.program, 'uLightDirection'),
+                    uCameraPos: gl.getUniformLocation(this.program, 'uCameraPos'),
+                    uIsWireframe: gl.getUniformLocation(this.program, 'uIsWireframe')
+                };
+            }
+
+            initGeometries() {
+                // 1. Cube Geometry
+                this.cubeBuffer = this.createCubeBuffers();
+
+                // 2. Sphere Geometry
+                this.sphereBuffer = this.createSphereBuffers(16, 16);
+
+                // 3. Ground Grid Geometry
+                this.gridBuffer = this.createGridBuffers(40, 40);
+            }
+
+            createCubeBuffers() {
+                const gl = this.gl;
+                const positions = new Float32Array([
+                    // Front
+                    -0.5, -0.5,  0.5,   0.5, -0.5,  0.5,   0.5,  0.5,  0.5,  -0.5,  0.5,  0.5,
+                    // Back
+                    -0.5, -0.5, -0.5,  -0.5,  0.5, -0.5,   0.5,  0.5, -0.5,   0.5, -0.5, -0.5,
+                    // Top
+                    -0.5,  0.5, -0.5,  -0.5,  0.5,  0.5,   0.5,  0.5,  0.5,   0.5,  0.5, -0.5,
+                    // Bottom
+                    -0.5, -0.5, -0.5,   0.5, -0.5, -0.5,   0.5, -0.5,  0.5,  -0.5, -0.5,  0.5,
+                    // Right
+                     0.5, -0.5, -0.5,   0.5,  0.5, -0.5,   0.5,  0.5,  0.5,   0.5, -0.5,  0.5,
+                    // Left
+                    -0.5, -0.5, -0.5,  -0.5, -0.5,  0.5,  -0.5,  0.5,  0.5,  -0.5,  0.5, -0.5,
+                ]);
+
+                const normals = new Float32Array([
+                     0, 0, 1,   0, 0, 1,   0, 0, 1,   0, 0, 1,
+                     0, 0,-1,   0, 0,-1,   0, 0,-1,   0, 0,-1,
+                     0, 1, 0,   0, 1, 0,   0, 1, 0,   0, 1, 0,
+                     0,-1, 0,   0,-1, 0,   0,-1, 0,   0,-1, 0,
+                     1, 0, 0,   1, 0, 0,   1, 0, 0,   1, 0, 0,
+                    -1, 0, 0,  -1, 0, 0,  -1, 0, 0,  -1, 0, 0,
+                ]);
+
+                const indices = new Uint16Array([
+                    0, 1, 2,  0, 2, 3,    // front
+                    4, 5, 6,  4, 6, 7,    // back
+                    8, 9, 10, 8, 10, 11,  // top
+                    12, 13, 14, 12, 14, 15, // bottom
+                    16, 17, 18, 16, 18, 19, // right
+                    20, 21, 22, 20, 22, 23  // left
+                ]);
+
+                return this.uploadBuffers(positions, normals, indices);
+            }
+
+            createSphereBuffers(latBands, longBands) {
+                const positions = [];
+                const normals = [];
+                const indices = [];
+
+                for (let lat = 0; lat <= latBands; lat++) {
+                    const theta = lat * Math.PI / latBands;
+                    const sinTheta = Math.sin(theta);
+                    const cosTheta = Math.cos(theta);
+
+                    for (let long = 0; long <= longBands; long++) {
+                        const phi = long * 2 * Math.PI / longBands;
+                        const x = Math.cos(phi) * sinTheta;
+                        const y = cosTheta;
+                        const z = Math.sin(phi) * sinTheta;
+
+                        normals.push(x, y, z);
+                        positions.push(0.5 * x, 0.5 * y, 0.5 * z);
+                    }
+                }
+
+                for (let lat = 0; lat < latBands; lat++) {
+                    for (let long = 0; long < longBands; long++) {
+                        const first = (lat * (longBands + 1)) + long;
+                        const second = first + longBands + 1;
+                        indices.push(first, second, first + 1);
+                        indices.push(second, second + 1, first + 1);
+                    }
+                }
+
+                return this.uploadBuffers(new Float32Array(positions), new Float32Array(normals), new Uint16Array(indices));
+            }
+
+            createGridBuffers(size, divisions) {
+                const positions = [];
+                const normals = [];
+                const indices = [];
+
+                const half = size / 2;
+                const step = size / divisions;
+
+                let index = 0;
+                for (let i = -half; i <= half; i += step) {
+                    // Lines parallel to Z
+                    positions.push(i, 0, -half, i, 0, half);
+                    normals.push(0, 1, 0, 0, 1, 0);
+                    indices.push(index, index + 1);
+                    index += 2;
+
+                    // Lines parallel to X
+                    positions.push(-half, 0, i, half, 0, i);
+                    normals.push(0, 1, 0, 0, 1, 0);
+                    indices.push(index, index + 1);
+                    index += 2;
+                }
+
+                return this.uploadBuffers(new Float32Array(positions), new Float32Array(normals), new Uint16Array(indices), true);
+            }
+
+            uploadBuffers(positions, normals, indices, isLines = false) {
+                const gl = this.gl;
+
+                const posBuf = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+                gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+                const normBuf = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
+                gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+
+                const idxBuf = gl.createBuffer();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+                gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+                return {
+                    pos: posBuf,
+                    norm: normBuf,
+                    idx: idxBuf,
+                    count: indices.length,
+                    isLines: isLines
+                };
+            }
+
+            resize() {
+                const displayWidth  = this.canvas.clientWidth;
+                const displayHeight = this.canvas.clientHeight;
+
+                if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
+                    this.canvas.width  = displayWidth;
+                    this.canvas.height = displayHeight;
+                    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+                }
+            }
+
+            render(sceneData) {
+                this.resize();
+                const gl = this.gl;
+
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                gl.useProgram(this.program);
+
+                const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+                const projMatrix = Mat4.perspective(45 * Math.PI / 180, aspect, 0.1, 100.0);
+                const viewMatrix = Mat4.lookAt(sceneData.cameraPos, sceneData.cameraTarget, new Vec3(0, 1, 0));
+
+                gl.uniformMatrix4fv(this.uniforms.uProjectionMatrix, false, projMatrix.elements);
+                gl.uniformMatrix4fv(this.uniforms.uViewMatrix, false, viewMatrix.elements);
+                gl.uniform3f(this.uniforms.uLightDirection, sceneData.lightDir.x, sceneData.lightDir.y, sceneData.lightDir.z);
+                gl.uniform3f(this.uniforms.uCameraPos, sceneData.cameraPos.x, sceneData.cameraPos.y, sceneData.cameraPos.z);
+
+                // 1. Render Ground Grid
+                this.drawMesh(this.gridBuffer, new Mat4(), [0.25, 0.35, 0.5], true);
+
+                // 2. Render Rigid Bodies
+                for (let i = 0; i < sceneData.bodies.length; i++) {
+                    const body = sceneData.bodies[i];
+                    const modelMatrix = Mat4.compose(body.position, body.rotation, body.size);
+                    const buf = body.type === SHAPE_SPHERE ? this.sphereBuffer : this.cubeBuffer;
+
+                    this.drawMesh(buf, modelMatrix, body.color, body.wireframe);
+                }
+            }
+
+            drawMesh(buffer, modelMatrix, color, isWireframe = false) {
+                const gl = this.gl;
+
+                gl.uniformMatrix4fv(this.uniforms.uModelMatrix, false, modelMatrix.elements);
+
+                // Compute normal matrix (transpose of inverse model matrix 3x3)
+                const me = modelMatrix.elements;
+                const normMat = new Float32Array([
+                    me[0], me[1], me[2],
+                    me[4], me[5], me[6],
+                    me[8], me[9], me[10]
+                ]);
+                gl.uniformMatrix3fv(this.uniforms.uNormalMatrix, false, normMat);
+                gl.uniform3fv(this.uniforms.uColor, color);
+                gl.uniform1f(this.uniforms.uIsWireframe, isWireframe ? 1.0 : 0.0);
+
+                // Bind attributes
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffer.pos);
+                gl.vertexAttribPointer(this.attribs.aPosition, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(this.attribs.aPosition);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffer.norm);
+                gl.vertexAttribPointer(this.attribs.aNormal, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(this.attribs.aNormal);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer.idx);
+
+                const drawMode = buffer.isLines || isWireframe ? gl.LINES : gl.TRIANGLES;
+                gl.drawElements(drawMode, buffer.count, gl.UNSIGNED_SHORT, 0);
+            }
+        }
+
+        // ====================================================================
+        // 4. APPLICATION & INTERACTION CONTROLLER
+        // ====================================================================
+
+        window.onload = function() {
+            const canvas = document.getElementById('webgl-canvas');
+            const renderer = new WebGLRenderer(canvas);
+            const physicsWorld = new PhysicsWorld();
+
+            // Camera Controls State
+            const camera = {
+                distance: 22,
+                theta: Math.PI / 4,
+                phi: Math.PI / 6,
+                target: new Vec3(0, 3, 0),
+                pos: new Vec3()
+            };
+
+            function updateCameraPosition() {
+                camera.pos.x = camera.target.x + camera.distance * Math.cos(camera.phi) * Math.sin(camera.theta);
+                camera.pos.y = camera.target.y + camera.distance * Math.sin(camera.phi);
+                camera.pos.z = camera.target.z + camera.distance * Math.cos(camera.phi) * Math.cos(camera.theta);
+            }
+            updateCameraPosition();
+
+            // Lighting Direction
+            const lightDir = new Vec3(-0.5, -1.0, -0.5).normalize();
+            let lightAngle = 0;
+
+            // UI Parameter State
+            const params = {
+                speed: 22,
+                size: 1.0,
+                wireframe: false,
+                rotateLight: true
+            };
+
+            // Color palette generator
+            function getRandomColor() {
+                const colors = [
+                    [0.95, 0.35, 0.35], // Red
+                    [0.35, 0.75, 0.95], // Light Blue
+                    [0.45, 0.85, 0.45], // Green
+                    [0.95, 0.75, 0.25], // Amber
+                    [0.75, 0.45, 0.95], // Purple
+                    [0.95, 0.45, 0.75]  // Pink
+                ];
+                return colors[Math.floor(Math.random() * colors.length)];
+            }
+
+            // Spawn Functions
+            function spawnProjectile(type) {
+                const body = new RigidBody(
+                    type,
+                    new Vec3(params.size, params.size, params.size),
+                    1.0
+                );
+
+                // Spawn at camera location
+                body.position.copy(camera.pos);
+                body.color = getRandomColor();
+                body.wireframe = params.wireframe;
+
+                // Calculate direction vector towards camera target with slight offset
+                const dir = Vec3.sub(camera.target, camera.pos).normalize();
+                body.velocity = Vec3.scale(dir, params.speed);
+
+                // Add random initial angular spin
+                body.angularVelocity.set(
+                    (Math.random() - 0.5) * 8,
+                    (Math.random() - 0.5) * 8,
+                    (Math.random() - 0.5) * 8
+                );
+
+                physicsWorld.addBody(body);
+            }
+
+            function buildPyramid() {
+                physicsWorld.clear();
+                const baseSize = 5;
+                const boxSize = 1.0;
+                const startY = boxSize * 0.5;
+
+                for (let level = 0; level < baseSize; level++) {
+                    const count = baseSize - level;
+                    const offset = (count - 1) * boxSize * 0.55;
+
+                    for (let x = 0; x < count; x++) {
+                        for (let z = 0; z < count; z++) {
+                            const body = new RigidBody(SHAPE_CUBE, new Vec3(boxSize, boxSize, boxSize), 1.0);
+                            body.position.set(
+                                x * boxSize * 1.1 - offset,
+                                startY + level * boxSize * 1.05,
+                                z * boxSize * 1.1 - offset
+                            );
+                            body.color = getRandomColor();
+                            body.wireframe = params.wireframe;
+                            physicsWorld.addBody(body);
+                        }
+                    }
+                }
+            }
+
+            function buildWall() {
+                physicsWorld.clear();
+                const cols = 6;
+                const rows = 6;
+                const boxSize = 1.0;
+
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        const body = new RigidBody(SHAPE_CUBE, new Vec3(boxSize, boxSize, boxSize), 1.0);
+                        body.position.set(
+                            (c - cols / 2) * 1.05,
+                            0.5 + r * 1.05,
+                            0
+                        );
+                        body.color = getRandomColor();
+                        body.wireframe = params.wireframe;
+                        physicsWorld.addBody(body);
+                    }
+                }
+            }
+
+            function buildSphereRain() {
+                physicsWorld.clear();
+                for (let i = 0; i < 35; i++) {
+                    const size = 0.6 + Math.random() * 0.8;
+                    const body = new RigidBody(SHAPE_SPHERE, new Vec3(size, size, size), 1.0);
+                    body.position.set(
+                        (Math.random() - 0.5) * 8,
+                        4 + Math.random() * 12,
+                        (Math.random() - 0.5) * 8
+                    );
+                    body.color = getRandomColor();
+                    body.wireframe = params.wireframe;
+                    physicsWorld.addBody(body);
+                }
+            }
+
+            function buildMixScene() {
+                physicsWorld.clear();
+                buildPyramid();
+                // Add a heavy sphere on top
+                const sphere = new RigidBody(SHAPE_SPHERE, new Vec3(2.2, 2.2, 2.2), 5.0);
+                sphere.position.set(0, 10, 0);
+                sphere.color = [0.95, 0.2, 0.2];
+                sphere.wireframe = params.wireframe;
+                physicsWorld.addBody(sphere);
+            }
+
+            // Initial scene setup
+            buildPyramid();
+
+            // Bind UI DOM Controls
+            document.getElementById('btn-shoot-cube').onclick = () => spawnProjectile(SHAPE_CUBE);
+            document.getElementById('btn-shoot-sphere').onclick = () => spawnProjectile(SHAPE_SPHERE);
+            document.getElementById('btn-drop-stack').onclick = () => buildPyramid();
+            document.getElementById('btn-reset').onclick = () => physicsWorld.clear();
+
+            document.getElementById('btn-preset-pyramid').onclick = () => buildPyramid();
+            document.getElementById('btn-preset-wall').onclick = () => buildWall();
+            document.getElementById('btn-preset-chaos').onclick = () => buildSphereRain();
+            document.getElementById('btn-preset-mix').onclick = () => buildMixScene();
+
+            // Range inputs
+            const gravityInput = document.getElementById('param-gravity');
+            gravityInput.oninput = (e) => {
+                const val = parseFloat(e.target.value);
+                physicsWorld.gravity.y = val;
+                document.getElementById('val-gravity').textContent = `${val.toFixed(1)} m/s²`;
+            };
+
+            const restitutionInput = document.getElementById('param-restitution');
+            restitutionInput.oninput = (e) => {
+                const val = parseFloat(e.target.value);
+                physicsWorld.globalRestitution = val;
+                physicsWorld.bodies.forEach(b => b.restitution = val);
+                document.getElementById('val-restitution').textContent = val.toFixed(2);
+            };
+
+            const frictionInput = document.getElementById('param-friction');
+            frictionInput.oninput = (e) => {
+                const val = parseFloat(e.target.value);
+                physicsWorld.globalFriction = val;
+                physicsWorld.bodies.forEach(b => b.friction = val);
+                document.getElementById('val-friction').textContent = val.toFixed(2);
+            };
+
+            const speedInput = document.getElementById('param-speed');
+            speedInput.oninput = (e) => {
+                params.speed = parseFloat(e.target.value);
+                document.getElementById('val-speed').textContent = `${params.speed} m/s`;
+            };
+
+            const sizeInput = document.getElementById('param-size');
+            sizeInput.oninput = (e) => {
+                params.size = parseFloat(e.target.value);
+                document.getElementById('val-size').textContent = params.size.toFixed(1);
+            };
+
+            const wireframeInput = document.getElementById('param-wireframe');
+            wireframeInput.onchange = (e) => {
+                params.wireframe = e.target.checked;
+                physicsWorld.bodies.forEach(b => b.wireframe = params.wireframe);
+            };
+
+            document.getElementById('param-rotate-light').onchange = (e) => {
+                params.rotateLight = e.target.checked;
+            };
+
+            // Mouse & Pointer Orbit Controls
+            let isDragging = false;
+            let dragButton = 0; // 0: left, 2: right
+            let lastMouseX = 0, lastMouseY = 0;
+
+            canvas.onpointerdown = (e) => {
+                isDragging = true;
+                dragButton = e.button;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                canvas.setPointerCapture(e.pointerId);
+            };
+
+            canvas.onpointermove = (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - lastMouseX;
+                const dy = e.clientY - lastMouseY;
+
+                if (dragButton === 0) {
+                    // Left Click: Rotate Orbit
+                    camera.theta -= dx * 0.008;
+                    camera.phi = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, camera.phi + dy * 0.008));
+                } else if (dragButton === 2) {
+                    // Right Click: Pan Target
+                    const forward = Vec3.sub(camera.target, camera.pos).normalize();
+                    const right = Vec3.cross(forward, new Vec3(0, 1, 0)).normalize();
+                    const up = Vec3.cross(right, forward).normalize();
+
+                    camera.target.add(Vec3.scale(right, -dx * 0.02));
+                    camera.target.add(Vec3.scale(up, dy * 0.02));
+                }
+
+                updateCameraPosition();
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            };
+
+            canvas.onpointerup = (e) => {
+                isDragging = false;
+                canvas.releasePointerCapture(e.pointerId);
+            };
+
+            canvas.oncontextmenu = (e) => e.preventDefault();
+
+            canvas.onwheel = (e) => {
+                camera.distance = Math.max(5, Math.min(60, camera.distance + e.deltaY * 0.02));
+                updateCameraPosition();
+                e.preventDefault();
+            };
+
+            // Main Animation & Physics Loop
+            let lastTime = performance.now();
+            let frameCount = 0;
+            let lastFpsTime = performance.now();
+
+            function animate(currentTime) {
+                const dt = Math.min((currentTime - lastTime) / 1000, 0.05); // Cap delta time
+                lastTime = currentTime;
+
+                // FPS Counter Update
+                frameCount++;
+                if (currentTime - lastFpsTime >= 1000) {
+                    document.getElementById('fps-counter').textContent = frameCount;
+                    document.getElementById('body-counter').textContent = physicsWorld.bodies.length;
+                    frameCount = 0;
+                    lastFpsTime = currentTime;
+                }
+
+                // 1. Physics Step
+                physicsWorld.step(dt);
+
+                // Remove out-of-bounds fallen objects to keep performance high
+                physicsWorld.bodies = physicsWorld.bodies.filter(b => b.position.y > -20);
+
+                // 2. Animate Light (optional)
+                if (params.rotateLight) {
+                    lightAngle += dt * 0.4;
+                    lightDir.x = Math.cos(lightAngle);
+                    lightDir.z = Math.sin(lightAngle);
+                    lightDir.normalize();
+                }
+
+                // 3. WebGL Render Step
+                renderer.render({
+                    cameraPos: camera.pos,
+                    cameraTarget: camera.target,
+                    lightDir: lightDir,
+                    bodies: physicsWorld.bodies
+                });
+
+                requestAnimationFrame(animate);
+            }
+
+            // Start loop on window load
+            requestAnimationFrame(animate);
+        };
+    </script>
+</body>
+</html>
