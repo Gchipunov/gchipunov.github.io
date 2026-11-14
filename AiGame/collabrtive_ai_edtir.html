@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Collab RTS Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global State
+        window.appState = {
+            appId: typeof __app_id !== 'undefined' ? __app_id : 'default-rts-editor',
+            roomId: null,
+            userId: null,
+            isHost: false,
+            players: {},
+            buildConfig: null,
+            objects: {}
+        };
+
+        // UI Utils
+        const $ = id => document.getElementById(id);
+        const show = id => {
+            ['ui-auth', 'ui-join', 'ui-lobby', 'ui-editor'].forEach(el => $(el).classList.add('hidden'));
+            $(id).classList.remove('hidden');
+        };
+        const notify = (msg) => {
+            const el = document.createElement('div');
+            el.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-4 py-2 rounded shadow-lg z-50 animate-bounce';
+            el.innerText = msg;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 3000);
+        };
+
+        // Firebase Init
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+            // Fallback config if not provided by environment
+            projectId: "demo-project" 
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        window.db = db; // Export for three.js interaction
+
+        async function initAuth() {
+            try {
+                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                let userCredential;
+                if (token && token !== "") {
+                    userCredential = await signInWithCustomToken(auth, token);
+                } else {
+                    userCredential = await signInAnonymously(auth);
+                }
+                window.appState.userId = userCredential.user.uid;
+                show('ui-join');
+            } catch (e) {
+                console.error("Auth Error", e);
+                $('auth-status').innerText = "Authentication failed.";
+            }
+        }
+
+        // Database Paths Helper
+        const getRoomRef = (roomId) => doc(db, 'artifacts', window.appState.appId, 'public', 'data', 'rooms', roomId);
+        const getPlayersRef = (roomId) => collection(getRoomRef(roomId), 'players');
+        const getObjectsRef = (roomId) => collection(getRoomRef(roomId), 'objects');
+
+        // Room Logic
+        window.createRoom = async () => {
+            try {
+                // Generate a 6-character alphanumeric token
+                const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+                window.appState.roomId = roomId;
+                window.appState.isHost = true;
+                
+                await setDoc(getRoomRef(roomId), {
+                    hostId: window.appState.userId,
+                    state: 'lobby',
+                    createdAt: Date.now()
+                });
+                
+                await joinRoom(roomId);
+            } catch (e) {
+                console.error("Error creating room:", e);
+                notify("Failed to create room. Please try again.");
+            }
+        };
+
+        window.joinExistingRoom = async () => {
+            const code = $('room-code-input').value.toUpperCase().trim();
+            if (!code) {
+                notify("Please enter a Room Code.");
+                return;
+            }
+            if (code.length < 5) {
+                notify("Invalid Room Code. It should be 6 characters.");
+                return;
+            }
+            
+            try {
+                const roomSnap = await getDoc(getRoomRef(code));
+                if (roomSnap.exists()) {
+                    window.appState.roomId = code;
+                    // Restore host status if the creator rejoins
+                    window.appState.isHost = (roomSnap.data().hostId === window.appState.userId);
+                    await joinRoom(code);
+                } else {
+                    notify("Room not found! Check the code and try again.");
+                }
+            } catch (e) {
+                console.error("Error joining room:", e);
+                notify("Error connecting to room.");
+            }
+        };
+        
+        window.copyRoomCode = () => {
+            const code = window.appState.roomId;
+            if (!code) return;
+            try {
+                // iFrame safe clipboard copy fallback
+                const textArea = document.createElement("textarea");
+                textArea.value = code;
+                textArea.style.position = "fixed"; // prevent scrolling to bottom of page in MS Edge
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                notify("Room Code copied: " + code);
+            } catch (err) {
+                console.error("Copy failed", err);
+                notify("Failed to copy code.");
+            }
+        };
+
+        async function joinRoom(roomId) {
+            const playerRef = doc(getPlayersRef(roomId), window.appState.userId);
+            await setDoc(playerRef, {
+                id: window.appState.userId,
+                name: `Commander_${window.appState.userId.substring(0,4)}`,
+                color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'),
+                isReady: false
+            });
+
+            $('display-room-code').innerText = roomId;
+            show('ui-lobby');
+            if (window.appState.isHost) {
+                $('btn-start-editor').classList.remove('hidden');
+            }
+
+            // Listen to Room State
+            onSnapshot(getRoomRef(roomId), (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    if (data.state === 'editor' && !window.threeInitialized) {
+                        startThreeJSEditor();
+                    }
+                }
+            }, (error) => console.error(error));
+
+            // Listen to Players
+            onSnapshot(getPlayersRef(roomId), (snapshot) => {
+                const list = $('player-list');
+                list.innerHTML = '';
+                window.appState.players = {};
+                
+                let allReady = true;
+                snapshot.forEach(doc => {
+                    const p = doc.data();
+                    window.appState.players[p.id] = p;
+                    const el = document.createElement('div');
+                    el.className = `p-2 mb-2 rounded bg-gray-800 border ${p.isReady ? 'border-green-500' : 'border-gray-600'} flex justify-between items-center`;
+                    el.innerHTML = `
+                        <div class="flex items-center gap-2">
+                            <div class="w-4 h-4 rounded-full" style="background-color:${p.color}"></div>
+                            <span>${p.name}</span>
+                        </div>
+                        <span class="text-xs ${p.isReady ? 'text-green-400' : 'text-yellow-400'}">
+                            ${p.isReady ? 'Ready' : 'In Lobby'}
+                        </span>
+                    `;
+                    list.appendChild(el);
+                    
+                    if (!p.isReady) allReady = false;
+                });
+
+                if (window.appState.isHost) {
+                    $('btn-start-editor').disabled = !allReady;
+                    $('btn-start-editor').innerText = allReady ? 'Start Editor' : 'Waiting for Players...';
+                }
+            }, (error) => console.error(error));
+        }
+
+        window.toggleReady = async () => {
+            const p = window.appState.players[window.appState.userId];
+            if (!p) return;
+            const playerRef = doc(getPlayersRef(window.appState.roomId), window.appState.userId);
+            await updateDoc(playerRef, { isReady: !p.isReady });
+        };
+
+        window.startEditorSession = async () => {
+            if (!window.appState.isHost) return;
+            await updateDoc(getRoomRef(window.appState.roomId), { state: 'editor' });
+        };
+
+        // UI toggles & Gemini Hammer Logic
+        window.toggleHammer = () => {
+            const modal = document.getElementById('hammer-modal');
+            modal.classList.toggle('hidden');
+            if (!modal.classList.contains('hidden')) {
+                document.getElementById('hammer-prompt').focus();
+            }
+        };
+        
+        window.cancelHammer = () => {
+            document.getElementById('hammer-modal').classList.add('hidden');
+            document.getElementById('hammer-prompt').value = '';
+            window.appState.buildConfig = null;
+            document.getElementById('build-status').classList.add('hidden');
+        };
+
+        window.submitBuildPrompt = async () => {
+            const prompt = document.getElementById('hammer-prompt').value.trim();
+            if (!prompt) return;
+
+            const btn = document.getElementById('hammer-submit');
+            btn.innerText = 'Generating...';
+            btn.disabled = true;
+
+            const systemPrompt = `You are a 3D Map Editor Assistant.
+The user wants to build an object. Interpret their prompt and output a JSON configuration.
+You must choose ONE of these geometries: "box", "cylinder", or "sphere".
+You must provide a hex color based on their description.
+You must provide a scale (a float between 0.5 and 10.0, default 1.0).
+Output ONLY the JSON, wrapped in \`\`\`json and \`\`\`.
+Example:
+\`\`\`json
+{
+  "geometry": "box",
+  "color": "#800080",
+  "scale": 5.0
+}
+\`\`\``;
+
+            const payload = {
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            try {
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                
+                const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
+                if (jsonMatch) {
+                    try {
+                        const config = JSON.parse(jsonMatch[1]);
+                        window.appState.buildConfig = config;
+                        
+                        // Close modal and set build mode UI
+                        document.getElementById('hammer-modal').classList.add('hidden');
+                        document.getElementById('build-status').classList.remove('hidden');
+                        document.getElementById('build-status').innerHTML = `<span>🔨 Placing: ${config.geometry}</span> <div class="w-3 h-3 rounded-full border border-white" style="background-color:${config.color}"></div>`;
+                    } catch(e) {
+                        console.error("Failed to parse AI JSON", e);
+                        notify("AI generated invalid data.");
+                    }
+                } else {
+                    notify("Failed to interpret prompt.");
+                }
+            } catch (e) {
+                console.error(e);
+                notify("Error contacting AI.");
+            }
+            btn.innerText = 'Generate';
+            btn.disabled = false;
+            document.getElementById('hammer-prompt').value = '';
+        };
+
+        // Initialize App
+        initAuth();
+    </script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #0f172a; font-family: 'Inter', sans-serif; color: white; }
+        #three-canvas { width: 100%; height: 100%; display: block; outline: none; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Screen 1: Loading Auth -->
+    <div id="ui-auth" class="absolute inset-0 flex items-center justify-center bg-slate-900 z-50">
+        <div class="text-center">
+            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p id="auth-status" class="text-slate-400 animate-pulse">Connecting to Command Center...</p>
+        </div>
+    </div>
+
+    <!-- Screen 2: Join / Create -->
+    <div id="ui-join" class="hidden absolute inset-0 flex items-center justify-center bg-slate-900 z-40 bg-cover bg-center" style="background-image: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);">
+        <div class="bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700 w-full max-w-md text-center">
+            <h1 class="text-3xl font-black mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">RTS Collab Editor</h1>
+            
+            <button onclick="createRoom()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold shadow-lg transition-transform transform hover:scale-105 mb-6">Create New Room</button>
+            
+            <div class="flex items-center mb-6">
+                <div class="flex-grow h-px bg-slate-600"></div>
+                <span class="px-4 text-slate-400 text-sm">OR</span>
+                <div class="flex-grow h-px bg-slate-600"></div>
+            </div>
+
+            <input type="text" id="room-code-input" placeholder="Enter Room Code" class="w-full bg-slate-900 border border-slate-600 rounded p-3 text-center mb-4 text-lg font-mono uppercase tracking-widest focus:outline-none focus:border-blue-500">
+            <button onclick="joinExistingRoom()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold shadow-lg transition-transform transform hover:scale-105">Join Room</button>
+        </div>
+    </div>
+
+    <!-- Screen 3: Lobby (Simplified) -->
+    <div id="ui-lobby" class="hidden absolute inset-0 flex items-center justify-center bg-slate-900 z-30 p-4">
+        <div class="bg-slate-800 rounded-xl shadow-2xl border border-slate-700 w-full max-w-3xl h-[60vh] flex overflow-hidden">
+            
+            <!-- Left: Players & Status -->
+            <div class="w-1/2 bg-slate-800/50 p-6 border-r border-slate-700 flex flex-col">
+                <h2 class="text-2xl font-bold mb-2 flex items-center gap-2">
+                    Lobby: <span id="display-room-code" class="text-blue-400 font-mono tracking-wider"></span>
+                    <button onclick="copyRoomCode()" class="bg-blue-600/80 hover:bg-blue-500 text-xs px-3 py-1.5 rounded transition-colors shadow" title="Copy to Clipboard">Copy</button>
+                </h2>
+                <p class="text-slate-400 text-sm mb-6">Wait for all commanders to ready up before deploying.</p>
+                
+                <h3 class="font-bold text-slate-300 mb-2 uppercase tracking-wide text-xs">Connected Commanders</h3>
+                <div id="player-list" class="flex-1 overflow-y-auto space-y-2 font-mono text-sm">
+                    <!-- Populated by Firebase -->
+                </div>
+
+                <button id="btn-start-editor" onclick="startEditorSession()" class="hidden w-full mt-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 rounded-lg font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all">Waiting for Players...</button>
+            </div>
+
+            <!-- Right: Ready Controls -->
+            <div class="w-1/2 p-6 flex flex-col bg-slate-900 justify-center items-center">
+                <div class="text-center mb-8">
+                    <h3 class="font-black text-2xl mb-2 text-slate-200">Prepare for Deployment</h3>
+                    <p class="text-sm text-slate-400">Mark yourself ready when you're prepared to edit the map.</p>
+                </div>
+                
+                <button onclick="toggleReady()" class="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-lg shadow-[0_0_15px_rgba(5,150,105,0.4)] transition-transform hover:scale-105">
+                    Toggle Ready Status
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen 4: Editor (With Hammer UI) -->
+    <div id="ui-editor" class="hidden absolute inset-0 z-20">
+        <!-- Overlay UI -->
+        <div class="absolute top-0 left-0 w-full p-4 pointer-events-none flex justify-between z-10">
+            <div class="bg-slate-900/80 backdrop-blur border border-slate-700 p-4 rounded-xl pointer-events-auto flex flex-col gap-2 shadow-lg">
+                <h2 class="font-black text-xl bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">Collaborative Map Editor</h2>
+                <p class="text-xs text-slate-400">Left Click (Hold): Rotate | Right Click: Pan | Scroll: Zoom</p>
+                <div class="flex gap-3 mt-2 items-center">
+                    <button onclick="toggleHammer()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-4 rounded shadow-lg flex items-center gap-2 transition-transform hover:scale-105">
+                        <span>🔨</span> Build Tool
+                    </button>
+                    <div id="build-status" class="hidden bg-emerald-600/20 border border-emerald-500 text-emerald-400 px-3 py-2 rounded text-sm flex items-center gap-2 cursor-pointer hover:bg-emerald-600/30" onclick="cancelHammer()" title="Click to cancel placement">
+                        Mode: Ready to Place
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-slate-900/80 backdrop-blur border border-slate-700 p-4 rounded-xl pointer-events-auto w-64 max-h-64 flex flex-col shadow-lg">
+                <h3 class="font-bold text-sm text-slate-300 mb-2">Live Placements</h3>
+                <div id="editor-log" class="flex-1 overflow-y-auto text-xs font-mono text-slate-400 space-y-1"></div>
+            </div>
+        </div>
+
+        <!-- Hammer Prompt Modal -->
+        <div id="hammer-modal" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-slate-800 border border-slate-600 p-6 rounded-xl shadow-2xl z-30 pointer-events-auto w-full max-w-md">
+            <h3 class="font-bold text-xl mb-2 text-amber-400 flex items-center gap-2"><span>🔨</span> AI Build Prompt</h3>
+            <p class="text-sm text-slate-400 mb-4">Describe the object you want to build (e.g., "A giant purple enemy base" or "small yellow tank"). The AI will generate the 3D geometry.</p>
+            <input type="text" id="hammer-prompt" placeholder="Describe your object..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 mb-4 text-white outline-none focus:border-amber-500 font-mono shadow-inner" onkeypress="if(event.key === 'Enter') submitBuildPrompt()">
+            <div class="flex justify-end gap-3">
+                <button onclick="cancelHammer()" class="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
+                <button onclick="submitBuildPrompt()" id="hammer-submit" class="px-6 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg font-bold shadow transition-colors">Generate</button>
+            </div>
+        </div>
+
+        <canvas id="three-canvas"></canvas>
+    </div>
+
+    <!-- Three.js Editor Logic -->
+    <script type="module">
+        import { collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        window.startThreeJSEditor = () => {
+            window.threeInitialized = true;
+            show('ui-editor');
+
+            const canvas = document.getElementById('three-canvas');
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+            scene.fog = new THREE.Fog(0x0f172a, 50, 200);
+
+            // Perspective Camera
+            const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.set(30, 40, 50);
+            camera.lookAt(0, 0, 0);
+
+            // OrbitControls
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.05; // Don't go below ground
+            controls.mouseButtons = {
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN
+            };
+
+            // Lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 50, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // Grid & Ground
+            const gridHelper = new THREE.GridHelper(100, 50, 0x334155, 0x1e293b);
+            scene.add(gridHelper);
+
+            const planeGeo = new THREE.PlaneGeometry(100, 100);
+            planeGeo.rotateX(-Math.PI / 2);
+            const planeMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, depthWrite: false });
+            const ground = new THREE.Mesh(planeGeo, planeMat);
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Raycaster
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            
+            // Meshes Dictionary
+            const placedMeshes = {};
+
+            // Render Loop
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update(); // Required for damping
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            // Interaction for Placement
+            let downPos = {x: 0, y: 0};
+            canvas.addEventListener('pointerdown', (e) => {
+                downPos = {x: e.clientX, y: e.clientY};
+            });
+
+            canvas.addEventListener('pointerup', (e) => {
+                if(e.button !== 0) return; // Only process left clicks
+                
+                // If it was a drag (OrbitControls rotation), ignore
+                const dist = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
+                if (dist > 5) return;
+
+                // Proceed only if in Build Mode
+                if (!window.appState.buildConfig) return;
+
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                
+                const intersects = raycaster.intersectObject(ground);
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    // Snap to grid (2x2 units per cell)
+                    const x = Math.round(point.x / 2) * 2;
+                    const z = Math.round(point.z / 2) * 2;
+
+                    const config = window.appState.buildConfig;
+
+                    // Save to Firebase
+                    const roomId = window.appState.roomId;
+                    const objRef = collection(window.db, 'artifacts', window.appState.appId, 'public', 'data', 'rooms', roomId, 'objects');
+                    
+                    addDoc(objRef, {
+                        x: x,
+                        y: 0,
+                        z: z,
+                        geometry: config.geometry || 'box',
+                        color: config.color || '#ffffff',
+                        scale: config.scale || 1,
+                        ownerId: window.appState.userId,
+                        timestamp: Date.now()
+                    });
+
+                    // Consume the config (one click = one placement) to prevent accidental spam
+                    window.appState.buildConfig = null;
+                    document.getElementById('build-status').classList.add('hidden');
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // Listen to Firebase Objects (Real-time Sync)
+            const roomId = window.appState.roomId;
+            const objRef = collection(window.db, 'artifacts', window.appState.appId, 'public', 'data', 'rooms', roomId, 'objects');
+            
+            onSnapshot(objRef, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "added") {
+                        const data = change.doc.data();
+                        const id = change.doc.id;
+                        
+                        if (!placedMeshes[id]) {
+                            const player = window.appState.players[data.ownerId];
+                            
+                            const scale = parseFloat(data.scale) || 1;
+                            const color = data.color || '#ffffff';
+
+                            let geo;
+                            let heightOffset = 0;
+                            if (data.geometry === 'cylinder') {
+                                geo = new THREE.CylinderGeometry(1 * scale, 1 * scale, 2 * scale, 16);
+                                heightOffset = scale; // Half of height 2
+                            } else if (data.geometry === 'sphere') {
+                                geo = new THREE.SphereGeometry(1.2 * scale, 16, 16);
+                                heightOffset = 1.2 * scale; // Radius
+                            } else {
+                                geo = new THREE.BoxGeometry(2 * scale, 2 * scale, 2 * scale);
+                                heightOffset = scale; // Half of height 2
+                            }
+                            
+                            const mat = new THREE.MeshStandardMaterial({ color: color });
+                            const mesh = new THREE.Mesh(geo, mat);
+                            
+                            mesh.position.set(data.x, heightOffset, data.z);
+                            mesh.castShadow = true;
+                            mesh.receiveShadow = true;
+                            
+                            // Pop animation
+                            mesh.scale.set(0.1, 0.1, 0.1);
+                            let t = 0;
+                            const pop = setInterval(() => {
+                                t += 0.1;
+                                const s = Math.min(1, t);
+                                mesh.scale.set(s,s,s);
+                                if(t >= 1) clearInterval(pop);
+                            }, 16);
+
+                            scene.add(mesh);
+                            placedMeshes[id] = mesh;
+
+                            // Update Log
+                            const log = document.getElementById('editor-log');
+                            const entry = document.createElement('div');
+                            entry.innerHTML = `<span style="color:${color}">■</span> ${player?.name || 'Player'} placed ${data.geometry}`;
+                            log.appendChild(entry);
+                            log.scrollTop = log.scrollHeight;
+                        }
+                    }
+                });
+            }, (error) => console.error("Sync Error:", error));
+        };
+    </script>
+</body>
+</html>
