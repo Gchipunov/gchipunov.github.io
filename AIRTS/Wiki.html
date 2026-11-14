@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Wiki: Initial Ollama Loop Call &amp; Single-Prompt Payload</title>
+<style>
+  :root {
+    --bg: #f8f9fa;
+    --surface: #ffffff;
+    --border: #a2a9b1;
+    --border-light: #eaecf0;
+    --text: #202122;
+    --muted: #54595d;
+    --link: #3366cc;
+    --code-bg: #f6f8fa;
+    --accent: #2a4b8d;
+    --callout: #eaf3ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Lato, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  .wiki-wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 24px;
+    padding: 20px;
+  }
+  aside.sidebar {
+    background: var(--surface);
+    border: 1px solid var(--border-light);
+    padding: 16px;
+    height: fit-content;
+    position: sticky;
+    top: 16px;
+    font-size: 13px;
+  }
+  aside.sidebar h3 {
+    margin: 0 0 10px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 6px;
+  }
+  aside.sidebar ul { list-style: none; padding: 0; margin: 0; }
+  aside.sidebar li { margin-bottom: 7px; }
+  aside.sidebar a { color: var(--link); text-decoration: none; }
+  aside.sidebar a:hover { text-decoration: underline; }
+
+  main.article {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 28px 36px;
+  }
+  h1.page-title {
+    font-family: "Linux Libertine", Georgia, Times, serif;
+    font-size: 28px;
+    font-weight: normal;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+    margin: 0 0 8px 0;
+  }
+  .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+  h2 {
+    font-family: "Linux Libertine", Georgia, Times, serif;
+    font-size: 21px;
+    font-weight: normal;
+    border-bottom: 1px solid var(--border-light);
+    padding-bottom: 4px;
+    margin-top: 28px;
+  }
+  h3 { font-size: 16px; margin-top: 20px; color: var(--text); }
+  p { margin: 10px 0; font-size: 14.5px; }
+
+  .infobox {
+    float: right;
+    width: 280px;
+    margin: 0 0 16px 20px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 12.5px;
+    border-collapse: collapse;
+  }
+  .infobox th {
+    background: #cedff2;
+    padding: 7px 10px;
+    text-align: center;
+    font-size: 13.5px;
+  }
+  .infobox td {
+    padding: 6px 10px;
+    border-top: 1px solid var(--border-light);
+    vertical-align: top;
+  }
+  .infobox td.label { font-weight: bold; width: 38%; color: var(--muted); }
+
+  .callout {
+    background: var(--callout);
+    border-left: 4px solid var(--accent);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13.5px;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border-light);
+    padding: 14px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.45;
+    margin: 12px 0;
+  }
+  code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  pre code { background: none; padding: 0; }
+
+  table.wikitable {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13.5px;
+  }
+  table.wikitable th, table.wikitable td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+  }
+  table.wikitable th { background: var(--bg); }
+
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border-light);
+    padding: 14px;
+    margin: 16px 0;
+    font-size: 12.5px;
+    text-align: center;
+    flex-wrap: wrap;
+  }
+  .flow-node {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    border-radius: 4px;
+    flex: 1;
+    min-width: 140px;
+  }
+  .flow-arrow { font-weight: bold; color: var(--accent); font-size: 16px; }
+
+  @media (max-width: 820px) {
+    .wiki-wrap { grid-template-columns: 1fr; }
+    aside.sidebar { position: static; }
+    .infobox { float: none; width: 100%; margin: 12px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wiki-wrap">
+  <aside class="sidebar">
+    <h3>Contents</h3>
+    <ul>
+      <li><a href="#overview">1. Handshake Overview</a></li>
+      <li><a href="#step-1-tags">2. Step 1: Model Discovery (GET /api/tags)</a></li>
+      <li><a href="#step-2-payload">3. Step 2: Single Prompt + Code Payload</a></li>
+      <li><a href="#step-3-chat">4. Step 3: Executing POST /api/chat</a></li>
+      <li><a href="#step-4-extract">5. Step 4: Parsing &amp; Code Extraction</a></li>
+      <li><a href="#minimal-curl">6. Raw cURL Verification</a></li>
+    </ul>
+  </aside>
+
+  <main class="article">
+    <h1 class="page-title">Ollama Agent Loop: Initial Handshake &amp; Single-Prompt Architecture</h1>
+    <div class="subtitle">From RTS Engine &amp; WebGL Multi-Agent Documentation &bull; Pure HTML/CSS Static Reference</div>
+
+    <table class="infobox">
+      <tr><th colspan="2">Ollama REST Loop Protocol</th></tr>
+      <tr><td class="label">Default Endpoint</td><td><code>http://localhost:11434</code></td></tr>
+      <tr><td class="label">Discovery Route</td><td><code>GET /api/tags</code></td></tr>
+      <tr><td class="label">Inference Route</td><td><code>POST /api/chat</code></td></tr>
+      <tr><td class="label">Stream Mode</td><td><code>"stream": false</code> (atomic JSON)</td></tr>
+      <tr><td class="label">Code Injection</td><td>Embedded inside <code>messages[1].content</code></td></tr>
+    </table>
+
+    <p id="overview">
+      When an autonomous coding loop initializes—whether running inside <code>agent_studio.html</code> (Browser JS),
+      <code>ollama_pi_agent.py</code> (Raspberry Pi Zero Python 3), or <code>agent_loop.cpp</code> (C++11/17)—it follows a
+      deterministic <strong>two-request handshake</strong>. First, it queries the local or LAN Ollama daemon to resolve the
+      active model tag; second, it dispatches a single structured <code>POST /api/chat</code> request containing the
+      role constraints, the task prompt, and the current source code snapshot.
+    </p>
+
+    <div class="flow-diagram">
+      <div class="flow-node"><strong>1. Loop Init</strong><br>Load starter RTS code</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node"><strong>2. GET /api/tags</strong><br>Resolve <code>models[0].name</code></div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node"><strong>3. Build Prompt</strong><br>Task + <code>[jscode]</code> block</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-node"><strong>4. POST /api/chat</strong><br>Receive updated code</div>
+    </div>
+
+    <h2 id="step-1-tags">1. Step 1: Model Discovery (<code>GET /api/tags</code>)</h2>
+    <p>
+      Rather than hardcoding a model string that might not exist on the host machine, the loop starts by sending an
+      HTTP <code>GET</code> request to <code>/api/tags</code>. Ollama returns a JSON manifest of all locally pulled weights.
+    </p>
+    <pre><code>// HTTP Request
+GET http://localhost:11434/api/tags HTTP/1.1
+Accept: application/json
+
+// HTTP Response (200 OK)
+{
+  "models": [
+    {
+      "name": "qwen2.5-coder:latest",
+      "size": 4683075271,
+      "details": { "family": "qwen2", "parameter_size": "7.6B" }
+    }
+  ]
+}</code></pre>
+    <p>
+      The orchestrator extracts <code>response.models[0].name</code> (e.g., <code>"qwen2.5-coder:latest"</code>) and assigns it
+      to both the <strong>Coder Agent</strong> and the <strong>Reviewer Agent</strong> for Iteration #1.
+    </p>
+
+    <h2 id="step-2-payload">2. Step 2: Constructing the Single Prompt with Embedded Code</h2>
+    <p>
+      In Iteration #1, the loop combines three pieces into a single user message: the <strong>shared problem goal</strong>,
+      the <strong>output formatting rule</strong>, and the <strong>starter RTS source code</strong> wrapped in fenced markers.
+    </p>
+
+    <table class="wikitable">
+      <thead>
+        <tr>
+          <th>Message Role</th>
+          <th>Purpose in Loop</th>
+          <th>Content Structure</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>system</code></td>
+          <td>Enforces language &amp; output boundaries</td>
+          <td>Instructs the model to return only valid WebGL HTML/JS or C++11 inside a single fenced code block without prose truncation.</td>
+        </tr>
+        <tr>
+          <td><code>user</code></td>
+          <td>Delivers 1 prompt + baseline code</td>
+          <td>Concatenates the task description, the <code>[jscode]</code> format directive, and the starter 3-building / 3-unit code.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="step-3-chat">3. Step 3: Executing <code>POST /api/chat</code> (Exact Wire Payload)</h2>
+    <p>
+      Below is the exact JSON body transmitted by the loop script on its very first coding iteration. Setting
+      <code>"stream": false</code> ensures Ollama buffers the entire generated file and returns a single parseable JSON object.
+    </p>
+    <pre><code>POST http://localhost:11434/api/chat HTTP/1.1
+Content-Type: application/json
+
+{
+  "model": "qwen2.5-coder:latest",
+  "stream": false,
+  "options": {
+    "temperature": 0.25
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an expert WebGL and JavaScript RTS game engine programmer. Write a complete, self-contained single-file HTML5 + WebGL game featuring 3 structures (Command Center, Power Plant, War Factory) and 3 units (MCV, Crusader Tank, Ranger Squad). Output ONLY valid HTML inside ```html ... ```."
+    },
+    {
+      "role": "user",
+      "content": "SHARED PROBLEM:\nBuild a playable WebGL RTS mini-game with 3 structures and 3 units with mouse selection and move orders.\n\nREQUIRED FORMAT INSTRUCTION:\nmake webgl single html static file of this game after your done coding with description: 3 units and 3 structures based off some status rts game code:\n```html\n&lt;!DOCTYPE html&gt;\n&lt;html&gt;&lt;body&gt;&lt;canvas id='gl'&gt;&lt;/canvas&gt;&lt;script&gt;\nconst structures = ['Command Center', 'Power Plant', 'War Factory'];\nconst units = ['MCV', 'Crusader Tank', 'Ranger Squad'];\n// ... starter WebGL render loop ...\n&lt;/script&gt;&lt;/body&gt;&lt;/html&gt;\n```"
+    }
+  ]
+}</code></pre>
+
+    <div class="callout">
+      <strong>Why <code>temperature: 0.25</code>?</strong> Low temperature prevents the model from inventing non-existent WebGL extensions or renaming the 3 required structures and 3 units between iterations, keeping the Reviewer Agent's checks predictable.
+    </div>
+
+    <h2 id="step-4-extract">4. Step 4: Parsing the Response &amp; Advancing the Loop</h2>
+    <p>
+      Ollama responds with the generated assistant message inside <code>message.content</code>. The loop extracts the code
+      between <code>```html</code> and <code>```</code>, passes it to <strong>Agent 2 (Reviewer)</strong>, and hot-reloads the viewport.
+    </p>
+    <pre><code>// JSON Returned by Ollama
+{
+  "model": "qwen2.5-coder:latest",
+  "done": true,
+  "message": {
+    "role": "assistant",
+    "content": "```html\n&lt;!DOCTYPE html&gt;\n&lt;html&gt;... full updated WebGL RTS code ...&lt;/html&gt;\n```"
+  }
+}
+
+// Loop Extraction Logic (JavaScript)
+const rawReply = data.message.content;
+const match = rawReply.match(/```(?:html)?\s*\n([\s\S]*?)```/i);
+const candidateCode = match ? match[1].trim() : rawReply.trim();</code></pre>
+
+    <h2 id="minimal-curl">5. Standalone cURL Test (Verify in Terminal)</h2>
+    <p>
+      You can test this exact single-prompt call against your running Ollama instance from any terminal before launching the full multi-agent loop:
+    </p>
+    <pre><code>curl http://localhost:11434/api/chat -d '{
+  "model": "qwen2.5-coder:latest",
+  "stream": false,
+  "messages": [
+    {
+      "role": "user",
+      "content": "make webgl single html static file of this game after your done coding with description: 3 units and 3 structures based off some status rts game code: const units=[\"MCV\",\"Tank\",\"Ranger\"]; const buildings=[\"HQ\",\"Power\",\"Factory\"];"
+    }
+  ]
+}'</code></pre>
+  </main>
+</div>
+
+</body>
+</html>
