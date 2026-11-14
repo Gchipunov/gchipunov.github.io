@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Game Co-lab</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection, addDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Global State ---
+        window.appState = {
+            appId: typeof __app_id !== 'undefined' ? __app_id : 'ai-colab-default',
+            roomId: null,
+            userId: null,
+            userName: null,
+            isHost: false,
+            peers: {}, // WebRTC connections { uid: { pc, dc, mesh } }
+            scene: null,
+            camera: null,
+            renderer: null,
+            localPlayerMesh: null,
+            isGameActive: false,
+            keys: { w: false, a: false, s: false, d: false }
+        };
+
+        const $ = id => document.getElementById(id);
+        const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+        // --- Firebase Init ---
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { projectId: "demo-project" };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        window.db = db;
+
+        // Path Helpers (Strict Artifact Paths)
+        const getBasePath = (collectionName) => collection(db, 'artifacts', window.appState.appId, 'public', 'data', collectionName);
+
+        async function initApp() {
+            try {
+                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                let userCredential;
+                if (token && token !== "") {
+                    userCredential = await signInWithCustomToken(auth, token);
+                } else {
+                    userCredential = await signInAnonymously(auth);
+                }
+                window.appState.userId = userCredential.user.uid;
+                window.appState.userName = "Player_" + window.appState.userId.substring(0, 4);
+                
+                showScreen('screen-home');
+            } catch (e) {
+                console.error("Auth Error", e);
+                $('home-status').innerText = "Auth failed. Check console.";
+            }
+        }
+
+        // --- Navigation ---
+        function showScreen(id) {
+            ['screen-loading', 'screen-home', 'screen-lobby', 'screen-game'].forEach(s => $(s).classList.add('hidden'));
+            $(id).classList.remove('hidden');
+        }
+
+        function logToUI(msg, isError = false) {
+            const el = document.createElement('div');
+            el.className = `fixed bottom-4 right-4 px-4 py-2 rounded shadow-lg z-50 transition-opacity duration-500 ${isError ? 'bg-red-600' : 'bg-blue-600'} text-white`;
+            el.innerText = msg;
+            document.body.appendChild(el);
+            setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 500); }, 3000);
+        }
+
+        // --- Room Management ---
+        window.createRoom = async () => {
+            const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+            window.appState.roomId = roomId;
+            window.appState.isHost = true;
+            
+            const roomRef = doc(getBasePath('rooms'), roomId);
+            await setDoc(roomRef, { hostId: window.appState.userId, state: 'lobby', mapConfig: null });
+            await joinRoom(roomId);
+        };
+
+        window.joinRoomBtn = async () => {
+            const roomId = $('room-code-input').value.toUpperCase().trim();
+            if (roomId.length < 5) return logToUI("Invalid Code", true);
+            
+            const roomSnap = await getDoc(doc(getBasePath('rooms'), roomId));
+            if (roomSnap.exists()) {
+                window.appState.roomId = roomId;
+                window.appState.isHost = (roomSnap.data().hostId === window.appState.userId);
+                await joinRoom(roomId);
+            } else {
+                logToUI("Room not found", true);
+            }
+        };
+
+        async function joinRoom(roomId) {
+            showScreen('screen-lobby');
+            $('display-room-code').innerText = roomId;
+            if (window.appState.isHost) $('btn-generate').classList.remove('hidden');
+
+            // Listen to Room State
+            onSnapshot(doc(getBasePath('rooms'), roomId), (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    if (data.state === 'playing' && !window.appState.isGameActive && data.mapConfig) {
+                        startGamePhase(data.mapConfig);
+                    }
+                }
+            }, e => console.error("Room sync error", e));
+
+            // Listen to Chat (Filter in memory per rules)
+            onSnapshot(getBasePath('chats'), (snap) => {
+                const chatBox = $('chat-messages');
+                chatBox.innerHTML = '';
+                const messages = [];
+                snap.forEach(d => {
+                    const data = d.data();
+                    if (data.roomId === roomId) messages.push(data);
+                });
+                messages.sort((a, b) => a.timestamp - b.timestamp).forEach(m => {
+                    chatBox.innerHTML += `<div class="text-sm mb-1"><span class="text-blue-400 font-bold">${m.sender}:</span> <span class="text-slate-200">${m.text}</span></div>`;
+                });
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }, e => console.error(e));
+
+            // Listen to Prompts (Filter in memory)
+            onSnapshot(getBasePath('prompts'), (snap) => {
+                const promptBox = $('prompt-list');
+                promptBox.innerHTML = '';
+                const prompts = [];
+                snap.forEach(d => {
+                    const data = d.data();
+                    if (data.roomId === roomId) prompts.push(data);
+                });
+                $('prompt-count').innerText = prompts.length;
+                prompts.forEach(p => {
+                    promptBox.innerHTML += `<div class="bg-slate-700 p-2 rounded mb-2 text-sm text-slate-200 border border-slate-600"><span class="text-emerald-400 text-xs block mb-1">${p.sender}'s Idea:</span>${p.text}</div>`;
+                });
+            }, e => console.error(e));
+        }
+
+        // --- Lobby Actions ---
+        window.sendChat = async () => {
+            const text = $('chat-input').value.trim();
+            if (!text) return;
+            $('chat-input').value = '';
+            await addDoc(getBasePath('chats'), { roomId: window.appState.roomId, sender: window.appState.userName, text, timestamp: Date.now() });
+        };
+
+        window.sendPrompt = async () => {
+            const text = $('prompt-input').value.trim();
+            if (!text) return;
+            $('prompt-input').value = '';
+            await addDoc(getBasePath('prompts'), { roomId: window.appState.roomId, sender: window.appState.userName, text, timestamp: Date.now() });
+        };
+
+        // --- Gemini AI Generation ---
+        window.generateGame = async () => {
+            if (!window.appState.isHost) return;
+            $('btn-generate').innerText = "Generating AI Map...";
+            $('btn-generate').disabled = true;
+
+            try {
+                // Fetch all prompts for this room
+                const promptDocs = await getDocs(getBasePath('prompts'));
+                const ideas = [];
+                promptDocs.forEach(d => {
+                    if (d.data().roomId === window.appState.roomId) ideas.push(d.data().text);
+                });
+
+                const combinedPrompts = ideas.length > 0 ? ideas.join(" | ") : "A generic sci-fi training arena with random blocks.";
+                
+                const systemPrompt = `You are a WebGL level designer. Combine the following ideas into a cohesive arena map. 
+Ideas: ${combinedPrompts}
+Output ONLY a valid JSON object representing the map config. NO markdown, NO backticks.
+Format required:
+{
+  "themeName": "String",
+  "groundColor": "#hexcolor",
+  "skyColor": "#hexcolor",
+  "obstacles": [
+    {"x": number, "z": number, "width": number, "height": number, "depth": number, "color": "#hexcolor"}
+  ]
+}
+Keep map coordinates between -40 and 40. Max 15 obstacles.`;
+
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: systemPrompt }] }] })
+                });
+                
+                const result = await response.json();
+                let text = result.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+                
+                // Cleanup markdown if AI accidentally includes it
+                text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                const mapConfig = JSON.parse(text);
+
+                // Update Room State to launch game for everyone
+                await updateDoc(doc(getBasePath('rooms'), window.appState.roomId), {
+                    state: 'playing',
+                    mapConfig: mapConfig
+                });
+
+            } catch (err) {
+                console.error("AI Gen error", err);
+                logToUI("Failed to generate map.", true);
+                $('btn-generate').innerText = "Generate Game";
+                $('btn-generate').disabled = false;
+            }
+        };
+
+        // --- Phase 2: WebGL & WebRTC Setup ---
+        function startGamePhase(mapConfig) {
+            window.appState.isGameActive = true;
+            showScreen('screen-game');
+            
+            initThreeJS(mapConfig);
+            initWebRTC();
+            
+            // Movement Loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- WebRTC Signaling Logic ---
+        async function initWebRTC() {
+            const roomId = window.appState.roomId;
+            const myId = window.appState.userId;
+            const signalsRef = getBasePath('signals');
+
+            // 1. Register presence in room
+            await setDoc(doc(getBasePath('players'), myId), { roomId, joinedAt: Date.now() });
+
+            // 2. Listen for other players in the room to initiate connections
+            onSnapshot(getBasePath('players'), (snap) => {
+                snap.forEach(d => {
+                    const peerId = d.id;
+                    const data = d.data();
+                    if (data.roomId === roomId && peerId !== myId) {
+                        // Only initiator creates the offer to avoid duplicate channels
+                        if (myId > peerId && !window.appState.peers[peerId]) {
+                            setupPeerConnection(peerId, true);
+                        } else if (!window.appState.peers[peerId]) {
+                            setupPeerConnection(peerId, false); // Prepare to receive offer
+                        }
+                    }
+                });
+            }, e => console.error("Player sync error", e));
+
+            // 3. Listen for Signaling Messages (Offers, Answers, ICE)
+            onSnapshot(signalsRef, (snap) => {
+                snap.docChanges().forEach(async (change) => {
+                    if (change.type === 'added') {
+                        const signal = change.doc.data();
+                        // Process only signals addressed to ME in THIS ROOM
+                        if (signal.roomId === roomId && signal.to === myId) {
+                            handleSignal(signal.from, signal);
+                            // Cleanup signal after reading (optional, but good for cleanliness)
+                            deleteDoc(change.doc.ref).catch(e => {}); 
+                        }
+                    }
+                });
+            }, e => console.error("Signal sync error", e));
+        }
+
+        async function setupPeerConnection(peerId, isInitiator) {
+            const pc = new RTCPeerConnection(rtcConfig);
+            window.appState.peers[peerId] = { pc: pc, dc: null, mesh: null };
+            updateRTCUI();
+
+            // Create Avatar in 3D
+            const geo = new THREE.BoxGeometry(2, 2, 2);
+            const mat = new THREE.MeshLambertMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(0, 1, 0);
+            window.appState.scene.add(mesh);
+            window.appState.peers[peerId].mesh = mesh;
+
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    addDoc(getBasePath('signals'), {
+                        roomId: window.appState.roomId,
+                        from: window.appState.userId,
+                        to: peerId,
+                        type: 'candidate',
+                        candidate: event.candidate.toJSON()
+                    });
+                }
+            };
+
+            pc.onconnectionstatechange = () => updateRTCUI();
+
+            if (isInitiator) {
+                const dc = pc.createDataChannel("gameData", { ordered: false, maxRetransmits: 0 }); // UDP-like
+                setupDataChannel(peerId, dc);
+                
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await addDoc(getBasePath('signals'), {
+                    roomId: window.appState.roomId,
+                    from: window.appState.userId,
+                    to: peerId,
+                    type: 'offer',
+                    sdp: offer
+                });
+            } else {
+                pc.ondatachannel = (event) => setupDataChannel(peerId, event.channel);
+            }
+        }
+
+        async function handleSignal(peerId, signal) {
+            const peer = window.appState.peers[peerId];
+            if (!peer) return;
+
+            if (signal.type === 'offer') {
+                await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                const answer = await peer.pc.createAnswer();
+                await peer.pc.setLocalDescription(answer);
+                await addDoc(getBasePath('signals'), {
+                    roomId: window.appState.roomId,
+                    from: window.appState.userId,
+                    to: peerId,
+                    type: 'answer',
+                    sdp: answer
+                });
+            } else if (signal.type === 'answer') {
+                await peer.pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            } else if (signal.type === 'candidate') {
+                await peer.pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+            }
+        }
+
+        function setupDataChannel(peerId, dc) {
+            window.appState.peers[peerId].dc = dc;
+            dc.onopen = () => updateRTCUI();
+            dc.onmessage = (event) => {
+                // Incoming position data: x,z
+                const data = JSON.parse(event.data);
+                const mesh = window.appState.peers[peerId].mesh;
+                if (mesh) {
+                    // Smooth interpolation could go here, for now direct set
+                    mesh.position.x = data.x;
+                    mesh.position.z = data.z;
+                }
+            };
+        }
+
+        function updateRTCUI() {
+            let connected = 0;
+            const peers = Object.values(window.appState.peers);
+            peers.forEach(p => {
+                if (p.pc.connectionState === 'connected') connected++;
+            });
+            $('rtc-status').innerText = `Peers Connected: ${connected} / ${peers.length}`;
+        }
+
+        // --- Three.js Implementation ---
+        function initThreeJS(config) {
+            const canvas = $('game-canvas');
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            window.appState.renderer = renderer;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(config.skyColor || 0x0f172a);
+            scene.fog = new THREE.Fog(config.skyColor || 0x0f172a, 20, 100);
+            window.appState.scene = scene;
+
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            window.appState.camera = camera;
+
+            // Lights
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(20, 50, 20);
+            scene.add(dirLight);
+
+            // Ground
+            const groundGeo = new THREE.PlaneGeometry(200, 200);
+            groundGeo.rotateX(-Math.PI / 2);
+            const groundMat = new THREE.MeshLambertMaterial({ color: config.groundColor || 0x334155 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            scene.add(ground);
+
+            // Build AI Obstacles
+            if (config.obstacles && Array.isArray(config.obstacles)) {
+                config.obstacles.forEach(obs => {
+                    const geo = new THREE.BoxGeometry(obs.width || 2, obs.height || 4, obs.depth || 2);
+                    const mat = new THREE.MeshLambertMaterial({ color: obs.color || 0x888888 });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.set(obs.x || 0, (obs.height || 4) / 2, obs.z || 0);
+                    scene.add(mesh);
+                });
+            }
+
+            // Local Player
+            const playerGeo = new THREE.BoxGeometry(2, 2, 2);
+            const playerMat = new THREE.MeshLambertMaterial({ color: 0x3b82f6 }); // Blue for local
+            const player = new THREE.Mesh(playerGeo, playerMat);
+            player.position.y = 1;
+            scene.add(player);
+            window.appState.localPlayerMesh = player;
+
+            // Events
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', e => setKey(e.key, true));
+            document.addEventListener('keyup', e => setKey(e.key, false));
+        }
+
+        function setKey(key, isDown) {
+            const k = key.toLowerCase();
+            if (['w', 'a', 's', 'd'].includes(k)) window.appState.keys[k] = isDown;
+        }
+
+        function onWindowResize() {
+            if (!window.appState.camera) return;
+            window.appState.camera.aspect = window.innerWidth / window.innerHeight;
+            window.appState.camera.updateProjectionMatrix();
+            window.appState.renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function gameLoop() {
+            if (!window.appState.isGameActive) return;
+            requestAnimationFrame(gameLoop);
+
+            const speed = 0.3;
+            const keys = window.appState.keys;
+            const player = window.appState.localPlayerMesh;
+            const camera = window.appState.camera;
+
+            let moved = false;
+            if (keys.w) { player.position.z -= speed; moved = true; }
+            if (keys.s) { player.position.z += speed; moved = true; }
+            if (keys.a) { player.position.x -= speed; moved = true; }
+            if (keys.d) { player.position.x += speed; moved = true; }
+
+            // Camera follow (isometric-ish)
+            camera.position.x = player.position.x;
+            camera.position.y = player.position.y + 15;
+            camera.position.z = player.position.z + 15;
+            camera.lookAt(player.position);
+
+            window.appState.renderer.render(window.appState.scene, camera);
+
+            // Broadcast position via WebRTC DataChannels if moved
+            if (moved) {
+                const posData = JSON.stringify({ x: player.position.x, z: player.position.z });
+                Object.values(window.appState.peers).forEach(p => {
+                    if (p.dc && p.dc.readyState === 'open') {
+                        p.dc.send(posData);
+                    }
+                });
+            }
+        }
+
+        window.disconnectGame = () => {
+            window.appState.isGameActive = false;
+            Object.values(window.appState.peers).forEach(p => {
+                if (p.dc) p.dc.close();
+                if (p.pc) p.pc.close();
+            });
+            window.appState.peers = {};
+            
+            // Clean up Three.js DOM
+            const canvas = $('game-canvas');
+            const gl = canvas.getContext('webgl');
+            if (gl) gl.getExtension('WEBGL_lose_context')?.loseContext();
+            
+            showScreen('screen-home');
+            window.location.reload(); // Hard reset state for simplicity
+        };
+
+        // Start Auth
+        initApp();
+    </script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #0f172a; font-family: 'Inter', sans-serif; color: #e2e8f0; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    </style>
+</head>
+<body class="antialiased selection:bg-blue-500 selection:text-white">
+
+    <!-- Loading -->
+    <div id="screen-loading" class="absolute inset-0 flex items-center justify-center z-50 bg-slate-900">
+        <div class="text-center">
+            <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p id="home-status" class="text-slate-400 animate-pulse">Initializing Platform...</p>
+        </div>
+    </div>
+
+    <!-- Home (Create/Join) -->
+    <div id="screen-home" class="hidden absolute inset-0 flex items-center justify-center z-40 bg-slate-900 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-800 to-slate-950">
+        <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 w-full max-w-sm text-center">
+            <h1 class="text-3xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">AI Game Co-lab</h1>
+            <p class="text-xs text-slate-400 mb-8">Multiplayer Sandbox Generation</p>
+            
+            <button onclick="createRoom()" class="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold shadow-lg transition-transform hover:scale-105 mb-6">Create Lobby</button>
+            
+            <div class="flex items-center mb-6">
+                <div class="flex-grow h-px bg-slate-600"></div><span class="px-4 text-slate-400 text-sm">OR</span><div class="flex-grow h-px bg-slate-600"></div>
+            </div>
+
+            <div class="flex gap-2">
+                <input type="text" id="room-code-input" placeholder="Room Code" class="w-full bg-slate-900 border border-slate-600 rounded p-3 text-center font-mono uppercase focus:border-blue-500 outline-none">
+                <button onclick="joinRoomBtn()" class="px-6 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-bold shadow-lg transition-transform hover:scale-105">Join</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Phase 1: Lobby -->
+    <div id="screen-lobby" class="hidden absolute inset-0 z-30 bg-slate-900 flex flex-col p-4 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold">Lobby: <span id="display-room-code" class="text-blue-400 font-mono"></span></h2>
+            <button id="btn-generate" onclick="generateGame()" class="hidden px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 rounded font-bold shadow-lg shadow-purple-500/30 transition-transform hover:scale-105">
+                Generate Game
+            </button>
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
+            <!-- Left: Chat -->
+            <div class="flex-1 bg-slate-800 rounded-xl border border-slate-700 flex flex-col overflow-hidden shadow-xl">
+                <div class="p-4 border-b border-slate-700 bg-slate-800/50"><h3 class="font-bold">General Chat</h3></div>
+                <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-2"></div>
+                <div class="p-4 border-t border-slate-700 bg-slate-900 flex gap-2">
+                    <input type="text" id="chat-input" placeholder="Type a message..." class="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-2 outline-none focus:border-blue-500" onkeypress="if(event.key==='Enter') sendChat()">
+                    <button onclick="sendChat()" class="px-4 bg-blue-600 hover:bg-blue-500 rounded font-bold">Send</button>
+                </div>
+            </div>
+
+            <!-- Right: Prompts -->
+            <div class="flex-1 bg-slate-800 rounded-xl border border-slate-700 flex flex-col overflow-hidden shadow-xl">
+                <div class="p-4 border-b border-slate-700 bg-slate-800/50 flex justify-between items-center">
+                    <h3 class="font-bold text-amber-400">Game Prompts</h3>
+                    <span class="text-xs bg-slate-700 px-2 py-1 rounded">Total: <span id="prompt-count">0</span></span>
+                </div>
+                <div id="prompt-list" class="flex-1 p-4 overflow-y-auto space-y-2"></div>
+                <div class="p-4 border-t border-slate-700 bg-slate-900 flex flex-col gap-2">
+                    <textarea id="prompt-input" maxlength="500" placeholder="Describe map features, colors, obstacles (max 500 chars)..." class="w-full h-20 bg-slate-800 border border-slate-600 rounded px-3 py-2 outline-none focus:border-amber-500 resize-none"></textarea>
+                    <button onclick="sendPrompt()" class="w-full py-2 bg-amber-600 hover:bg-amber-500 rounded font-bold">Submit Idea</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Phase 2: Game -->
+    <div id="screen-game" class="hidden absolute inset-0 z-20">
+        <!-- WebRTC UI Overlay -->
+        <div class="absolute top-4 left-4 bg-slate-900/80 backdrop-blur border border-slate-700 p-4 rounded-xl shadow-lg pointer-events-auto">
+            <h2 class="font-bold text-blue-400 mb-1">AI Generated Arena</h2>
+            <p id="rtc-status" class="text-xs text-slate-300 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span> Connecting Peers...
+            </p>
+            <div class="mt-3 text-[10px] text-slate-500">Controls: W A S D</div>
+        </div>
+
+        <button onclick="disconnectGame()" class="absolute top-4 right-4 px-4 py-2 bg-red-600/80 hover:bg-red-500 backdrop-blur rounded text-sm font-bold shadow-lg transition-colors z-30">
+            Disconnect & Return
+        </button>
+
+        <canvas id="game-canvas" class="w-full h-full block outline-none"></canvas>
+    </div>
+
+</body>
+</html>
