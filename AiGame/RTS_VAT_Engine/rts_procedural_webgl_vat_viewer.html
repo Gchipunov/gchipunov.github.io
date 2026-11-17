@@ -1,0 +1,1556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>RTS Procedural WebGL & VAT Viewer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', sans-serif;
+      background-color: #111827;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #webgl-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+      touch-action: none;
+    }
+    .glass-card {
+      background-color: rgba(15, 18, 24, var(--panel-alpha, 0.78));
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      transition: background-color 0.2s ease, opacity 0.25s ease;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.22);
+      border-radius: 9999px;
+    }
+    input[type="range"] {
+      accent-color: #22c55e;
+    }
+    .speech-bubble {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      pointer-events: none;
+      transition: opacity 0.2s ease, transform 0.15s ease;
+      z-index: 25;
+    }
+  </style>
+</head>
+<body class="text-slate-100">
+
+  <!-- Full-Viewport WebGL Canvas Container -->
+  <div id="webgl-container"></div>
+
+  <!-- Floating 2D Projected Comic Speech Bubbles for Beavis & Butt-Head -->
+  <div id="bubble-beavis" class="speech-bubble hidden">
+    <div class="bg-amber-300 text-slate-950 font-extrabold text-xs sm:text-sm px-3 py-1.5 rounded-2xl border-2 border-slate-950 shadow-xl whitespace-nowrap">
+      <span id="bubble-beavis-text">Heh heh! Pull my finger!</span>
+    </div>
+    <div class="w-3 h-3 bg-amber-300 border-r-2 border-b-2 border-slate-950 rotate-45 mx-auto -mt-1.5"></div>
+  </div>
+
+  <div id="bubble-butthead" class="speech-bubble hidden">
+    <div class="bg-sky-300 text-slate-950 font-extrabold text-xs sm:text-sm px-3 py-1.5 rounded-2xl border-2 border-slate-950 shadow-xl whitespace-nowrap">
+      <span id="bubble-butthead-text">Uh huh huh... okay dumbass.</span>
+    </div>
+    <div class="w-3 h-3 bg-sky-300 border-r-2 border-b-2 border-slate-950 rotate-45 mx-auto -mt-1.5"></div>
+  </div>
+
+  <!-- Top Telemetry & Quick Controls Bar -->
+  <header class="fixed top-2 left-2 right-2 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+    <div class="glass-card pointer-events-auto rounded-xl px-3 py-1.5 flex items-center gap-3 shadow-lg">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-bold text-xs sm:text-sm tracking-wide text-white">RTS VAT ENGINE</span>
+      </div>
+      <div class="hidden sm:flex items-center gap-2 text-[11px] font-mono text-slate-300 border-l border-white/15 pl-3">
+        <span>FPS: <strong id="hud-fps" class="text-emerald-400">60</strong></span>
+        <span>•</span>
+        <span>VAT UNITS: <strong id="hud-units" class="text-sky-400">120</strong></span>
+        <span>•</span>
+        <span>GRID: <strong id="hud-coords" class="text-amber-300">0, 0</strong></span>
+      </div>
+    </div>
+
+    <div class="glass-card pointer-events-auto rounded-xl px-2.5 py-1.5 flex items-center gap-2 shadow-lg">
+      <button id="btn-toggle-hud" class="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold transition">
+        Hide Panels
+      </button>
+      <button id="btn-reset-cam" class="px-2.5 py-1 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-xs font-semibold text-white transition">
+        Reset Cam
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Translucent Black Overlay Panels -->
+  <main id="hud-panels" class="fixed inset-x-2 top-14 bottom-24 z-10 flex flex-col md:flex-row justify-between gap-3 pointer-events-none">
+
+    <!-- Left Column: Website Cards & Comedy Choreography Stage -->
+    <div class="flex flex-col gap-2.5 max-w-sm w-full max-h-full overflow-y-auto custom-scroll pointer-events-none">
+      <!-- Translucent Black Overlay Card matching reference screenshots -->
+      <section class="glass-card pointer-events-auto rounded-xl p-3.5 shadow-xl">
+        <div class="flex items-center justify-between mb-1">
+          <h1 class="text-sm sm:text-base font-bold text-white">RTS Procedural World & VAT</h1>
+          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">WebGL 2.0</span>
+        </div>
+        <p class="text-xs text-slate-300 leading-relaxed">
+          Stepped green platforms, concentric grid walkways, water purification plant, GPU Vertex Animation Texture infantry with custom accent colors, and interactive placement grid.
+        </p>
+      </section>
+
+      <!-- Beavis & Butt-Head Choreographic Lo-Fi TTS Stage Card -->
+      <section class="glass-card pointer-events-auto rounded-xl p-3.5 shadow-xl border-amber-400/30">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-1.5">
+            <span class="text-base">🤘</span>
+            <h2 class="text-xs sm:text-sm font-bold text-amber-300 uppercase tracking-wider">Couch Comedy Stage (Lo-Fi TTS)</h2>
+          </div>
+          <span id="skit-status" class="text-[10px] font-mono text-slate-300 bg-white/10 px-2 py-0.5 rounded">READY</span>
+        </div>
+        <p class="text-[11px] text-slate-300 mb-2.5">
+          Choreographed 3D scene near the Water Plant: Beavis &amp; Butt-Head perform the classic <span class="text-amber-300 font-semibold">"Pull My Finger"</span> routine with AI Lo-Fi bitcrushed TTS &amp; WebAudio synth.
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-play-skit" class="py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition flex items-center justify-center gap-1.5">
+            <span>▶</span> Pull My Finger Skit
+          </button>
+          <button id="btn-focus-duo" class="py-2 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold text-xs transition flex items-center justify-center gap-1">
+            <span>🎥</span> Focus Stage
+          </button>
+        </div>
+        <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+          <label class="flex items-center gap-1.5 cursor-pointer">
+            <input id="chk-lofi-tts" type="checkbox" checked class="rounded" />
+            <span>AI Lo-Fi Radio Filter + Speech</span>
+          </label>
+          <button id="btn-test-fart" class="text-amber-300 hover:underline font-mono text-[10px]">[SFX Test]</button>
+        </div>
+      </section>
+
+      <!-- Human Accent Colors & VAT Inspector Card -->
+      <section class="glass-card pointer-events-auto rounded-xl p-3.5 shadow-xl">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-xs font-bold uppercase tracking-wider text-sky-300">Infantry VAT &amp; Accent Colors</h2>
+          <span class="text-[10px] font-mono text-slate-400">48 Frames Baked</span>
+        </div>
+
+        <!-- Faction / Accent Color Swatches -->
+        <div class="mb-2.5">
+          <div class="text-[11px] text-slate-300 mb-1.5 flex justify-between">
+            <span>Human Squad Accent Color:</span>
+            <span id="accent-label" class="font-mono text-emerald-300">Tactical Emerald</span>
+          </div>
+          <div class="flex flex-wrap gap-1.5" id="accent-swatches">
+            <button data-color="#22c55e" data-name="Tactical Emerald" class="w-6 h-6 rounded-full bg-emerald-500 ring-2 ring-white shadow"></button>
+            <button data-color="#ef4444" data-name="Crimson Guard" class="w-6 h-6 rounded-full bg-red-500 opacity-80 hover:opacity-100"></button>
+            <button data-color="#3b82f6" data-name="Allied Cobalt" class="w-6 h-6 rounded-full bg-blue-500 opacity-80 hover:opacity-100"></button>
+            <button data-color="#f59e0b" data-name="Hazard Amber" class="w-6 h-6 rounded-full bg-amber-500 opacity-80 hover:opacity-100"></button>
+            <button data-color="#a855f7" data-name="Psi Violet" class="w-6 h-6 rounded-full bg-purple-500 opacity-80 hover:opacity-100"></button>
+            <button data-color="#06b6d4" data-name="Hydro Cyan" class="w-6 h-6 rounded-full bg-cyan-500 opacity-80 hover:opacity-100"></button>
+          </div>
+        </div>
+
+        <!-- Unit Counts & Animation Mode -->
+        <div class="space-y-2 text-xs">
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-300">
+              <span>Conscripts &amp; Riflemen Count</span>
+              <span id="unit-count-val" class="font-mono text-white">120</span>
+            </div>
+            <input id="slider-units" type="range" min="20" max="400" step="10" value="120" class="w-full h-1.5 bg-slate-700 rounded-lg cursor-pointer" />
+          </div>
+
+          <div class="grid grid-cols-3 gap-1.5 pt-1">
+            <button data-anim="all" class="vat-anim-btn py-1 px-2 rounded bg-emerald-600 text-white font-semibold text-[11px]">Mixed AI</button>
+            <button data-anim="march" class="vat-anim-btn py-1 px-2 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[11px]">March</button>
+            <button data-anim="fire" class="vat-anim-btn py-1 px-2 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[11px]">Fire Drill</button>
+          </div>
+
+          <!-- Live Baked VAT DataTexture Preview -->
+          <div class="pt-1.5 border-t border-white/10 flex items-center justify-between gap-2">
+            <div>
+              <div class="text-[10px] font-semibold text-slate-300">GPU VAT DataTexture</div>
+              <div class="text-[10px] text-slate-400">RGBAFloat Vertex Offsets</div>
+            </div>
+            <canvas id="vat-preview-canvas" width="96" height="32" class="rounded border border-white/20 bg-black"></canvas>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Right Column: Transparency, Sky, Grid & Inspector -->
+    <div class="hidden md:flex flex-col gap-2.5 w-72 max-h-full overflow-y-auto custom-scroll pointer-events-none">
+      <section class="glass-card pointer-events-auto rounded-xl p-3.5 shadow-xl">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-emerald-300 mb-2">Black Overlay &amp; Atmosphere</h2>
+        <div class="space-y-2.5 text-xs">
+          <div>
+            <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+              <span>Black Panel Opacity</span>
+              <span id="alpha-val" class="font-mono text-white">78%</span>
+            </div>
+            <input id="slider-alpha" type="range" min="15" max="95" value="78" class="w-full h-1.5 bg-slate-700 rounded-lg cursor-pointer" />
+          </div>
+
+          <div class="grid grid-cols-3 gap-1.5">
+            <button data-sky="blue" class="sky-btn py-1.5 px-2 rounded bg-sky-600 text-white font-semibold text-[11px]">Sky Blue</button>
+            <button data-sky="grey" class="sky-btn py-1.5 px-2 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[11px]">Overcast</button>
+            <button data-sky="night" class="sky-btn py-1.5 px-2 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[11px]">Tactical</button>
+          </div>
+
+          <div class="flex items-center justify-between pt-1 border-t border-white/10">
+            <span class="text-[11px] text-slate-300">Placement Mapping Grid</span>
+            <input id="chk-grid" type="checkbox" checked class="w-4 h-4 rounded cursor-pointer" />
+          </div>
+        </div>
+      </section>
+
+      <section class="glass-card pointer-events-auto rounded-xl p-3.5 shadow-xl">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-amber-300 mb-1">Selected Entity / Tile</h2>
+        <div id="inspector-name" class="text-sm font-bold text-white">Water Purification Plant</div>
+        <p id="inspector-desc" class="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+          Tap any terrain block, water basin, or building on the grid to inspect or construct modular structures.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <!-- Bottom Building Placement Dock -->
+  <footer class="fixed bottom-2 left-2 right-2 z-20 flex justify-center pointer-events-none">
+    <div class="glass-card pointer-events-auto rounded-2xl p-2 shadow-2xl flex items-center gap-1.5 sm:gap-2 overflow-x-auto max-w-full">
+      <button data-build="none" class="build-btn px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs whitespace-nowrap transition">
+        👆 Inspect / Orbit
+      </button>
+      <button data-build="modular4" class="build-btn px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 font-semibold text-xs whitespace-nowrap transition">
+        🏢 4-Story Brick
+      </button>
+      <button data-build="factory" class="build-btn px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 font-semibold text-xs whitespace-nowrap transition">
+        🏭 RTS Barracks
+      </button>
+      <button data-build="waterSub" class="build-btn px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 font-semibold text-xs whitespace-nowrap transition">
+        💧 Hydro Silos
+      </button>
+      <button id="btn-rotate-ghost" class="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/30 text-amber-200 font-semibold text-xs whitespace-nowrap transition">
+        ↻ Rotate
+      </button>
+    </div>
+  </footer>
+
+  <!-- Toast Notification Banner -->
+  <div id="toast-msg" class="fixed top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none opacity-0 transition-opacity duration-300">
+    <div class="bg-slate-900/95 border border-emerald-400/40 text-emerald-200 text-xs font-semibold px-4 py-2 rounded-full shadow-xl">
+      Structure Constructed
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      // =========================================================================
+      // 1. THREE.JS RENDERER, SCENE, CAMERA & LIGHTING
+      // =========================================================================
+      const container = document.getElementById('webgl-container');
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x1e88e5);
+      scene.fog = new THREE.FogExp2(0x1e88e5, 0.0085);
+
+      const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 250);
+      const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x334155, 0.85);
+      hemiLight.position.set(0, 40, 0);
+      scene.add(hemiLight);
+
+      const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.15);
+      dirLight.position.set(24, 38, 22);
+      dirLight.castShadow = true;
+      dirLight.shadow.mapSize.set(2048, 2048);
+      dirLight.shadow.camera.near = 2;
+      dirLight.shadow.camera.far = 110;
+      const dShadow = 34;
+      dirLight.shadow.camera.left = -dShadow;
+      dirLight.shadow.camera.right = dShadow;
+      dirLight.shadow.camera.top = dShadow;
+      dirLight.shadow.camera.bottom = -dShadow;
+      scene.add(dirLight);
+
+      // =========================================================================
+      // 2. PROCEDURAL CANVAS TEXTURES (CONCENTRIC GRID TILE & BRICK)
+      // =========================================================================
+      function createConcentricTileTexture() {
+        const c = document.createElement('canvas');
+        c.width = 128; c.height = 128;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#4b5259';
+        ctx.fillRect(0, 0, 128, 128);
+        const rings = ['#9ca3af', '#374151', '#d1d5db', '#1f2937', '#6b7280'];
+        rings.forEach((col, idx) => {
+          const inset = idx * 11 + 4;
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 5;
+          ctx.strokeRect(inset, inset, 128 - inset * 2, 128 - inset * 2);
+        });
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        return tex;
+      }
+
+      function createBrickTexture() {
+        const c = document.createElement('canvas');
+        c.width = 128; c.height = 128;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#9a4636';
+        ctx.fillRect(0, 0, 128, 128);
+        ctx.fillStyle = '#cbd5e1';
+        for (let y = 0; y < 128; y += 16) {
+          ctx.fillRect(0, y, 128, 2);
+          const offset = (y / 16) % 2 === 0 ? 0 : 16;
+          for (let x = offset; x < 128; x += 32) {
+            ctx.fillRect(x, y, 2, 16);
+          }
+        }
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(2, 2);
+        return tex;
+      }
+
+      const walkwayTex = createConcentricTileTexture();
+      const brickTex = createBrickTexture();
+
+      // =========================================================================
+      // 3. STEPPED GREEN TERRAIN PLATFORMS & MAPPING PLACEMENT GRID
+      // =========================================================================
+      const TILE_SIZE = 2.0;
+      const GRID_HALF = 22;
+      const occupiedCells = new Set();
+      const waterCells = new Set();
+      const terrainMeshes = [];
+
+      function cellKey(gx, gz) { return `${gx},${gz}`; }
+      function markCellsOccupied(gxMin, gxMax, gzMin, gzMax, isWater = false) {
+        for (let x = gxMin; x <= gxMax; x++) {
+          for (let z = gzMin; z <= gzMax; z++) {
+            occupiedCells.add(cellKey(x, z));
+            if (isWater) waterCells.add(cellKey(x, z));
+          }
+        }
+      }
+
+      // Base Plaza Floor
+      const plazaMat = new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.85 });
+      const plazaMesh = new THREE.Mesh(new THREE.BoxGeometry(92, 0.8, 92), plazaMat);
+      plazaMesh.position.set(0, -0.4, 0);
+      plazaMesh.receiveShadow = true;
+      plazaMesh.userData = { type: 'terrain', name: 'Concrete Foundation Plaza', desc: 'Open structural grid sector ready for RTS base deployment.' };
+      scene.add(plazaMesh);
+      terrainMeshes.push(plazaMesh);
+
+      // Concentric Grid Walkways matching reference screenshots
+      const walkwayMat = new THREE.MeshStandardMaterial({ map: walkwayTex, roughness: 0.65 });
+      function addWalkwayStrip(gxStart, gxEnd, gzStart, gzEnd, yTop = 0.16) {
+        const w = (gxEnd - gxStart + 1) * TILE_SIZE;
+        const d = (gzEnd - gzStart + 1) * TILE_SIZE;
+        const cx = ((gxStart + gxEnd) * 0.5) * TILE_SIZE;
+        const cz = ((gzStart + gzEnd) * 0.5) * TILE_SIZE;
+        const texClone = walkwayTex.clone();
+        texClone.needsUpdate = true;
+        texClone.repeat.set(gxEnd - gxStart + 1, gzEnd - gzStart + 1);
+        const mat = new THREE.MeshStandardMaterial({ map: texClone, roughness: 0.6 });
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, yTop, d), mat);
+        mesh.position.set(cx, yTop * 0.5, cz);
+        mesh.receiveShadow = true;
+        mesh.userData = { type: 'walkway', name: 'Concentric Transit Walkway', desc: 'Reinforced logistics path connecting stepped green sectors.' };
+        scene.add(mesh);
+        terrainMeshes.push(mesh);
+      }
+
+      addWalkwayStrip(-12, 12, -1, 1, 0.18);
+      addWalkwayStrip(-1, 1, -12, 12, 0.18);
+      addWalkwayStrip(-12, 12, -11, -10, 0.18);
+
+      // Stepped Vibrant Green Turf Platforms with Concrete Bevel Rims
+      const greenTopMat = new THREE.MeshStandardMaterial({ color: 0x26b814, roughness: 0.48 });
+      const concreteRimMat = new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.55 });
+      const darkTrimMat = new THREE.MeshStandardMaterial({ color: 0x1f2429, roughness: 0.7 });
+
+      function createSteppedGreenBlock(gxMin, gxMax, gzMin, gzMax, height, label) {
+        const w = (gxMax - gxMin + 1) * TILE_SIZE;
+        const d = (gzMax - gzMin + 1) * TILE_SIZE;
+        const cx = ((gxMin + gxMax) * 0.5) * TILE_SIZE;
+        const cz = ((gzMin + gzMax) * 0.5) * TILE_SIZE;
+
+        const group = new THREE.Group();
+        const baseRim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.35, height * 0.45, d + 0.35), concreteRimMat);
+        baseRim.position.set(cx, height * 0.225, cz);
+        baseRim.castShadow = baseRim.receiveShadow = true;
+
+        const darkBand = new THREE.Mesh(new THREE.BoxGeometry(w + 0.12, height * 0.18, d + 0.12), darkTrimMat);
+        darkBand.position.set(cx, height * 0.52, cz);
+
+        const greenSlab = new THREE.Mesh(new THREE.BoxGeometry(w - 0.15, height * 0.42, d - 0.15), greenTopMat);
+        greenSlab.position.set(cx, height * 0.79, cz);
+        greenSlab.castShadow = greenSlab.receiveShadow = true;
+        greenSlab.userData = {
+          type: 'platform',
+          height,
+          name: label,
+          desc: `Elevated green sector (Elevation +${height.toFixed(1)}m). Valid for turret or modular garrison placement.`
+        };
+
+        group.add(baseRim, darkBand, greenSlab);
+        scene.add(group);
+        terrainMeshes.push(greenSlab);
+      }
+
+      createSteppedGreenBlock(-10, -3, 2, 9, 1.35, 'Southwest Turf Terrace');
+      createSteppedGreenBlock(2, 9, 2, 9, 1.05, 'Southeast Turf Terrace');
+      createSteppedGreenBlock(-10, -3, -9, -3, 1.65, 'Northwest Command Plateau');
+      createSteppedGreenBlock(2, 7, -9, -4, 0.95, 'Northeast Outpost Pad');
+
+      // Tactical Grid Overlay & Hover Cursor
+      const gridHelper = new THREE.GridHelper(GRID_HALF * 2 * TILE_SIZE, GRID_HALF * 2, 0x38bdf8, 0x94a3b8);
+      gridHelper.position.y = 0.03;
+      gridHelper.material.transparent = true;
+      gridHelper.material.opacity = 0.35;
+      scene.add(gridHelper);
+
+      const cellHighlight = new THREE.Mesh(
+        new THREE.PlaneGeometry(TILE_SIZE * 0.96, TILE_SIZE * 0.96),
+        new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.45, side: THREE.DoubleSide })
+      );
+      cellHighlight.rotation.x = -Math.PI / 2;
+      cellHighlight.position.y = 0.06;
+      scene.add(cellHighlight);
+
+      // =========================================================================
+      // 4. ANIMATED WATER PURIFICATION PLANT
+      // =========================================================================
+      const waterPlantGroup = new THREE.Group();
+      waterPlantGroup.position.set(22, 0, -6);
+      scene.add(waterPlantGroup);
+
+      const basinW = 16, basinD = 12;
+      const basinFloor = new THREE.Mesh(
+        new THREE.BoxGeometry(basinW, 0.3, basinD),
+        new THREE.MeshStandardMaterial({ color: 0x0f293a, roughness: 0.85 })
+      );
+      basinFloor.position.set(0, 0.05, 0);
+      waterPlantGroup.add(basinFloor);
+
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.5 });
+      const w1 = new THREE.Mesh(new THREE.BoxGeometry(basinW + 0.8, 1.1, 0.6), wallMat); w1.position.set(0, 0.55, -basinD * 0.5);
+      const w2 = new THREE.Mesh(new THREE.BoxGeometry(basinW + 0.8, 1.1, 0.6), wallMat); w2.position.set(0, 0.55, basinD * 0.5);
+      const w3 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.1, basinD), wallMat); w3.position.set(basinW * 0.5, 0.55, 0);
+      const w4 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.1, basinD), wallMat); w4.position.set(-basinW * 0.5, 0.55, 0);
+      waterPlantGroup.add(w1, w2, w3, w4);
+
+      const waterGeo = new THREE.PlaneGeometry(basinW - 0.5, basinD - 0.5, 32, 24);
+      waterGeo.rotateX(-Math.PI / 2);
+      const waterMat = new THREE.MeshStandardMaterial({
+        color: 0x0ea5e9,
+        emissive: 0x0369a1,
+        emissiveIntensity: 0.35,
+        roughness: 0.15,
+        metalness: 0.2,
+        transparent: true,
+        opacity: 0.86
+      });
+      const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+      waterMesh.position.set(0, 0.72, 0);
+      waterMesh.userData = {
+        type: 'waterplant',
+        name: 'Municipal Water Treatment Plant',
+        desc: 'Active aeration basin with dual rotary clarifier tanks and intake manifold.'
+      };
+      waterPlantGroup.add(waterMesh);
+      terrainMeshes.push(waterMesh);
+
+      const clarifierBridges = [];
+      [-4.0, 2.5].forEach((offsetX) => {
+        const tankGroup = new THREE.Group();
+        tankGroup.position.set(offsetX, 0.4, -0.5);
+        const tankCyl = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.6, 1.1, 24), concreteRimMat);
+        tankCyl.position.set(0, 0.55, 0);
+        tankCyl.castShadow = true;
+        const tankInner = new THREE.Mesh(new THREE.CylinderGeometry(2.25, 2.25, 1.14, 24), new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.2 }));
+        tankInner.position.set(0, 0.56, 0);
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.22, 0.42), new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 }));
+        bridge.position.set(0, 1.24, 0);
+        bridge.castShadow = true;
+        tankGroup.add(tankCyl, tankInner, bridge);
+        clarifierBridges.push(bridge);
+        waterPlantGroup.add(tankGroup);
+      });
+
+      // Intake pipes
+      [-1.8, 1.8].forEach((pz) => {
+        const pipe = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.28, 0.28, 5.5, 12),
+          new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6, roughness: 0.35 })
+        );
+        pipe.rotation.z = Math.PI / 2;
+        pipe.position.set(-9.5, 0.95, pz);
+        waterPlantGroup.add(pipe);
+      });
+
+      markCellsOccupied(7, 15, -6, 0, true);
+
+      // =========================================================================
+      // 5. PROCEDURAL MODULAR BUILDINGS & INTERACTIVE PLACEMENT
+      // =========================================================================
+      function createModular4StoryBuilding(isGhost = false) {
+        const group = new THREE.Group();
+        const w = 3.8, d = 3.8, floorH = 1.35, floors = 4;
+        const brickMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x34d399, transparent: true, opacity: 0.55 })
+          : new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.8 });
+        const slabMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x6ee7b7, transparent: true, opacity: 0.65 })
+          : new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.6 });
+        const winMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0xa7f3d0, transparent: true, opacity: 0.7 })
+          : new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.15, metalness: 0.85 });
+
+        for (let f = 0; f < floors; f++) {
+          const yBase = f * floorH;
+          const plate = new THREE.Mesh(new THREE.BoxGeometry(w + 0.22, 0.2, d + 0.22), slabMat);
+          plate.position.set(0, yBase + 0.1, 0);
+          const wall = new THREE.Mesh(new THREE.BoxGeometry(w, floorH - 0.2, d), brickMat);
+          wall.position.set(0, yBase + 0.2 + (floorH - 0.2) * 0.5, 0);
+          if (!isGhost) {
+            plate.castShadow = plate.receiveShadow = wall.castShadow = wall.receiveShadow = true;
+          }
+          group.add(plate, wall);
+
+          [-0.95, 0.95].forEach(wx => {
+            const win1 = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.68, d + 0.08), winMat);
+            win1.position.set(wx, yBase + 0.78, 0);
+            const win2 = new THREE.Mesh(new THREE.BoxGeometry(w + 0.08, 0.68, 0.68), winMat);
+            win2.position.set(0, yBase + 0.78, wx);
+            group.add(win1, win2);
+          });
+        }
+        const roofY = floors * floorH;
+        const roofPlate = new THREE.Mesh(new THREE.BoxGeometry(w + 0.28, 0.24, d + 0.28), slabMat);
+        roofPlate.position.set(0, roofY + 0.12, 0);
+        const waterTank = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.9, 14), slabMat);
+        waterTank.position.set(0.9, roofY + 0.75, -0.8);
+        group.add(roofPlate, waterTank);
+        group.userData = { type: 'building', name: '4-Story Modular Brick Block', desc: 'Reinforced multi-story urban garrison with rooftop water tank.' };
+        return group;
+      }
+
+      function createIndustrialFactoryBuilding(isGhost = false) {
+        const group = new THREE.Group();
+        const bodyMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x34d399, transparent: true, opacity: 0.55 })
+          : new THREE.MeshStandardMaterial({ color: 0x2b3036, roughness: 0.65 });
+        const roofMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x6ee7b7, transparent: true, opacity: 0.65 })
+          : new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5 });
+        const stackMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x34d399, transparent: true, opacity: 0.6 })
+          : new THREE.MeshStandardMaterial({ color: 0x9a3412, roughness: 0.7 });
+
+        const base = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.32, 4.0), roofMat);
+        base.position.set(0, 0.16, 0);
+        const hall = new THREE.Mesh(new THREE.BoxGeometry(5.2, 2.6, 3.5), bodyMat);
+        hall.position.set(0, 1.62, 0);
+        if (!isGhost) { base.castShadow = hall.castShadow = hall.receiveShadow = true; }
+        group.add(base, hall);
+
+        [-1.3, -0.35].forEach(sx => {
+          const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.32, 3.0, 12), stackMat);
+          stack.position.set(sx, 4.2, -0.5);
+          if (!isGhost) stack.castShadow = true;
+          group.add(stack);
+        });
+        group.userData = { type: 'building', name: 'RTS Heavy Barracks & Factory', desc: 'Industrial infantry training depot with twin exhaust stacks.' };
+        return group;
+      }
+
+      function createWaterSubstationBuilding(isGhost = false) {
+        const group = new THREE.Group();
+        const tankMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x34d399, transparent: true, opacity: 0.55 })
+          : new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35 });
+        const baseMat = isGhost
+          ? new THREE.MeshStandardMaterial({ color: 0x6ee7b7, transparent: true, opacity: 0.65 })
+          : new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.6 });
+        const basePlate = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.28, 3.6), baseMat);
+        basePlate.position.set(0, 0.14, 0);
+        group.add(basePlate);
+        const t1 = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 2.4, 18), tankMat); t1.position.set(-0.8, 1.48, -0.5);
+        const t2 = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 2.4, 18), tankMat); t2.position.set(0.85, 1.48, -0.5);
+        if (!isGhost) { t1.castShadow = t2.castShadow = true; }
+        group.add(t1, t2);
+        group.userData = { type: 'building', name: 'Water Filtration Substation', desc: 'Pressurized hydro-storage silos and pump manifold.' };
+        return group;
+      }
+
+      const buildingBuilders = {
+        modular4: createModular4StoryBuilding,
+        factory: createIndustrialFactoryBuilding,
+        waterSub: createWaterSubstationBuilding
+      };
+
+      function placeStructureAt(builderFn, x, y, z, rotY = 0) {
+        const obj = builderFn(false);
+        obj.position.set(x, y, z);
+        obj.rotation.y = rotY;
+        scene.add(obj);
+        obj.traverse(child => {
+          if (child.isMesh) {
+            child.userData = obj.userData;
+            terrainMeshes.push(child);
+          }
+        });
+        return obj;
+      }
+
+      // Pre-place initial landmark buildings
+      placeStructureAt(createIndustrialFactoryBuilding, -13, 1.65, -12, 0);
+      placeStructureAt(createModular4StoryBuilding, 11, 1.05, 11, 0);
+      placeStructureAt(createWaterSubstationBuilding, 14, 0.0, -14, 0);
+
+      // Ghost preview state
+      let activeBuildMode = 'none';
+      let ghostRotation = 0;
+      let ghostMesh = null;
+
+      function setBuildMode(mode) {
+        activeBuildMode = mode;
+        if (ghostMesh) {
+          scene.remove(ghostMesh);
+          ghostMesh = null;
+        }
+        if (mode !== 'none' && buildingBuilders[mode]) {
+          ghostMesh = buildingBuilders[mode](true);
+          ghostMesh.visible = false;
+          scene.add(ghostMesh);
+        }
+        document.querySelectorAll('.build-btn').forEach(btn => {
+          const isMatch = btn.dataset.build === mode;
+          btn.className = isMatch
+            ? 'build-btn px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs whitespace-nowrap transition'
+            : 'build-btn px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 font-semibold text-xs whitespace-nowrap transition';
+        });
+      }
+
+      // =========================================================================
+      // 6. GPU VERTEX ANIMATION TEXTURE (VAT) INFANTRY WITH ACCENT COLORS
+      // =========================================================================
+      const VAT_FRAMES = 48; // 3 clips x 16 frames: [0..15] Idle, [16..31] March, [32..47] Aim/Fire
+
+      function buildHumanGeometryWithVATParts() {
+        // Build composite geometry with partId encoded in UV.y and accentMask in color attribute
+        const parts = [];
+        function addBoxPart(w, h, d, x, y, z, partId, baseColorHex, isAccent = false) {
+          const g = new THREE.BoxGeometry(w, h, d);
+          g.translate(x, y, z);
+          const pos = g.attributes.position;
+          const uv = g.attributes.uv;
+          const colors = new Float32Array(pos.count * 3);
+          const c = new THREE.Color(baseColorHex);
+          for (let i = 0; i < pos.count; i++) {
+            uv.setXY(i, partId / 8.0, isAccent ? 1.0 : 0.0);
+            colors[i * 3] = c.r;
+            colors[i * 3 + 1] = c.g;
+            colors[i * 3 + 2] = c.b;
+          }
+          g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+          parts.push(g);
+        }
+
+        // Part 0: Torso & Accent Shoulder/Chest Trim
+        addBoxPart(0.36, 0.46, 0.22, 0, 0.72, 0, 0, 0x4b5563, false);
+        addBoxPart(0.38, 0.14, 0.24, 0, 0.84, 0, 0, 0xffffff, true); // Accent chest/shoulder stripe
+        // Part 1: Head & Accent Helmet/Visor Band
+        addBoxPart(0.24, 0.24, 0.24, 0, 1.10, 0, 1, 0xf1c27d, false);
+        addBoxPart(0.27, 0.10, 0.27, 0, 1.21, 0, 1, 0xffffff, true); // Accent helmet/beret
+        // Part 2: Left Leg
+        addBoxPart(0.14, 0.48, 0.15, -0.10, 0.24, 0, 2, 0x374151, false);
+        // Part 3: Right Leg
+        addBoxPart(0.14, 0.48, 0.15, 0.10, 0.24, 0, 3, 0x374151, false);
+        // Part 4: Left Arm
+        addBoxPart(0.11, 0.40, 0.11, -0.25, 0.72, 0.04, 4, 0x6b7280, false);
+        // Part 5: Right Arm + Rifle + Accent Scope/Barrel
+        addBoxPart(0.11, 0.40, 0.11, 0.25, 0.72, 0.08, 5, 0x6b7280, false);
+        addBoxPart(0.06, 0.08, 0.62, 0.22, 0.76, 0.34, 5, 0x111827, false);
+        addBoxPart(0.07, 0.05, 0.14, 0.22, 0.82, 0.28, 5, 0xffffff, true); // Accent weapon core
+
+        // Merge non-indexed geometries
+        let totalVerts = 0;
+        parts.forEach(p => { totalVerts += p.attributes.position.count; });
+        const merged = new THREE.BufferGeometry();
+        const mPos = new Float32Array(totalVerts * 3);
+        const mNorm = new Float32Array(totalVerts * 3);
+        const mUv = new Float32Array(totalVerts * 2);
+        const mCol = new Float32Array(totalVerts * 3);
+
+        let offset = 0;
+        parts.forEach(p => {
+          const count = p.attributes.position.count;
+          mPos.set(p.attributes.position.array, offset * 3);
+          mNorm.set(p.attributes.normal.array, offset * 3);
+          mUv.set(p.attributes.uv.array, offset * 2);
+          mCol.set(p.attributes.color.array, offset * 3);
+          offset += count;
+        });
+
+        merged.setAttribute('position', new THREE.BufferAttribute(mPos, 3));
+        merged.setAttribute('normal', new THREE.BufferAttribute(mNorm, 3));
+        merged.setAttribute('uv', new THREE.BufferAttribute(mUv, 2));
+        merged.setAttribute('color', new THREE.BufferAttribute(mCol, 3));
+        return merged;
+      }
+
+      // Bake procedural VAT DataTexture (width = 8 body parts, height = 48 frames)
+      function createProceduralVATTexture() {
+        const width = 8;
+        const height = VAT_FRAMES;
+        const data = new Float32Array(width * height * 4);
+
+        const previewCanvas = document.getElementById('vat-preview-canvas');
+        const pCtx = previewCanvas.getContext('2d');
+        const imgData = pCtx.createImageData(previewCanvas.width, previewCanvas.height);
+
+        for (let frame = 0; frame < height; frame++) {
+          const clip = Math.floor(frame / 16); // 0: Idle, 1: March, 2: Fire
+          const t = (frame % 16) / 16.0 * Math.PI * 2;
+
+          for (let part = 0; part < width; part++) {
+            let dx = 0, dy = 0, dz = 0;
+            if (clip === 0) {
+              // Idle breathing
+              if (part === 0 || part === 1 || part === 4 || part === 5) {
+                dy = Math.sin(t) * 0.025;
+              }
+            } else if (clip === 1) {
+              // March stride
+              const bounce = Math.abs(Math.sin(t)) * 0.045;
+              if (part === 0 || part === 1) dy = bounce;
+              if (part === 2) { dz = Math.sin(t) * 0.18; dy = Math.max(0, -Math.cos(t)) * 0.06; }
+              if (part === 3) { dz = -Math.sin(t) * 0.18; dy = Math.max(0, Math.cos(t)) * 0.06; }
+              if (part === 4) { dz = -Math.sin(t) * 0.12; dy = bounce; }
+              if (part === 5) { dz = Math.sin(t) * 0.10; dy = bounce; }
+            } else {
+              // Aim & Recoil kick
+              const recoil = Math.pow(Math.max(0, Math.sin(t * 2)), 4) * 0.11;
+              if (part === 5) { dz = -recoil; dy = recoil * 0.3; }
+              if (part === 0 || part === 1) { dz = -recoil * 0.35; }
+            }
+
+            const idx = (frame * width + part) * 4;
+            data[idx] = dx;
+            data[idx + 1] = dy;
+            data[idx + 2] = dz;
+            data[idx + 3] = 1.0;
+          }
+        }
+
+        // Paint visual preview onto HUD canvas
+        for (let y = 0; y < previewCanvas.height; y++) {
+          const f = Math.floor((y / previewCanvas.height) * height);
+          for (let x = 0; x < previewCanvas.width; x++) {
+            const p = Math.floor((x / previewCanvas.width) * width);
+            const idx = (f * width + p) * 4;
+            const pIdx = (y * previewCanvas.width + x) * 4;
+            imgData.data[pIdx] = Math.min(255, Math.floor((data[idx] + 0.2) * 550));
+            imgData.data[pIdx + 1] = Math.min(255, Math.floor((data[idx + 1] + 0.1) * 950));
+            imgData.data[pIdx + 2] = Math.min(255, Math.floor((data[idx + 2] + 0.2) * 550));
+            imgData.data[pIdx + 3] = 255;
+          }
+        }
+        pCtx.putImageData(imgData, 0, 0);
+
+        const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
+        tex.needsUpdate = true;
+        return tex;
+      }
+
+      const vatTexture = createProceduralVATTexture();
+      const humanBaseGeo = buildHumanGeometryWithVATParts();
+
+      const vatUniforms = {
+        uVatTex: { value: vatTexture },
+        uTime: { value: 0 },
+        uAccentColor: { value: new THREE.Color(0x22c55e) }
+      };
+
+      const vatMaterial = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.55,
+        metalness: 0.15
+      });
+
+      vatMaterial.onBeforeCompile = (shader) => {
+        shader.uniforms.uVatTex = vatUniforms.uVatTex;
+        shader.uniforms.uTime = vatUniforms.uTime;
+        shader.uniforms.uAccentColor = vatUniforms.uAccentColor;
+
+        shader.vertexShader = `
+          uniform sampler2D uVatTex;
+          uniform float uTime;
+          uniform vec3 uAccentColor;
+          attribute vec3 aInstanceMeta; // x: phaseOffset, y: clipIndex (0,1,2), z: roleTint
+          varying float vIsAccent;
+          varying float vRoleTint;
+        ` + shader.vertexShader;
+
+        shader.vertexShader = shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `
+          #include <begin_vertex>
+          vIsAccent = uv.y;
+          vRoleTint = aInstanceMeta.z;
+          float frameInClip = mod((uTime * 18.0) + aInstanceMeta.x, 16.0);
+          float globalFrame = aInstanceMeta.y * 16.0 + frameInClip;
+          vec2 vatUv = vec2(uv.x + 0.0625, (globalFrame + 0.5) / 48.0);
+          vec3 vatOffset = texture2D(uVatTex, vatUv).xyz;
+          transformed += vatOffset;
+          `
+        );
+
+        shader.fragmentShader = `
+          uniform vec3 uAccentColor;
+          varying float vIsAccent;
+          varying float vRoleTint;
+        ` + shader.fragmentShader;
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <color_fragment>',
+          `
+          #include <color_fragment>
+          vec3 roleBase = mix(vec3(0.45, 0.52, 0.36), vec3(0.32, 0.42, 0.55), vRoleTint);
+          diffuseColor.rgb = mix(diffuseColor.rgb * roleBase * 1.65, uAccentColor, step(0.5, vIsAccent));
+          `
+        );
+      };
+
+      const MAX_UNITS = 400;
+      let activeUnitCount = 120;
+      let forcedAnimClip = 'all';
+      const instancedHumans = new THREE.InstancedMesh(humanBaseGeo, vatMaterial, MAX_UNITS);
+      instancedHumans.castShadow = true;
+      instancedHumans.receiveShadow = true;
+      instancedHumans.count = activeUnitCount;
+      scene.add(instancedHumans);
+
+      const unitAgents = [];
+      const instanceMetaArray = new Float32Array(MAX_UNITS * 3);
+      const dummyObj = new THREE.Object3D();
+
+      for (let i = 0; i < MAX_UNITS; i++) {
+        const isRifleGuy = i % 2 === 1;
+        const angle = (i / MAX_UNITS) * Math.PI * 14;
+        const radius = 5 + (i % 18) * 1.15;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const clip = i % 3 === 0 ? 2 : 1; // March or Fire
+
+        unitAgents.push({
+          x,
+          z,
+          vx: Math.cos(angle + Math.PI / 2) * (isRifleGuy ? 1.1 : 1.45),
+          vz: Math.sin(angle + Math.PI / 2) * (isRifleGuy ? 1.1 : 1.45),
+          phase: (i * 3.7) % 16,
+          baseClip: clip,
+          isRifleGuy
+        });
+
+        instanceMetaArray[i * 3] = unitAgents[i].phase;
+        instanceMetaArray[i * 3 + 1] = clip;
+        instanceMetaArray[i * 3 + 2] = isRifleGuy ? 1.0 : 0.0;
+      }
+
+      humanBaseGeo.setAttribute('aInstanceMeta', new THREE.InstancedBufferAttribute(instanceMetaArray, 3));
+
+      function getSurfaceHeightAt(x, z) {
+        // Check stepped green terraces
+        if (x >= -21 && x <= -5 && z >= 3 && z <= 19) return 1.35;
+        if (x >= 3 && x <= 19 && z >= 3 && z <= 19) return 1.05;
+        if (x >= -21 && x <= -5 && z >= -19 && z <= -5) return 1.65;
+        if (x >= 3 && x <= 15 && z >= -19 && z <= -7) return 0.95;
+        // Walkways
+        if (Math.abs(x) <= 3 || Math.abs(z) <= 3) return 0.18;
+        return 0.0;
+      }
+
+      function updateVATUnits(dt) {
+        const metaAttr = humanBaseGeo.getAttribute('aInstanceMeta');
+        for (let i = 0; i < activeUnitCount; i++) {
+          const u = unitAgents[i];
+          const desiredClip = forcedAnimClip === 'march' ? 1 : forcedAnimClip === 'fire' ? 2 : u.baseClip;
+          metaAttr.array[i * 3 + 1] = desiredClip;
+
+          if (desiredClip === 1) {
+            u.x += u.vx * dt;
+            u.z += u.vz * dt;
+            // Keep patrol inside map bounds and clear of water basin
+            if (Math.abs(u.x) > 19 || Math.abs(u.z) > 19 || (u.x > 12 && u.z > -13 && u.z < 1)) {
+              u.vx = -u.vx;
+              u.vz = -u.vz;
+              u.x += u.vx * dt * 2;
+              u.z += u.vz * dt * 2;
+            }
+          }
+
+          const y = getSurfaceHeightAt(u.x, u.z);
+          dummyObj.position.set(u.x, y, u.z);
+          dummyObj.rotation.y = Math.atan2(u.vx, u.vz);
+          const scale = u.isRifleGuy ? 1.06 : 0.96;
+          dummyObj.scale.set(scale, scale, scale);
+          dummyObj.updateMatrix();
+          instancedHumans.setMatrixAt(i, dummyObj.matrix);
+        }
+        instancedHumans.instanceMatrix.needsUpdate = true;
+        metaAttr.needsUpdate = true;
+      }
+
+      // =========================================================================
+      // 7. BEAVIS & BUTT-HEAD 3D CHOREOGRAPHY STAGE + LO-FI TTS & FART SYNTH
+      // =========================================================================
+      const stageGroup = new THREE.Group();
+      stageGroup.position.set(10, 0.18, 2.5);
+      scene.add(stageGroup);
+
+      // Iconic worn brown couch + CRT TV prop
+      const couchMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 });
+      const couchBase = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.55, 1.25), couchMat);
+      couchBase.position.set(0, 0.28, -0.8);
+      const couchBack = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.75, 0.32), couchMat);
+      couchBack.position.set(0, 0.85, -1.28);
+      couchBase.castShadow = couchBack.castShadow = true;
+      stageGroup.add(couchBase, couchBack);
+
+      function createCartoonDuoCharacter(shirtColor, hairColor, hairTilt) {
+        const char = new THREE.Group();
+        const torso = new THREE.Mesh(
+          new THREE.BoxGeometry(0.46, 0.62, 0.28),
+          new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.6 })
+        );
+        torso.position.y = 0.85;
+        torso.castShadow = true;
+
+        const legs = new THREE.Mesh(
+          new THREE.BoxGeometry(0.42, 0.54, 0.24),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 })
+        );
+        legs.position.y = 0.27;
+
+        const headGroup = new THREE.Group();
+        headGroup.position.set(0, 1.36, 0);
+        const head = new THREE.Mesh(
+          new THREE.BoxGeometry(0.32, 0.36, 0.32),
+          new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.5 })
+        );
+        const hair = new THREE.Mesh(
+          new THREE.BoxGeometry(0.36, 0.26, 0.38),
+          new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.7 })
+        );
+        hair.position.set(0, 0.22, 0.04);
+        hair.rotation.x = hairTilt;
+        headGroup.add(head, hair);
+
+        // Articulated Right Arm + Extended Index Finger Pivot
+        const armPivot = new THREE.Group();
+        armPivot.position.set(0.30, 1.08, 0.05);
+        const armMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, 0.46, 0.14),
+          new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.5 })
+        );
+        armMesh.position.set(0, -0.20, 0);
+        const fingerMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.18, 0.06),
+          new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.4 })
+        );
+        fingerMesh.position.set(0, -0.48, 0.04);
+        armPivot.add(armMesh, fingerMesh);
+
+        // Left Arm
+        const leftArmPivot = new THREE.Group();
+        leftArmPivot.position.set(-0.30, 1.08, 0.05);
+        const leftArmMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.14, 0.46, 0.14),
+          new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.5 })
+        );
+        leftArmMesh.position.set(0, -0.20, 0);
+        leftArmPivot.add(leftArmMesh);
+
+        char.add(torso, legs, headGroup, armPivot, leftArmPivot);
+        return { root: char, headGroup, armPivot, leftArmPivot, torso };
+      }
+
+      // Beavis (Blonde pompadour, blue Metallica-style tee) & Butt-Head (Brown hair, grey AC/DC-style tee)
+      const beavis = createCartoonDuoCharacter(0x2563eb, 0xfacc15, -0.35);
+      beavis.root.position.set(-0.75, 0, 0.25);
+      beavis.root.rotation.y = 0.35;
+      stageGroup.add(beavis.root);
+
+      const butthead = createCartoonDuoCharacter(0x334155, 0x451a03, 0.15);
+      butthead.root.position.set(0.75, 0, 0.25);
+      butthead.root.rotation.y = -0.35;
+      stageGroup.add(butthead.root);
+
+      // Green gas puff particles for the punchline
+      const gasParticles = [];
+      const gasGeo = new THREE.SphereGeometry(0.16, 10, 10);
+      const gasMat = new THREE.MeshBasicMaterial({ color: 0x84cc16, transparent: true, opacity: 0.0 });
+      for (let g = 0; g < 10; g++) {
+        const p = new THREE.Mesh(gasGeo, gasMat.clone());
+        p.position.set(-0.75, 0.55, -0.1);
+        stageGroup.add(p);
+        gasParticles.push({ mesh: p, vel: new THREE.Vector3(), life: 0 });
+      }
+
+      function triggerGasCloud() {
+        gasParticles.forEach((gp, idx) => {
+          gp.life = 1.0;
+          gp.mesh.position.set(-0.75 + (Math.random() - 0.5) * 0.25, 0.52, -0.15);
+          gp.vel.set((Math.random() - 0.5) * 0.9, 0.6 + Math.random() * 0.7, -0.6 - Math.random() * 0.6);
+          gp.mesh.material.opacity = 0.85;
+          gp.mesh.scale.setScalar(0.6 + idx * 0.12);
+        });
+      }
+
+      // WebAudio Lo-Fi Radio Crackle + Procedural Fart Synth + SpeechSynthesis
+      let audioCtx = null;
+      function ensureAudioCtx() {
+        if (!audioCtx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          audioCtx = new AudioContext();
+        }
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+      }
+
+      function playLoFiStaticBurst(duration = 0.6) {
+        if (!document.getElementById('chk-lofi-tts').checked) return;
+        ensureAudioCtx();
+        const bufferSize = Math.floor(audioCtx.sampleRate * duration);
+        const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+        const output = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = (Math.random() * 2 - 1) * 0.045 * (i % 12 === 0 ? 2.5 : 0.4);
+        }
+        const whiteNoise = audioCtx.createBufferSource();
+        whiteNoise.buffer = buffer;
+
+        const bandpass = audioCtx.createBiquadFilter();
+        bandpass.type = 'bandpass';
+        bandpass.frequency.value = 1350;
+        bandpass.Q.value = 2.8;
+
+        whiteNoise.connect(bandpass);
+        bandpass.connect(audioCtx.destination);
+        whiteNoise.start();
+      }
+
+      function playSynthesizedFart() {
+        ensureAudioCtx();
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const lfo = audioCtx.createOscillator();
+        const lfoGain = audioCtx.createGain();
+        const mainGain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
+
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(115, now);
+        osc.frequency.exponentialRampToValueAtTime(42, now + 0.75);
+
+        lfo.type = 'square';
+        lfo.frequency.setValueAtTime(26, now);
+        lfo.frequency.linearRampToValueAtTime(14, now + 0.75);
+        lfoGain.gain.setValueAtTime(38, now);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(420, now);
+
+        mainGain.gain.setValueAtTime(0.01, now);
+        mainGain.gain.linearRampToValueAtTime(0.45, now + 0.06);
+        mainGain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+        osc.connect(filter);
+        filter.connect(mainGain);
+        mainGain.connect(audioCtx.destination);
+
+        osc.start(now);
+        lfo.start(now);
+        osc.stop(now + 0.88);
+        lfo.stop(now + 0.88);
+      }
+
+      function speakLoFiLine(text, pitch = 1.35, rate = 1.05) {
+        playLoFiStaticBurst(0.8);
+        if ('speechSynthesis' in window && document.getElementById('chk-lofi-tts').checked) {
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.pitch = pitch;
+          utter.rate = rate;
+          utter.volume = 0.95;
+          window.speechSynthesis.speak(utter);
+        }
+      }
+
+      // Choreography State Machine
+      const skitState = {
+        active: false,
+        timer: 0,
+        step: -1
+      };
+
+      const bubbleBeavis = document.getElementById('bubble-beavis');
+      const bubbleBeavisText = document.getElementById('bubble-beavis-text');
+      const bubbleButthead = document.getElementById('bubble-butthead');
+      const bubbleButtheadText = document.getElementById('bubble-butthead-text');
+      const skitStatusBadge = document.getElementById('skit-status');
+
+      function startPullMyFingerSkit() {
+        ensureAudioCtx();
+        skitState.active = true;
+        skitState.timer = 0;
+        skitState.step = -1;
+        skitStatusBadge.textContent = 'LIVE ACTING';
+        skitStatusBadge.className = 'text-[10px] font-mono text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded';
+      }
+
+      function updateChoreography(dt, elapsed) {
+        // Idle head bobbing when not acting
+        if (!skitState.active) {
+          beavis.headGroup.rotation.x = Math.sin(elapsed * 4.5) * 0.08;
+          butthead.headGroup.rotation.x = Math.sin(elapsed * 3.8 + 1) * 0.07;
+          beavis.armPivot.rotation.x = THREE.MathUtils.lerp(beavis.armPivot.rotation.x, 0, dt * 5);
+          beavis.armPivot.rotation.z = THREE.MathUtils.lerp(beavis.armPivot.rotation.z, 0, dt * 5);
+          butthead.leftArmPivot.rotation.x = THREE.MathUtils.lerp(butthead.leftArmPivot.rotation.x, 0, dt * 5);
+          butthead.leftArmPivot.rotation.z = THREE.MathUtils.lerp(butthead.leftArmPivot.rotation.z, 0, dt * 5);
+          return;
+        }
+
+        skitState.timer += dt;
+        const t = skitState.timer;
+
+        // Step 0: Beavis extends his finger toward Butt-Head
+        if (t >= 0.0 && skitState.step < 0) {
+          skitState.step = 0;
+          bubbleBeavis.classList.remove('hidden');
+          bubbleButthead.classList.add('hidden');
+          bubbleBeavisText.textContent = 'Heh heh! Hey Butt-Head, pull my finger!';
+          speakLoFiLine('Heh heh! Hey Butt-Head, pull my finger!', 1.55, 1.12);
+        }
+        if (t < 2.6) {
+          beavis.armPivot.rotation.z = THREE.MathUtils.lerp(beavis.armPivot.rotation.z, 1.35, dt * 6);
+          beavis.armPivot.rotation.x = THREE.MathUtils.lerp(beavis.armPivot.rotation.x, -0.35, dt * 6);
+          beavis.headGroup.rotation.y = Math.sin(t * 14) * 0.12;
+        }
+
+        // Step 1: Butt-Head reaches over and grabs/pulls Beavis's finger
+        if (t >= 2.6 && skitState.step < 1) {
+          skitState.step = 1;
+          bubbleButthead.classList.remove('hidden');
+          bubbleButtheadText.textContent = 'Uh huh huh... okay dumbass.';
+          speakLoFiLine('Uh huh huh... okay dumbass.', 0.72, 0.92);
+        }
+        if (t >= 2.6 && t < 4.8) {
+          butthead.leftArmPivot.rotation.z = THREE.MathUtils.lerp(butthead.leftArmPivot.rotation.z, -1.25, dt * 6);
+          butthead.leftArmPivot.rotation.x = THREE.MathUtils.lerp(butthead.leftArmPivot.rotation.x, -0.3, dt * 6);
+          // Yank motion at t = 4.1
+          if (t > 4.0) {
+            const yank = Math.sin((t - 4.0) * 18) * 0.25;
+            beavis.armPivot.rotation.z = 1.35 + yank;
+            butthead.leftArmPivot.rotation.z = -1.25 + yank;
+          }
+        }
+
+        // Step 2: Punchline! Synthesized Fart + Green Gas Cloud + Duo Laughing
+        if (t >= 4.8 && skitState.step < 2) {
+          skitState.step = 2;
+          playSynthesizedFart();
+          triggerGasCloud();
+          bubbleBeavisText.textContent = 'HEH HEH! FIRE! BOIOIOING!';
+          bubbleButtheadText.textContent = 'UH HUH HUH! THAT WAS COOL!';
+          setTimeout(() => {
+            speakLoFiLine('Heh heh heh! Uh huh huh huh! That ruled!', 1.25, 1.15);
+          }, 550);
+        }
+        if (t >= 4.8 && t < 8.4) {
+          // Laughing bounce
+          beavis.torso.position.y = 0.85 + Math.abs(Math.sin(t * 18)) * 0.08;
+          butthead.torso.position.y = 0.85 + Math.abs(Math.cos(t * 16)) * 0.07;
+          beavis.headGroup.rotation.x = -0.25 + Math.sin(t * 20) * 0.15;
+          butthead.headGroup.rotation.x = -0.20 + Math.cos(t * 18) * 0.15;
+        }
+
+        // Step 3: End skit & reset poses
+        if (t >= 8.5) {
+          skitState.active = false;
+          bubbleBeavis.classList.add('hidden');
+          bubbleButthead.classList.add('hidden');
+          beavis.torso.position.y = 0.85;
+          butthead.torso.position.y = 0.85;
+          skitStatusBadge.textContent = 'READY';
+          skitStatusBadge.className = 'text-[10px] font-mono text-slate-300 bg-white/10 px-2 py-0.5 rounded';
+        }
+      }
+
+      function updateSpeechBubblePositions() {
+        const tempVec = new THREE.Vector3();
+        if (!bubbleBeavis.classList.contains('hidden')) {
+          beavis.headGroup.getWorldPosition(tempVec);
+          tempVec.y += 0.65;
+          tempVec.project(camera);
+          const x = (tempVec.x * 0.5 + 0.5) * window.innerWidth;
+          const y = (-tempVec.y * 0.5 + 0.5) * window.innerHeight;
+          bubbleBeavis.style.left = `${x}px`;
+          bubbleBeavis.style.top = `${y}px`;
+        }
+        if (!bubbleButthead.classList.contains('hidden')) {
+          butthead.headGroup.getWorldPosition(tempVec);
+          tempVec.y += 0.65;
+          tempVec.project(camera);
+          const x = (tempVec.x * 0.5 + 0.5) * window.innerWidth;
+          const y = (-tempVec.y * 0.5 + 0.5) * window.innerHeight;
+          bubbleButthead.style.left = `${x}px`;
+          bubbleButthead.style.top = `${y}px`;
+        }
+      }
+
+      // =========================================================================
+      // 8. ORBIT / PAN / ZOOM CONTROLS & RAYCASTING FOR GRID PLACEMENT
+      // =========================================================================
+      const camTarget = new THREE.Vector3(4, 1.0, 0);
+      let camYaw = 0.62;
+      let camPitch = 0.58;
+      let camDist = 30;
+
+      function updateCameraTransform() {
+        camPitch = Math.max(0.18, Math.min(1.42, camPitch));
+        camDist = Math.max(8, Math.min(68, camDist));
+        camera.position.x = camTarget.x + Math.sin(camYaw) * Math.cos(camPitch) * camDist;
+        camera.position.y = camTarget.y + Math.sin(camPitch) * camDist;
+        camera.position.z = camTarget.z + Math.cos(camYaw) * Math.cos(camPitch) * camDist;
+        camera.lookAt(camTarget);
+      }
+      updateCameraTransform();
+
+      let isDragging = false;
+      let dragMoved = false;
+      let prevPointer = { x: 0, y: 0 };
+      let pinchStartDist = 0;
+
+      const raycaster = new THREE.Raycaster();
+      const pointerNDC = new THREE.Vector2();
+      let hoveredCell = { gx: 0, gz: 0, y: 0, valid: true, hitObj: null };
+
+      function updateGridRaycast(clientX, clientY) {
+        pointerNDC.x = (clientX / window.innerWidth) * 2 - 1;
+        pointerNDC.y = -(clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(pointerNDC, camera);
+        const hits = raycaster.intersectObjects(terrainMeshes, false);
+        if (hits.length > 0) {
+          const hit = hits[0];
+          const gx = Math.round(hit.point.x / TILE_SIZE);
+          const gz = Math.round(hit.point.z / TILE_SIZE);
+          const snapX = gx * TILE_SIZE;
+          const snapZ = gz * TILE_SIZE;
+          const isBlocked = occupiedCells.has(cellKey(gx, gz)) || waterCells.has(cellKey(gx, gz));
+
+          hoveredCell = { gx, gz, snapX, snapZ, y: hit.point.y, valid: !isBlocked, hitObj: hit.object };
+          document.getElementById('hud-coords').textContent = `${gx}, ${gz}`;
+
+          cellHighlight.position.set(snapX, hit.point.y + 0.04, snapZ);
+          cellHighlight.material.color.setHex(isBlocked ? 0xef4444 : 0x22c55e);
+
+          if (ghostMesh) {
+            ghostMesh.visible = true;
+            ghostMesh.position.set(snapX, hit.point.y, snapZ);
+            ghostMesh.rotation.y = ghostRotation;
+            ghostMesh.traverse(c => {
+              if (c.isMesh && c.material) {
+                c.material.color.setHex(isBlocked ? 0xef4444 : 0x34d399);
+              }
+            });
+          }
+        }
+      }
+
+      function showToast(msg) {
+        const el = document.getElementById('toast-msg');
+        el.firstElementChild.textContent = msg;
+        el.style.opacity = '1';
+        clearTimeout(el._timer);
+        el._timer = setTimeout(() => { el.style.opacity = '0'; }, 2000);
+      }
+
+      function handleCanvasTap() {
+        if (activeBuildMode !== 'none' && buildingBuilders[activeBuildMode]) {
+          if (!hoveredCell.valid) {
+            showToast('Blocked: Cannot build on water or occupied cell!');
+            return;
+          }
+          placeStructureAt(
+            buildingBuilders[activeBuildMode],
+            hoveredCell.snapX,
+            hoveredCell.y,
+            hoveredCell.snapZ,
+            ghostRotation
+          );
+          markCellsOccupied(hoveredCell.gx - 1, hoveredCell.gx + 1, hoveredCell.gz - 1, hoveredCell.gz + 1, false);
+          showToast(`Built ${buildingBuilders[activeBuildMode](false).userData.name}`);
+        } else if (hoveredCell.hitObj && hoveredCell.hitObj.userData) {
+          const info = hoveredCell.hitObj.userData;
+          document.getElementById('inspector-name').textContent = info.name || 'Map Sector';
+          document.getElementById('inspector-desc').textContent = info.desc || 'RTS tactical zone.';
+        }
+      }
+
+      const domEl = renderer.domElement;
+      domEl.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        dragMoved = false;
+        prevPointer = { x: e.clientX, y: e.clientY };
+        updateGridRaycast(e.clientX, e.clientY);
+      });
+
+      window.addEventListener('pointermove', (e) => {
+        updateGridRaycast(e.clientX, e.clientY);
+        if (!isDragging) return;
+        const dx = e.clientX - prevPointer.x;
+        const dy = e.clientY - prevPointer.y;
+        if (Math.hypot(dx, dy) > 4) dragMoved = true;
+
+        if (e.buttons === 2 || e.shiftKey) {
+          const right = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
+          const forward = new THREE.Vector3(Math.sin(camYaw), 0, Math.cos(camYaw));
+          camTarget.addScaledVector(right, -dx * 0.03);
+          camTarget.addScaledVector(forward, -dy * 0.03);
+        } else {
+          camYaw -= dx * 0.0065;
+          camPitch += dy * 0.0065;
+        }
+        updateCameraTransform();
+        prevPointer = { x: e.clientX, y: e.clientY };
+      });
+
+      window.addEventListener('pointerup', () => {
+        if (isDragging && !dragMoved) {
+          handleCanvasTap();
+        }
+        isDragging = false;
+      });
+
+      domEl.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        camDist += e.deltaY * 0.02;
+        updateCameraTransform();
+      }, { passive: false });
+
+      domEl.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          pinchStartDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+        }
+      }, { passive: true });
+
+      domEl.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && pinchStartDist > 0) {
+          const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+          );
+          camDist -= (dist - pinchStartDist) * 0.05;
+          pinchStartDist = dist;
+          updateCameraTransform();
+        }
+      }, { passive: true });
+
+      // =========================================================================
+      // 9. UI EVENT BINDINGS
+      // =========================================================================
+      document.getElementById('btn-play-skit').addEventListener('click', () => {
+        camTarget.set(10, 1.0, 2.5);
+        camYaw = 0.25;
+        camPitch = 0.35;
+        camDist = 11.5;
+        updateCameraTransform();
+        startPullMyFingerSkit();
+      });
+
+      document.getElementById('btn-focus-duo').addEventListener('click', () => {
+        camTarget.set(10, 1.0, 2.5);
+        camYaw = 0.25;
+        camPitch = 0.35;
+        camDist = 11.5;
+        updateCameraTransform();
+      });
+
+      document.getElementById('btn-test-fart').addEventListener('click', () => {
+        playSynthesizedFart();
+        triggerGasCloud();
+      });
+
+      document.querySelectorAll('#accent-swatches button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const hex = btn.dataset.color;
+          vatUniforms.uAccentColor.value.set(hex);
+          document.getElementById('accent-label').textContent = btn.dataset.name;
+          document.querySelectorAll('#accent-swatches button').forEach(b => {
+            b.classList.remove('ring-2', 'ring-white');
+          });
+          btn.classList.add('ring-2', 'ring-white');
+        });
+      });
+
+      document.getElementById('slider-units').addEventListener('input', (e) => {
+        activeUnitCount = parseInt(e.target.value, 10);
+        instancedHumans.count = activeUnitCount;
+        document.getElementById('unit-count-val').textContent = activeUnitCount;
+        document.getElementById('hud-units').textContent = activeUnitCount;
+      });
+
+      document.querySelectorAll('.vat-anim-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          forcedAnimClip = btn.dataset.anim;
+          document.querySelectorAll('.vat-anim-btn').forEach(b => {
+            b.className = b.dataset.anim === forcedAnimClip
+              ? 'vat-anim-btn py-1 px-2 rounded bg-emerald-600 text-white font-semibold text-[11px]'
+              : 'vat-anim-btn py-1 px-2 rounded bg-white/10 hover:bg-white/20 text-slate-200 text-[11px]';
+          });
+        });
+      });
+
+      document.getElementById('slider-alpha').addEventListener('input', (e) => {
+        const pct = parseInt(e.target.value, 10);
+        document.documentElement.style.setProperty('--panel-alpha', (pct / 100).toFixed(2));
+        document.getElementById('alpha-val').textContent = `${pct}%`;
+      });
+
+      document.querySelectorAll('.sky-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mode = btn.dataset.sky;
+          const colors = { blue: 0x1e88e5, grey: 0x6b7280, night: 0x0f172a };
+          const col = colors[mode] || 0x1e88e5;
+          scene.background.setHex(col);
+          scene.fog.color.setHex(col);
+        });
+      });
+
+      document.getElementById('chk-grid').addEventListener('change', (e) => {
+        gridHelper.visible = e.target.checked;
+        cellHighlight.visible = e.target.checked;
+      });
+
+      document.querySelectorAll('.build-btn').forEach(btn => {
+        btn.addEventListener('click', () => setBuildMode(btn.dataset.build));
+      });
+
+      document.getElementById('btn-rotate-ghost').addEventListener('click', () => {
+        ghostRotation += Math.PI / 2;
+        if (ghostMesh) ghostMesh.rotation.y = ghostRotation;
+      });
+
+      let hudHidden = false;
+      document.getElementById('btn-toggle-hud').addEventListener('click', (e) => {
+        hudHidden = !hudHidden;
+        document.getElementById('hud-panels').style.display = hudHidden ? 'none' : '';
+        e.target.textContent = hudHidden ? 'Show Panels' : 'Hide Panels';
+      });
+
+      document.getElementById('btn-reset-cam').addEventListener('click', () => {
+        camTarget.set(4, 1.0, 0);
+        camYaw = 0.62;
+        camPitch = 0.58;
+        camDist = 30;
+        updateCameraTransform();
+      });
+
+      window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // =========================================================================
+      // 10. MAIN RENDER LOOP
+      // =========================================================================
+      const clock = new THREE.Clock();
+      let fpsFrames = 0;
+      let fpsLast = performance.now();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.05);
+        const elapsed = clock.getElapsedTime();
+
+        // Update VAT shader time & unit patrol
+        vatUniforms.uTime.value = elapsed;
+        updateVATUnits(dt);
+
+        // Animate Water Plant waves & rotary clarifiers
+        const wPos = waterGeo.attributes.position;
+        for (let i = 0; i < wPos.count; i++) {
+          const vx = wPos.getX(i);
+          const vz = wPos.getZ(i);
+          wPos.setY(i, Math.sin(vx * 1.1 + elapsed * 3.0) * 0.04 + Math.cos(vz * 1.3 + elapsed * 2.4) * 0.04);
+        }
+        wPos.needsUpdate = true;
+        clarifierBridges.forEach((b, idx) => {
+          b.rotation.y = elapsed * (idx === 0 ? 0.55 : -0.45);
+        });
+
+        // Update Beavis & Butt-Head choreography & gas particles
+        updateChoreography(dt, elapsed);
+        gasParticles.forEach(gp => {
+          if (gp.life > 0) {
+            gp.life -= dt * 0.55;
+            gp.mesh.position.addScaledVector(gp.vel, dt);
+            gp.mesh.scale.addScalar(dt * 0.65);
+            gp.mesh.material.opacity = Math.max(0, gp.life * 0.85);
+          }
+        });
+
+        renderer.render(scene, camera);
+        updateSpeechBubblePositions();
+
+        fpsFrames++;
+        const now = performance.now();
+        if (now - fpsLast >= 500) {
+          document.getElementById('hud-fps').textContent = Math.round((fpsFrames * 1000) / (now - fpsLast));
+          fpsFrames = 0;
+          fpsLast = now;
+        }
+      }
+
+      animate();
+    });
+  </script>
+</body>
+</html>
