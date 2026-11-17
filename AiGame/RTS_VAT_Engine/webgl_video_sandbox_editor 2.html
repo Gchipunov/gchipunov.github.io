@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Video Sandbox Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: #eee; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100%; height: 100%; outline: none; }
+        .panel { background-color: rgba(30, 30, 30, 0.95); backdrop-filter: blur(10px); border: 1px solid #333; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        input[type="number"] { background: #2a2a2a; border: 1px solid #444; color: white; padding: 2px 4px; border-radius: 4px; width: 60px; outline: none; }
+        input[type="number"]:focus { border-color: #3b82f6; }
+        
+        .selected-item { background-color: #2563eb; color: white; }
+    </style>
+    <!-- Import Maps for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body class="h-screen w-screen flex flex-col text-sm select-none">
+
+    <!-- Top Toolbar -->
+    <div class="h-12 border-b border-gray-800 bg-gray-900 flex items-center justify-between px-4 z-10 shrink-0">
+        <div class="flex items-center gap-4">
+            <div class="text-blue-500 font-bold text-lg tracking-wider flex items-center gap-2">
+                <i class="fa-solid fa-cube"></i> SceneCraft
+            </div>
+            <div class="h-6 w-px bg-gray-700 mx-2"></div>
+            <!-- Transform Modes -->
+            <div class="flex bg-gray-800 rounded-md p-1 border border-gray-700">
+                <button id="btn-translate" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 transition" title="Translate (W)"><i class="fa-solid fa-arrows-up-down-left-right"></i></button>
+                <button id="btn-rotate" class="px-3 py-1 rounded hover:bg-gray-700 transition" title="Rotate (E)"><i class="fa-solid fa-rotate"></i></button>
+                <button id="btn-scale" class="px-3 py-1 rounded hover:bg-gray-700 transition" title="Scale (R)"><i class="fa-solid fa-up-right-and-down-left-from-center"></i></button>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <button id="btn-record" class="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-md transition font-medium shadow-lg shadow-red-900/20 flex items-center gap-2">
+                <i class="fa-solid fa-circle-dot" id="icon-record"></i> <span id="text-record">Record Scene</span>
+            </button>
+            <label class="cursor-pointer bg-green-600 hover:bg-green-500 text-white px-4 py-1.5 rounded-md transition font-medium shadow-lg shadow-green-900/20 flex items-center gap-2">
+                <i class="fa-solid fa-upload"></i> Upload Video
+                <input type="file" id="video-upload" accept="video/*" class="hidden">
+            </label>
+        </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Left Sidebar: Hierarchy & Creation -->
+        <div class="w-64 panel flex flex-col z-10 shrink-0 border-r border-gray-800">
+            <div class="p-3 border-b border-gray-800 font-semibold bg-gray-800/50 flex justify-between items-center">
+                <span>Scene Hierarchy</span>
+            </div>
+            
+            <!-- Create Tools -->
+            <div class="p-3 border-b border-gray-800 bg-gray-900/50 grid grid-cols-2 gap-2">
+                <button id="add-screen" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded py-1.5 flex items-center justify-center gap-2 transition">
+                    <i class="fa-solid fa-tv text-blue-400"></i> Screen
+                </button>
+                <button id="add-cube" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded py-1.5 flex items-center justify-center gap-2 transition">
+                    <i class="fa-solid fa-cube text-green-400"></i> Cube
+                </button>
+                <button id="add-sphere" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded py-1.5 flex items-center justify-center gap-2 transition">
+                    <i class="fa-solid fa-globe text-purple-400"></i> Sphere
+                </button>
+                <button id="add-plane" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded py-1.5 flex items-center justify-center gap-2 transition">
+                    <i class="fa-regular fa-square text-yellow-400"></i> Plane
+                </button>
+            </div>
+
+            <!-- Object List -->
+            <div id="hierarchy-list" class="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- Center: WebGL Viewport -->
+        <div class="flex-1 relative bg-black">
+            <div id="canvas-container"></div>
+            
+            <!-- Floating Help/Stats -->
+            <div class="absolute top-4 right-4 bg-black/60 p-2 rounded border border-gray-800 text-xs text-gray-400 pointer-events-none">
+                Left Click: Select<br>
+                Right Click/Drag: Orbit<br>
+                Scroll: Zoom<br>
+                W/E/R: Transform Mode
+            </div>
+        </div>
+
+        <!-- Right Sidebar: Inspector -->
+        <div class="w-72 panel flex flex-col z-10 shrink-0 border-l border-gray-800 overflow-y-auto">
+            <div class="p-3 border-b border-gray-800 font-semibold bg-gray-800/50">
+                Inspector
+            </div>
+            
+            <div id="inspector-content" class="p-4 hidden flex-col gap-6">
+                <!-- Name -->
+                <div>
+                    <label class="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Object Name</label>
+                    <input type="text" id="insp-name" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 outline-none focus:border-blue-500 transition">
+                </div>
+
+                <!-- Transform -->
+                <div>
+                    <label class="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Transform</label>
+                    
+                    <div class="flex items-center mb-2">
+                        <span class="w-12 text-gray-400 text-xs">Pos</span>
+                        <div class="flex gap-2">
+                            <input type="number" id="pos-x" step="0.1">
+                            <input type="number" id="pos-y" step="0.1">
+                            <input type="number" id="pos-z" step="0.1">
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center mb-2">
+                        <span class="w-12 text-gray-400 text-xs">Rot</span>
+                        <div class="flex gap-2">
+                            <input type="number" id="rot-x" step="1">
+                            <input type="number" id="rot-y" step="1">
+                            <input type="number" id="rot-z" step="1">
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <span class="w-12 text-gray-400 text-xs">Scale</span>
+                        <div class="flex gap-2">
+                            <input type="number" id="sca-x" step="0.1">
+                            <input type="number" id="sca-y" step="0.1">
+                            <input type="number" id="sca-z" step="0.1">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Material Properties -->
+                <div class="border-t border-gray-800 pt-4">
+                    <label class="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Material / Texture</label>
+                    
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-gray-400 text-xs">Use Video Texture</span>
+                        <input type="checkbox" id="mat-video" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 h-4 w-4">
+                    </div>
+
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-gray-400 text-xs">Color Tint</span>
+                        <input type="color" id="mat-color" value="#ffffff" class="w-16 h-8 rounded cursor-pointer bg-transparent border-0 p-0">
+                    </div>
+                    
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-gray-400 text-xs">Wireframe</span>
+                        <input type="checkbox" id="mat-wireframe" class="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500 h-4 w-4">
+                    </div>
+                    
+                    <button id="btn-delete" class="w-full mt-4 bg-red-900/30 hover:bg-red-900/60 text-red-500 border border-red-900/50 rounded py-1.5 transition">
+                        <i class="fa-solid fa-trash"></i> Delete Object
+                    </button>
+                </div>
+            </div>
+            
+            <div id="inspector-empty" class="p-6 text-center text-gray-500">
+                Select an object in the scene or hierarchy to edit its properties.
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Timeline / Video Controls -->
+    <div class="h-16 panel border-t border-gray-800 z-10 shrink-0 flex items-center px-6 gap-6">
+        <div class="flex items-center gap-3">
+            <button id="btn-playpause" class="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-lg shadow-lg shadow-blue-900/20 transition">
+                <i class="fa-solid fa-play" id="icon-playpause"></i>
+            </button>
+            <button id="btn-stop" class="w-8 h-8 rounded-full bg-gray-800 hover:bg-gray-700 border border-gray-700 flex items-center justify-center transition">
+                <i class="fa-solid fa-stop text-xs"></i>
+            </button>
+        </div>
+        
+        <div class="flex-1 flex items-center gap-4">
+            <span id="time-current" class="text-xs font-mono text-gray-400 w-12 text-right">00:00</span>
+            <div class="flex-1 h-2 bg-gray-800 rounded-full relative cursor-pointer group" id="timeline">
+                <div id="timeline-progress" class="absolute top-0 left-0 h-full bg-blue-500 rounded-full w-0 group-hover:bg-blue-400 transition-colors"></div>
+                <div id="timeline-handle" class="absolute top-1/2 -translate-y-1/2 -ml-2 w-4 h-4 bg-white rounded-full shadow scale-0 group-hover:scale-100 transition-transform cursor-grab"></div>
+            </div>
+            <span id="time-total" class="text-xs font-mono text-gray-400 w-12">00:00</span>
+        </div>
+        
+        <div class="flex items-center gap-2 w-32">
+            <i class="fa-solid fa-volume-high text-gray-400 text-xs"></i>
+            <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.5" class="w-full accent-blue-500">
+        </div>
+    </div>
+
+    <!-- Hidden Video Element for Texture -->
+    <video id="source-video" crossorigin="anonymous" playsinline style="display:none;"></video>
+
+    <!-- Application Logic -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        // --- Global State ---
+        let scene, camera, renderer, orbit, transformControl;
+        let video, videoTexture, videoMaterial;
+        let objects = []; // Array of mesh objects in scene
+        let selectedObject = null;
+        let isDraggingTimeline = false;
+        
+        // Recording state
+        let mediaRecorder;
+        let recordedChunks = [];
+        let isRecording = false;
+        
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 1. Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111111);
+            
+            // Grid and Axes
+            const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+            scene.add(gridHelper);
+            const axesHelper = new THREE.AxesHelper(5);
+            scene.add(axesHelper);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // 2. Camera Setup
+            camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+            camera.position.set(0, 3, 8);
+
+            // 3. Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // 4. Controls
+            orbit = new OrbitControls(camera, renderer.domElement);
+            orbit.enableDamping = true;
+            orbit.dampingFactor = 0.05;
+
+            transformControl = new TransformControls(camera, renderer.domElement);
+            transformControl.addEventListener('dragging-changed', function (event) {
+                orbit.enabled = !event.value;
+            });
+            transformControl.addEventListener('change', updateInspectorFromObject);
+            scene.add(transformControl);
+
+            // 5. Video Texture Setup
+            setupVideo();
+
+            // 6. Raycaster for Selection
+            setupRaycaster(container);
+
+            // 7. Event Listeners
+            setupUIEvents();
+            setupRecording();
+            window.addEventListener('resize', onWindowResize);
+
+            // Start Animation Loop
+            animate();
+            
+            // Add initial default object
+            addMesh('screen');
+        }
+
+        function setupVideo() {
+            video = document.getElementById('source-video');
+            
+            // Provide a default test video if user doesn't upload one
+            // Using a reliable open source video
+            video.src = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4";
+            video.load();
+            video.volume = 0.5;
+
+            videoTexture = new THREE.VideoTexture(video);
+            videoTexture.minFilter = THREE.LinearFilter;
+            videoTexture.magFilter = THREE.LinearFilter;
+            videoTexture.format = THREE.RGBAFormat;
+
+            // Default material that uses the video
+            videoMaterial = new THREE.MeshStandardMaterial({ 
+                map: videoTexture,
+                side: THREE.DoubleSide,
+                roughness: 0.2,
+                metalness: 0.1
+            });
+            
+            // Video Events
+            video.addEventListener('timeupdate', updateTimeline);
+            video.addEventListener('loadedmetadata', () => {
+                document.getElementById('time-total').textContent = formatTime(video.duration);
+            });
+            video.addEventListener('play', () => {
+                document.getElementById('icon-playpause').className = "fa-solid fa-pause";
+            });
+            video.addEventListener('pause', () => {
+                document.getElementById('icon-playpause').className = "fa-solid fa-play";
+            });
+        }
+
+        // --- Geometry Creation ---
+        let objectCounter = 1;
+        function addMesh(type) {
+            let geometry, material, namePrefix;
+            material = videoMaterial.clone(); // Clone material so we can tweak colors per object
+
+            switch(type) {
+                case 'screen':
+                    // Aspect ratio roughly 16:9
+                    geometry = new THREE.PlaneGeometry(16/3, 9/3);
+                    namePrefix = "Screen";
+                    break;
+                case 'cube':
+                    geometry = new THREE.BoxGeometry(2, 2, 2);
+                    namePrefix = "Cube";
+                    break;
+                case 'sphere':
+                    geometry = new THREE.SphereGeometry(1.5, 32, 32);
+                    namePrefix = "Sphere";
+                    break;
+                case 'plane':
+                    geometry = new THREE.PlaneGeometry(10, 10);
+                    geometry.rotateX(-Math.PI / 2); // Lay flat
+                    namePrefix = "FloorPlane";
+                    // Default floor doesn't usually have video
+                    material = new THREE.MeshStandardMaterial({ color: 0x555555, side: THREE.DoubleSide });
+                    break;
+            }
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = `${namePrefix} ${objectCounter++}`;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            // Raise slightly so it's not inside the grid
+            if(type !== 'plane') mesh.position.y = type === 'screen' ? 1.5 : 1;
+
+            scene.add(mesh);
+            objects.push(mesh);
+            
+            updateHierarchyUI();
+            selectObject(mesh);
+        }
+
+        // --- Selection & Interaction ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function setupRaycaster(container) {
+            container.addEventListener('pointerdown', (event) => {
+                // Only select on left click, and ignore if clicking transform controls
+                if (event.button !== 0) return;
+                
+                const rect = container.getBoundingClientRect();
+                mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+                mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+
+                // Check intersection with our objects
+                const intersects = raycaster.intersectObjects(objects, false);
+
+                // Check intersection with transform controls to prevent deselection when using gizmo
+                const gizmoIntersects = raycaster.intersectObjects(transformControl.children, true);
+                if (gizmoIntersects.length > 0) return; // User is clicking the gizmo
+
+                if (intersects.length > 0) {
+                    selectObject(intersects[0].object);
+                } else {
+                    selectObject(null);
+                }
+            });
+        }
+
+        function selectObject(object) {
+            selectedObject = object;
+            if (object) {
+                transformControl.attach(object);
+            } else {
+                transformControl.detach();
+            }
+            updateHierarchyUI();
+            updateInspectorUI();
+        }
+
+        // --- UI Updates ---
+        function updateHierarchyUI() {
+            const list = document.getElementById('hierarchy-list');
+            list.innerHTML = '';
+            
+            objects.forEach(obj => {
+                const div = document.createElement('div');
+                div.className = `px-3 py-2 rounded cursor-pointer text-sm truncate flex items-center gap-2 ${selectedObject === obj ? 'selected-item' : 'hover:bg-gray-800'}`;
+                
+                // Icon based on name heuristic
+                let icon = 'fa-cube';
+                if(obj.name.includes('Screen')) icon = 'fa-tv';
+                if(obj.name.includes('Sphere')) icon = 'fa-globe';
+                if(obj.name.includes('Plane')) icon = 'fa-square';
+
+                div.innerHTML = `<i class="fa-solid ${icon} opacity-50 w-4 text-center"></i> ${obj.name}`;
+                
+                div.addEventListener('click', () => selectObject(obj));
+                list.appendChild(div);
+            });
+        }
+
+        function updateInspectorUI() {
+            const content = document.getElementById('inspector-content');
+            const empty = document.getElementById('inspector-empty');
+            
+            if (selectedObject) {
+                content.classList.remove('hidden');
+                content.classList.add('flex');
+                empty.classList.add('hidden');
+                
+                updateInspectorFromObject();
+            } else {
+                content.classList.add('hidden');
+                content.classList.remove('flex');
+                empty.classList.remove('hidden');
+            }
+        }
+
+        function updateInspectorFromObject() {
+            if (!selectedObject) return;
+            
+            document.getElementById('insp-name').value = selectedObject.name;
+            
+            // Position
+            document.getElementById('pos-x').value = selectedObject.position.x.toFixed(2);
+            document.getElementById('pos-y').value = selectedObject.position.y.toFixed(2);
+            document.getElementById('pos-z').value = selectedObject.position.z.toFixed(2);
+            
+            // Rotation (convert to degrees for UI)
+            document.getElementById('rot-x').value = THREE.MathUtils.radToDeg(selectedObject.rotation.x).toFixed(0);
+            document.getElementById('rot-y').value = THREE.MathUtils.radToDeg(selectedObject.rotation.y).toFixed(0);
+            document.getElementById('rot-z').value = THREE.MathUtils.radToDeg(selectedObject.rotation.z).toFixed(0);
+            
+            // Scale
+            document.getElementById('sca-x').value = selectedObject.scale.x.toFixed(2);
+            document.getElementById('sca-y').value = selectedObject.scale.y.toFixed(2);
+            document.getElementById('sca-z').value = selectedObject.scale.z.toFixed(2);
+
+            // Material
+            const mat = selectedObject.material;
+            document.getElementById('mat-video').checked = (mat.map === videoTexture);
+            document.getElementById('mat-color').value = '#' + mat.color.getHexString();
+            document.getElementById('mat-wireframe').checked = mat.wireframe;
+        }
+
+        function applyInspectorToObject() {
+            if (!selectedObject) return;
+
+            // Name
+            selectedObject.name = document.getElementById('insp-name').value;
+            updateHierarchyUI();
+
+            // Transform
+            selectedObject.position.set(
+                parseFloat(document.getElementById('pos-x').value) || 0,
+                parseFloat(document.getElementById('pos-y').value) || 0,
+                parseFloat(document.getElementById('pos-z').value) || 0
+            );
+
+            selectedObject.rotation.set(
+                THREE.MathUtils.degToRad(parseFloat(document.getElementById('rot-x').value) || 0),
+                THREE.MathUtils.degToRad(parseFloat(document.getElementById('rot-y').value) || 0),
+                THREE.MathUtils.degToRad(parseFloat(document.getElementById('rot-z').value) || 0)
+            );
+
+            selectedObject.scale.set(
+                parseFloat(document.getElementById('sca-x').value) || 1,
+                parseFloat(document.getElementById('sca-y').value) || 1,
+                parseFloat(document.getElementById('sca-z').value) || 1
+            );
+        }
+        
+        function applyMaterialToObject() {
+            if (!selectedObject) return;
+            const useVideo = document.getElementById('mat-video').checked;
+            const hexColor = document.getElementById('mat-color').value;
+            const isWireframe = document.getElementById('mat-wireframe').checked;
+
+            selectedObject.material.map = useVideo ? videoTexture : null;
+            selectedObject.material.color.setHex(parseInt(hexColor.replace('#', '0x')));
+            selectedObject.material.wireframe = isWireframe;
+            selectedObject.material.needsUpdate = true;
+        }
+
+        // --- Event Listeners setup ---
+        function setupUIEvents() {
+            // Creation Tools
+            document.getElementById('add-screen').addEventListener('click', () => addMesh('screen'));
+            document.getElementById('add-cube').addEventListener('click', () => addMesh('cube'));
+            document.getElementById('add-sphere').addEventListener('click', () => addMesh('sphere'));
+            document.getElementById('add-plane').addEventListener('click', () => addMesh('plane'));
+
+            // Transform Modes
+            const btnT = document.getElementById('btn-translate');
+            const btnR = document.getElementById('btn-rotate');
+            const btnS = document.getElementById('btn-scale');
+            
+            function setMode(mode, activeBtn) {
+                transformControl.setMode(mode);
+                [btnT, btnR, btnS].forEach(b => {
+                    b.classList.remove('bg-blue-600');
+                    b.classList.add('hover:bg-gray-700');
+                });
+                activeBtn.classList.add('bg-blue-600');
+                activeBtn.classList.remove('hover:bg-gray-700');
+            }
+            
+            btnT.addEventListener('click', () => setMode('translate', btnT));
+            btnR.addEventListener('click', () => setMode('rotate', btnR));
+            btnS.addEventListener('click', () => setMode('scale', btnS));
+
+            window.addEventListener('keydown', function (event) {
+                switch (event.key.toLowerCase()) {
+                    case 'w': setMode('translate', btnT); break;
+                    case 'e': setMode('rotate', btnR); break;
+                    case 'r': setMode('scale', btnS); break;
+                    case 'delete': 
+                    case 'backspace':
+                        deleteSelected();
+                        break;
+                }
+            });
+
+            // Inspector inputs change event (Transform)
+            const inputs = ['pos-x', 'pos-y', 'pos-z', 'rot-x', 'rot-y', 'rot-z', 'sca-x', 'sca-y', 'sca-z'];
+            inputs.forEach(id => {
+                document.getElementById(id).addEventListener('change', applyInspectorToObject);
+                // Also update while typing/dragging for immediate feedback
+                document.getElementById(id).addEventListener('input', applyInspectorToObject);
+            });
+            document.getElementById('insp-name').addEventListener('change', applyInspectorToObject);
+
+            // Material inputs
+            document.getElementById('mat-video').addEventListener('change', applyMaterialToObject);
+            document.getElementById('mat-color').addEventListener('input', applyMaterialToObject);
+            document.getElementById('mat-wireframe').addEventListener('change', applyMaterialToObject);
+
+            // Delete button
+            document.getElementById('btn-delete').addEventListener('click', deleteSelected);
+
+            // Video Upload
+            document.getElementById('video-upload').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const fileURL = URL.createObjectURL(file);
+                    video.src = fileURL;
+                    video.load();
+                    video.play(); // Auto play on user upload
+                }
+            });
+
+            // Video Controls
+            const btnPlay = document.getElementById('btn-playpause');
+            btnPlay.addEventListener('click', () => {
+                if (video.paused) video.play();
+                else video.pause();
+            });
+
+            document.getElementById('btn-stop').addEventListener('click', () => {
+                video.pause();
+                video.currentTime = 0;
+            });
+            
+            document.getElementById('volume-slider').addEventListener('input', (e) => {
+                video.volume = e.target.value;
+            });
+
+            // Timeline Scrubbing
+            const timeline = document.getElementById('timeline');
+            
+            const scrub = (e) => {
+                const rect = timeline.getBoundingClientRect();
+                let x = e.clientX - rect.left;
+                x = Math.max(0, Math.min(x, rect.width));
+                const percent = x / rect.width;
+                video.currentTime = percent * video.duration;
+            };
+
+            timeline.addEventListener('mousedown', (e) => {
+                isDraggingTimeline = true;
+                scrub(e);
+            });
+            
+            window.addEventListener('mousemove', (e) => {
+                if (isDraggingTimeline) scrub(e);
+            });
+            
+            window.addEventListener('mouseup', () => {
+                isDraggingTimeline = false;
+            });
+        }
+        
+        function setupRecording() {
+            const btnRecord = document.getElementById('btn-record');
+            const iconRecord = document.getElementById('icon-record');
+            const textRecord = document.getElementById('text-record');
+
+            btnRecord.addEventListener('click', () => {
+                if (!isRecording) {
+                    // Start Recording Canvas Output
+                    const canvas = renderer.domElement;
+                    const stream = canvas.captureStream(30); // 30 FPS target
+                    
+                    let options = { mimeType: 'video/webm; codecs=vp9' };
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options = { mimeType: 'video/webm' };
+                    }
+                    
+                    try {
+                        mediaRecorder = new MediaRecorder(stream, options);
+                    } catch (e) {
+                        console.error('Exception while creating MediaRecorder:', e);
+                        return;
+                    }
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data && event.data.size > 0) {
+                            recordedChunks.push(event.data);
+                        }
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(recordedChunks, { type: options.mimeType });
+                        recordedChunks = [];
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        document.body.appendChild(a);
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = `SceneCraft_Record_${new Date().getTime()}.webm`;
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    
+                    // Update UI to reflect recording state
+                    btnRecord.classList.remove('bg-red-600', 'hover:bg-red-500');
+                    btnRecord.classList.add('bg-red-800', 'animate-pulse');
+                    iconRecord.classList.remove('fa-circle-dot');
+                    iconRecord.classList.add('fa-stop');
+                    textRecord.textContent = 'Stop Recording';
+                    
+                } else {
+                    // Stop Recording and trigger download
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    
+                    // Revert UI
+                    btnRecord.classList.add('bg-red-600', 'hover:bg-red-500');
+                    btnRecord.classList.remove('bg-red-800', 'animate-pulse');
+                    iconRecord.classList.add('fa-circle-dot');
+                    iconRecord.classList.remove('fa-stop');
+                    textRecord.textContent = 'Record Scene';
+                }
+            });
+        }
+
+        function deleteSelected() {
+            if(!selectedObject) return;
+            scene.remove(selectedObject);
+            // Free memory
+            if(selectedObject.geometry) selectedObject.geometry.dispose();
+            // Don't dispose video material as it might be shared, only clone materials if strictly needed
+            
+            objects = objects.filter(obj => obj !== selectedObject);
+            selectObject(null);
+        }
+
+        // --- Video Timeline Logic ---
+        function formatTime(seconds) {
+            if(isNaN(seconds)) return "00:00";
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        function updateTimeline() {
+            document.getElementById('time-current').textContent = formatTime(video.currentTime);
+            if(video.duration > 0) {
+                const percent = (video.currentTime / video.duration) * 100;
+                document.getElementById('timeline-progress').style.width = `${percent}%`;
+                document.getElementById('timeline-handle').style.left = `${percent}%`;
+            }
+        }
+
+        // --- Main Loop ---
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            orbit.update();
+            
+            // Ensure video texture updates
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                if (videoTexture) videoTexture.needsUpdate = true;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Start everything when DOM is ready
+        window.onload = init;
+    </script>
+</body>
+</html>
