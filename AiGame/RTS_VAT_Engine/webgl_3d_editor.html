@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGL 3D Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        
+        /* Custom scrollbar for properties panel */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        
+        input[type="color"] {
+            -webkit-appearance: none;
+            border: none;
+            width: 100%;
+            height: 32px;
+            border-radius: 4px;
+            padding: 0;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; }
+    </style>
+</head>
+<body class="text-gray-200 font-sans select-none bg-[#1a1a1a] overflow-hidden w-screen h-screen">
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container" class="absolute inset-0 w-full h-full z-0"></div>
+
+    <!-- Top Navigation -->
+    <div class="absolute top-0 left-0 w-full p-2 md:p-4 flex justify-between items-start pointer-events-none z-10">
+        <div class="flex flex-col">
+            <h1 class="text-lg md:text-xl font-bold text-white drop-shadow-md tracking-wide">WebGL <span class="text-blue-400">Builder</span></h1>
+            <div class="bg-gray-900/80 backdrop-blur-sm px-2 py-1 mt-1 rounded text-[10px] md:text-xs text-gray-400 pointer-events-auto border border-gray-700 w-max">
+                Tap: Select/Place | Drag: Orbit | 2-Finger/Right-Click: Pan
+            </div>
+        </div>
+        <div class="flex gap-2 pointer-events-auto">
+            <button id="btn-save" class="bg-blue-600/80 hover:bg-blue-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-semibold shadow border border-blue-500/50 backdrop-blur-md transition-all">Save</button>
+            <button id="btn-load" class="bg-emerald-600/80 hover:bg-emerald-500 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs md:text-sm font-semibold shadow border border-emerald-500/50 backdrop-blur-md transition-all">Load</button>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="absolute top-16 left-1/2 -translate-x-1/2 bg-gray-800/90 text-white px-4 py-2 rounded-full shadow-lg opacity-0 transition-opacity duration-300 pointer-events-none z-50 text-xs md:text-sm border border-gray-600 backdrop-blur-sm">
+        Message
+    </div>
+
+    <!-- Toolbar (Bottom Mobile, Left Desktop) -->
+    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 md:bottom-auto md:top-1/2 md:left-4 md:-translate-y-1/2 md:-translate-x-0 flex md:flex-col gap-2 z-10 pointer-events-auto w-max max-w-[95vw] overflow-x-auto pb-2 md:pb-0 px-2 md:px-0" style="scrollbar-width: none;">
+        <div class="bg-gray-900/80 backdrop-blur-md p-1.5 md:p-2 rounded-xl shadow-lg border border-gray-700/50 flex md:flex-col gap-1.5 md:gap-2 items-center">
+            <div class="hidden md:block text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-center pb-1 mb-1 border-b border-gray-700/50 w-full">Add</div>
+            <button id="btn-add-box" class="w-10 h-10 md:w-12 md:h-12 bg-gray-800 hover:bg-blue-600 transition-colors rounded-lg flex items-center justify-center shrink-0 border border-gray-700 focus:border-blue-400" title="Add Box">
+                <svg class="w-5 h-5 md:w-6 md:h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+            </button>
+            <button id="btn-add-sphere" class="w-10 h-10 md:w-12 md:h-12 bg-gray-800 hover:bg-purple-600 transition-colors rounded-lg flex items-center justify-center shrink-0 border border-gray-700 focus:border-purple-400" title="Add Sphere">
+                <svg class="w-5 h-5 md:w-6 md:h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </button>
+            <div class="w-px h-8 md:w-8 md:h-px bg-gray-700 mx-1"></div>
+            <button id="btn-toggle-edit" class="w-10 h-10 md:w-12 md:h-12 bg-gray-800 hover:bg-amber-600 transition-colors rounded-lg flex items-center justify-center shrink-0 border border-gray-700 focus:border-amber-400 relative" title="Toggle Edit Vertices Mode">
+                <svg class="w-5 h-5 md:w-6 md:h-6 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                <span id="edit-indicator" class="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border border-gray-900 hidden"></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Edit Vertices Floating Tools -->
+    <div id="edit-tools" class="absolute top-20 left-1/2 -translate-x-1/2 bg-amber-900/90 backdrop-blur-md p-2 rounded-xl shadow-lg border border-amber-700/50 flex gap-2 items-center z-10 pointer-events-auto transition-all duration-300 transform -translate-y-4 opacity-0 pointer-events-none hidden">
+        <span class="text-[10px] md:text-xs font-bold text-amber-200 uppercase tracking-wide mr-1 hidden md:inline">Vertex Mode</span>
+        <button id="btn-make-face" class="bg-amber-600 hover:bg-amber-500 text-white px-2 py-1.5 md:px-3 rounded-lg text-[10px] md:text-xs font-semibold shadow disabled:opacity-50 disabled:cursor-not-allowed transition-colors" disabled>Fill Triangle (Select 3)</button>
+        <button id="btn-clear-verts" class="bg-red-600/80 hover:bg-red-500 text-white px-2 py-1.5 md:px-3 rounded-lg text-[10px] md:text-xs font-semibold shadow transition-colors">Clear Verts</button>
+    </div>
+
+    <!-- Properties Panel (Right desktop, above toolbar mobile) -->
+    <div id="properties-panel" class="absolute bottom-20 left-1/2 -translate-x-1/2 md:bottom-auto md:top-1/2 md:left-auto md:right-4 md:-translate-y-1/2 md:-translate-x-0 w-[90vw] md:w-64 bg-gray-900/95 backdrop-blur-lg p-3 md:p-4 rounded-xl shadow-2xl border border-gray-700/50 z-20 pointer-events-auto transform transition-transform duration-300 translate-y-full md:translate-y-0 md:translate-x-72 opacity-0">
+        <div class="flex justify-between items-center mb-3 md:mb-4 border-b border-gray-700/50 pb-2">
+            <h2 class="text-xs md:text-sm font-bold tracking-wide uppercase text-gray-300">Properties</h2>
+            <span id="obj-type-label" class="text-[10px] md:text-xs bg-gray-800 px-2 py-1 rounded text-blue-400 font-mono">Box</span>
+        </div>
+
+        <div class="space-y-3 md:space-y-4">
+            <!-- Position -->
+            <div>
+                <label class="text-[10px] md:text-xs text-gray-400 block mb-1">Position</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <div class="flex flex-col">
+                        <span class="text-[9px] md:text-[10px] text-red-400 text-center">X</span>
+                        <input type="number" id="pos-x" step="0.1" class="w-full bg-gray-800 border border-gray-700 rounded p-1 text-[10px] md:text-xs text-center focus:border-blue-500 outline-none transition-colors text-white">
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[9px] md:text-[10px] text-green-400 text-center">Y</span>
+                        <input type="number" id="pos-y" step="0.1" class="w-full bg-gray-800 border border-gray-700 rounded p-1 text-[10px] md:text-xs text-center focus:border-blue-500 outline-none transition-colors text-white">
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[9px] md:text-[10px] text-blue-400 text-center">Z</span>
+                        <input type="number" id="pos-z" step="0.1" class="w-full bg-gray-800 border border-gray-700 rounded p-1 text-[10px] md:text-xs text-center focus:border-blue-500 outline-none transition-colors text-white">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Color -->
+            <div>
+                <label class="text-[10px] md:text-xs text-gray-400 block mb-1">Material Color</label>
+                <div class="p-0.5 md:p-1 bg-gray-800 border border-gray-700 rounded h-8 md:h-10">
+                    <input type="color" id="color-picker" value="#ffffff" class="w-full h-full cursor-pointer">
+                </div>
+            </div>
+
+            <!-- Animation Toggle -->
+            <div class="flex items-center justify-between pt-2 border-t border-gray-700/50">
+                <label class="text-xs md:text-sm text-gray-300 cursor-pointer select-none flex items-center gap-2" for="anim-toggle">
+                    <svg class="w-3.5 h-3.5 md:w-4 md:h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    Animate
+                </label>
+                <div class="relative inline-block w-8 md:w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" id="anim-toggle" class="toggle-checkbox absolute block w-4 h-4 md:w-5 md:h-5 rounded-full bg-white border-[3px] md:border-4 appearance-none cursor-pointer border-gray-600 transition-transform duration-200 checked:border-blue-500 checked:translate-x-4 md:checked:translate-x-5 z-10"/>
+                    <label for="anim-toggle" class="toggle-label block overflow-hidden h-4 md:h-5 rounded-full bg-gray-700 cursor-pointer"></label>
+                </div>
+            </div>
+
+            <!-- Delete Button -->
+            <button id="btn-delete" class="w-full mt-2 md:mt-4 bg-red-900/30 hover:bg-red-600 text-red-300 hover:text-white border border-red-800/50 transition-colors py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-semibold flex items-center justify-center gap-2">
+                <svg class="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                Delete Object
+            </button>
+        </div>
+    </div>
+
+    <!-- Import Map for ES Modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.150.1/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Core Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        scene.fog = new THREE.Fog(0x1a1a1a, 10, 50);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(6, 6, 8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // --- Controls (Game Editor Feel) ---
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxDistance = 50;
+        // Map editor usually benefits from restricted polar angles slightly, but allowing full orbit is fine for 3D editing
+        controls.mouseButtons = {
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.DOLLY,
+            RIGHT: THREE.MOUSE.PAN
+        };
+        // For mobile, two fingers pan automatically in OrbitControls.
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 15, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 50;
+        const d = 15;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+
+        // --- Environment ---
+        const gridHelper = new THREE.GridHelper(40, 40, 0x444444, 0x222222);
+        gridHelper.position.y = -0.01; 
+        scene.add(gridHelper);
+
+        // Invisible plane for raycasting clicks accurately onto the floor
+        const groundPlane = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            new THREE.MeshBasicMaterial({ visible: false })
+        );
+        groundPlane.rotation.x = -Math.PI / 2;
+        scene.add(groundPlane);
+
+        // --- Editor State ---
+        const editableGroup = new THREE.Group();
+        scene.add(editableGroup);
+
+        let selectedObject = null;
+        let selectionBox = new THREE.BoxHelper(new THREE.Mesh(), 0x00aaff);
+        selectionBox.material.depthTest = false;
+        selectionBox.material.transparent = true;
+        selectionBox.visible = false;
+        scene.add(selectionBox);
+
+        // --- Vertices Edit Mode State ---
+        let isEditMode = false;
+        let rawVertices = []; // Array of vertex meshes placed by user
+        let selectedVertices = []; // User selected vertices for connecting
+        const vertexMatNormal = new THREE.MeshBasicMaterial({ color: 0x00ff00, depthTest: false });
+        const vertexMatSelected = new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false });
+        const vertexGroup = new THREE.Group();
+        scene.add(vertexGroup);
+
+        // --- Object Creation ---
+        const defaultMaterial = (colorStr) => {
+            const color = colorStr ? new THREE.Color(colorStr) : new THREE.Color().setHSL(Math.random(), 0.7, 0.5);
+            return new THREE.MeshStandardMaterial({ 
+                color: color,
+                roughness: 0.3,
+                metalness: 0.2,
+                side: THREE.DoubleSide
+            });
+        };
+
+        function addPrimitive(type, savedData = null) {
+            let geometry, material, object;
+            
+            const color = savedData ? savedData.color : null;
+            material = defaultMaterial(color);
+
+            switch(type) {
+                case 'box':
+                    geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+                    object = new THREE.Mesh(geometry, material);
+                    object.position.y = 0.75;
+                    break;
+                case 'sphere':
+                    geometry = new THREE.SphereGeometry(1, 32, 16);
+                    object = new THREE.Mesh(geometry, material);
+                    object.position.y = 1;
+                    break;
+                case 'custom_face':
+                    // handled by restoreCustomFace
+                    break;
+            }
+
+            if(object) {
+                object.castShadow = true;
+                object.receiveShadow = true;
+                
+                object.userData = {
+                    type: type,
+                    isAnimating: savedData ? savedData.isAnimating : false
+                };
+
+                if (savedData) {
+                    object.position.fromArray(savedData.position);
+                } else {
+                    const spread = 3;
+                    object.position.x += (Math.random() - 0.5) * spread;
+                    object.position.z += (Math.random() - 0.5) * spread;
+                }
+
+                editableGroup.add(object);
+                if(!savedData) selectObject(object);
+            }
+        }
+
+        // --- Save / Load Implementation ---
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.remove('opacity-0');
+            setTimeout(() => t.classList.add('opacity-0'), 2500);
+        }
+
+        document.getElementById('btn-save').addEventListener('click', () => {
+            const sceneData = [];
+            editableGroup.children.forEach(obj => {
+                let geomData = null;
+                if (obj.userData.type === 'custom_face') {
+                    // Export vertices array for custom faces
+                    geomData = Array.from(obj.geometry.attributes.position.array);
+                }
+                sceneData.push({
+                    type: obj.userData.type,
+                    position: obj.position.toArray(),
+                    color: '#' + obj.material.color.getHexString(),
+                    isAnimating: obj.userData.isAnimating,
+                    vertices: geomData
+                });
+            });
+            localStorage.setItem('webgl_scene_save', JSON.stringify(sceneData));
+            showToast('Map Saved to Local Storage!');
+        });
+
+        document.getElementById('btn-load').addEventListener('click', () => {
+            const dataStr = localStorage.getItem('webgl_scene_save');
+            if (!dataStr) {
+                showToast('No saved map found.');
+                return;
+            }
+            
+            // Clear current objects
+            while(editableGroup.children.length > 0){ 
+                const obj = editableGroup.children[0];
+                if(obj.geometry) obj.geometry.dispose();
+                if(obj.material) obj.material.dispose();
+                editableGroup.remove(obj); 
+            }
+            selectObject(null);
+
+            const sceneData = JSON.parse(dataStr);
+            sceneData.forEach(data => {
+                if (data.type === 'custom_face') {
+                    restoreCustomFace(data);
+                } else {
+                    addPrimitive(data.type, data);
+                }
+            });
+            showToast('Map Loaded!');
+        });
+
+        function restoreCustomFace(data) {
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(data.vertices), 3));
+            geom.computeVertexNormals();
+            
+            const mat = defaultMaterial(data.color);
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData = { type: 'custom_face', isAnimating: data.isAnimating };
+            mesh.position.fromArray(data.position);
+            editableGroup.add(mesh);
+        }
+
+        // --- Edit Vertices Implementation ---
+        const btnToggleEdit = document.getElementById('btn-toggle-edit');
+        const editIndicator = document.getElementById('edit-indicator');
+        const editTools = document.getElementById('edit-tools');
+        const btnMakeFace = document.getElementById('btn-make-face');
+
+        btnToggleEdit.addEventListener('click', () => {
+            isEditMode = !isEditMode;
+            if (isEditMode) {
+                editIndicator.classList.remove('hidden');
+                editTools.classList.remove('hidden');
+                // Allow CSS transition to trigger after removing hidden
+                setTimeout(() => {
+                    editTools.classList.remove('translate-y-4', 'opacity-0', 'pointer-events-none');
+                }, 10);
+                selectObject(null); // Deselect objects when entering edit mode
+                vertexGroup.visible = true;
+                showToast('Edit Vertices Mode Enabled. Tap to place vertices.');
+            } else {
+                editIndicator.classList.add('hidden');
+                editTools.classList.add('translate-y-4', 'opacity-0', 'pointer-events-none');
+                setTimeout(() => { editTools.classList.add('hidden'); }, 300);
+                // Clear vertex selection
+                selectedVertices.forEach(v => v.material = vertexMatNormal);
+                selectedVertices = [];
+                updateEditUI();
+                vertexGroup.visible = false; // Hide edit handles when not in mode
+                showToast('Edit Vertices Mode Disabled.');
+            }
+        });
+
+        function updateEditUI() {
+            btnMakeFace.disabled = selectedVertices.length !== 3;
+            btnMakeFace.innerText = `Fill Triangle (${selectedVertices.length}/3)`;
+        }
+
+        document.getElementById('btn-clear-verts').addEventListener('click', () => {
+            while(vertexGroup.children.length > 0) {
+                const v = vertexGroup.children[0];
+                v.geometry.dispose();
+                vertexGroup.remove(v);
+            }
+            rawVertices = [];
+            selectedVertices = [];
+            updateEditUI();
+        });
+
+        btnMakeFace.addEventListener('click', () => {
+            if (selectedVertices.length !== 3) return;
+            
+            const geom = new THREE.BufferGeometry();
+            const p1 = selectedVertices[0].position;
+            const p2 = selectedVertices[1].position;
+            const p3 = selectedVertices[2].position;
+            
+            const vertices = new Float32Array([
+                p1.x, p1.y, p1.z,
+                p2.x, p2.y, p2.z,
+                p3.x, p3.y, p3.z
+            ]);
+            
+            geom.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geom.computeVertexNormals();
+            
+            const mat = defaultMaterial();
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData = { type: 'custom_face', isAnimating: false };
+            
+            editableGroup.add(mesh);
+            
+            // Unselect vertices
+            selectedVertices.forEach(v => v.material = vertexMatNormal);
+            selectedVertices = [];
+            updateEditUI();
+            showToast('Triangle Filled!');
+        });
+
+
+        // --- Raycasting / Interaction ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        
+        let pointerDownPos = { x: 0, y: 0 };
+        let pointerDownTime = 0;
+
+        window.addEventListener('pointerdown', (e) => {
+            if (e.target !== renderer.domElement) return;
+            pointerDownPos.x = e.clientX;
+            pointerDownPos.y = e.clientY;
+            pointerDownTime = performance.now();
+        });
+
+        window.addEventListener('pointerup', (e) => {
+            if (e.target !== renderer.domElement) return;
+
+            const deltaX = Math.abs(e.clientX - pointerDownPos.x);
+            const deltaY = Math.abs(e.clientY - pointerDownPos.y);
+            const deltaTime = performance.now() - pointerDownTime;
+
+            // Differentiate click/tap from drag
+            if (deltaX < 5 && deltaY < 5 && deltaTime < 300) {
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                if (isEditMode) {
+                    // 1. Try to select existing vertices
+                    raycaster.params.Mesh.threshold = 0.5; // easier tapping
+                    const vertHits = raycaster.intersectObjects(vertexGroup.children, false);
+                    
+                    if (vertHits.length > 0) {
+                        const v = vertHits[0].object;
+                        const idx = selectedVertices.indexOf(v);
+                        if (idx > -1) {
+                            selectedVertices.splice(idx, 1);
+                            v.material = vertexMatNormal;
+                        } else {
+                            if (selectedVertices.length < 3) {
+                                selectedVertices.push(v);
+                                v.material = vertexMatSelected;
+                            } else {
+                                showToast('Max 3 vertices for a triangle.');
+                            }
+                        }
+                        updateEditUI();
+                        return;
+                    }
+
+                    // 2. Try to place new vertex on objects or ground
+                    const allTargets = [...editableGroup.children, groundPlane];
+                    const surfaceHits = raycaster.intersectObjects(allTargets, false);
+                    if (surfaceHits.length > 0) {
+                        const point = surfaceHits[0].point;
+                        const vGeom = new THREE.SphereGeometry(0.15, 12, 12);
+                        const vMesh = new THREE.Mesh(vGeom, vertexMatNormal);
+                        vMesh.position.copy(point);
+                        vertexGroup.add(vMesh);
+                        rawVertices.push(vMesh);
+                    }
+                } else {
+                    // Normal Object Selection
+                    const intersects = raycaster.intersectObjects(editableGroup.children, false);
+                    if (intersects.length > 0) {
+                        selectObject(intersects[0].object);
+                    } else {
+                        selectObject(null);
+                    }
+                }
+            }
+        });
+
+        // --- UI Properties Panel ---
+        const propertiesPanel = document.getElementById('properties-panel');
+        const inputX = document.getElementById('pos-x');
+        const inputY = document.getElementById('pos-y');
+        const inputZ = document.getElementById('pos-z');
+        const colorPicker = document.getElementById('color-picker');
+        const animToggle = document.getElementById('anim-toggle');
+        const typeLabel = document.getElementById('obj-type-label');
+
+        function selectObject(obj) {
+            selectedObject = obj;
+
+            if (selectedObject) {
+                selectionBox.setFromObject(selectedObject);
+                selectionBox.visible = true;
+
+                // Set UI values
+                let t = selectedObject.userData.type.replace('_', ' ');
+                typeLabel.textContent = t.toUpperCase();
+                inputX.value = selectedObject.position.x.toFixed(2);
+                inputY.value = selectedObject.position.y.toFixed(2);
+                inputZ.value = selectedObject.position.z.toFixed(2);
+                
+                if(selectedObject.material && selectedObject.material.color) {
+                    colorPicker.value = '#' + selectedObject.material.color.getHexString();
+                }
+
+                animToggle.checked = selectedObject.userData.isAnimating || false;
+
+                // Show panel (responsive classes)
+                propertiesPanel.classList.remove('opacity-0', 'translate-y-full', 'md:translate-x-72');
+            } else {
+                selectionBox.visible = false;
+                // Hide panel
+                propertiesPanel.classList.add('opacity-0', 'translate-y-full', 'md:translate-x-72');
+            }
+        }
+
+        const updatePosition = () => {
+            if(!selectedObject) return;
+            selectedObject.position.x = parseFloat(inputX.value) || 0;
+            selectedObject.position.y = parseFloat(inputY.value) || 0;
+            selectedObject.position.z = parseFloat(inputZ.value) || 0;
+            selectionBox.setFromObject(selectedObject);
+        };
+        inputX.addEventListener('input', updatePosition);
+        inputY.addEventListener('input', updatePosition);
+        inputZ.addEventListener('input', updatePosition);
+
+        colorPicker.addEventListener('input', (e) => {
+            if(!selectedObject || !selectedObject.material) return;
+            selectedObject.material.color.set(e.target.value);
+        });
+
+        animToggle.addEventListener('change', (e) => {
+            if(!selectedObject) return;
+            selectedObject.userData.isAnimating = e.target.checked;
+        });
+
+        document.getElementById('btn-delete').addEventListener('click', () => {
+            if(!selectedObject) return;
+            if(selectedObject.geometry) selectedObject.geometry.dispose();
+            if(selectedObject.material) selectedObject.material.dispose();
+            editableGroup.remove(selectedObject);
+            selectObject(null);
+        });
+
+        document.getElementById('btn-add-box').addEventListener('click', () => { addPrimitive('box'); isEditMode && btnToggleEdit.click(); });
+        document.getElementById('btn-add-sphere').addEventListener('click', () => { addPrimitive('sphere'); isEditMode && btnToggleEdit.click(); });
+
+
+        // --- Resize Handler ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            controls.update();
+
+            editableGroup.children.forEach(child => {
+                if (child.userData.isAnimating) {
+                    // For custom faces, maybe animate differently if origin isn't centered, 
+                    // but simple rotation works for visual feedback.
+                    child.rotation.x += 1.0 * delta;
+                    child.rotation.y += 1.5 * delta;
+                }
+            });
+
+            if (selectedObject && selectionBox.visible) {
+                selectionBox.update();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Init
+        addPrimitive('box');
+        animate();
+
+    </script>
+</body>
+</html>
