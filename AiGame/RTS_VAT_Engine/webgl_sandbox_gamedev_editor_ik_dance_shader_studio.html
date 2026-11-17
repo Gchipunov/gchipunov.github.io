@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AETHER // WebGL Sandbox & IK Dance Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #05070c;
+            color: #e2e8f0;
+            overflow: hidden;
+            user-select: none;
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Custom Scrollbar for Editor Panels */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(56, 189, 248, 0.3);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(56, 189, 248, 0.6);
+        }
+        /* Custom Range Sliders */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            background: #1e293b;
+            border-radius: 2px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 12px;
+            width: 12px;
+            border-radius: 50%;
+            background: #38bdf8;
+            cursor: pointer;
+            margin-top: -4px;
+            box-shadow: 0 0 8px rgba(56, 189, 248, 0.8);
+        }
+        .glass-panel {
+            background: rgba(10, 15, 28, 0.82);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.15);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col overflow-hidden">
+
+    <!-- Top Engine Toolbar -->
+    <header class="h-12 glass-panel border-b border-sky-500/20 flex items-center justify-between px-4 z-20 shrink-0">
+        <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-2">
+                <div class="w-3 h-3 rounded-full bg-sky-400 animate-pulse shadow-[0_0_10px_#38bdf8]"></div>
+                <span class="font-bold tracking-wider text-sm text-sky-400">AETHER<span class="text-slate-400 font-normal">ENGINE</span></span>
+            </div>
+            <span class="text-xs px-2 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-500/30 font-mono">WebGL 2.0 // GLSL</span>
+        </div>
+
+        <!-- Transport & Dance Mode Controls -->
+        <div class="flex items-center space-x-2 bg-slate-950/90 px-3 py-1 rounded-lg border border-slate-800">
+            <button id="btn-play" class="p-1.5 rounded hover:bg-sky-500/20 text-sky-400 transition" title="Play / Pause Simulation">
+                <svg id="icon-play" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                <svg id="icon-pause" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            </button>
+            <button id="btn-reset-cam" class="p-1.5 rounded hover:bg-slate-800 text-slate-300 transition text-xs font-mono" title="Reset Camera">
+                CAM RESET
+            </button>
+            <div class="h-4 w-[1px] bg-slate-800 mx-1"></div>
+            <button id="btn-audio" class="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-300 text-xs font-medium transition">
+                <span id="audio-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                <span>SYNTH BEAT</span>
+            </button>
+        </div>
+
+        <!-- Right Status / Mobile Toggle -->
+        <div class="flex items-center space-x-3">
+            <div class="hidden md:flex items-center space-x-3 text-xs font-mono text-slate-400">
+                <span>FPS: <strong id="fps-counter" class="text-sky-400">60</strong></span>
+                <span>BONES: <strong class="text-sky-400">18 IK</strong></span>
+            </div>
+            <button id="toggle-panels" class="lg:hidden px-2.5 py-1 rounded bg-sky-500/20 border border-sky-500/40 text-xs text-sky-300">
+                Panels
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Area -->
+    <div class="flex-1 flex relative overflow-hidden">
+        
+        <!-- Left Panel: Scene Hierarchy & Procedural IK Animations -->
+        <aside id="left-panel" class="w-72 glass-panel border-r border-sky-500/20 flex flex-col z-10 transition-transform duration-300 absolute lg:relative h-full left-0">
+            
+            <!-- Dance Choreography Selector (The 3 Dancing Animations) -->
+            <div class="p-3 border-b border-slate-800/80">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        IK Dance Animations
+                    </h2>
+                    <span class="text-[10px] font-mono text-slate-400">PROCEDURAL</span>
+                </div>
+
+                <div class="space-y-1.5" id="dance-selector">
+                    <button data-dance="0" class="dance-btn w-full text-left p-2.5 rounded-lg bg-sky-500/20 border border-sky-400/50 text-white transition flex items-center justify-between group">
+                        <div>
+                            <div class="text-xs font-semibold text-sky-300">01. Neon Club Groove</div>
+                            <div class="text-[10px] text-slate-400">Rhythmic hip sway, chest pop & hand wave</div>
+                        </div>
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200">ACTIVE</span>
+                    </button>
+
+                    <button data-dance="1" class="dance-btn w-full text-left p-2.5 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 text-slate-300 transition flex items-center justify-between">
+                        <div>
+                            <div class="text-xs font-semibold">02. Cyber Vogue & Tutting</div>
+                            <div class="text-[10px] text-slate-400">Sharp 90° IK wrist locks & head isolation</div>
+                        </div>
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">128 BPM</span>
+                    </button>
+
+                    <button data-dance="2" class="dance-btn w-full text-left p-2.5 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 text-slate-300 transition flex items-center justify-between">
+                        <div>
+                            <div class="text-xs font-semibold">03. Liquid Hypnotic Flow</div>
+                            <div class="text-[10px] text-slate-400">Sine-wave spine & zero-gravity arm trails</div>
+                        </div>
+                        <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">96 BPM</span>
+                    </button>
+                </div>
+
+                <!-- Tempo & IK Blend Sliders -->
+                <div class="mt-3 pt-3 border-t border-slate-800/80 space-y-2.5">
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-1">
+                            <span class="text-slate-400">Animation Speed</span>
+                            <span id="val-speed" class="font-mono text-sky-400">1.00x</span>
+                        </div>
+                        <input id="slider-speed" type="range" min="0.1" max="2.5" step="0.05" value="1.0" class="w-full">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-1">
+                            <span class="text-slate-400">IK Groove Amplitude</span>
+                            <span id="val-amp" class="font-mono text-sky-400">1.00</span>
+                        </div>
+                        <input id="slider-amp" type="range" min="0.2" max="1.8" step="0.05" value="1.0" class="w-full">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scene Outliner & Interactive IK Targets -->
+            <div class="p-3 flex-1 overflow-y-auto">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Scene Hierarchy & Rig</h2>
+                <div class="space-y-1 text-xs font-mono">
+                    <div class="p-1.5 rounded bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+                        <span class="text-sky-300">▼ Avatar_Rig_IK</span>
+                        <span class="text-[10px] text-emerald-400">VISIBLE</span>
+                    </div>
+                    <div class="pl-3 space-y-1 text-slate-400">
+                        <div class="flex items-center justify-between py-0.5">
+                            <span>├─ Pelvis_Root</span>
+                            <span class="text-[10px] text-slate-500">Joint</span>
+                        </div>
+                        <div class="flex items-center justify-between py-0.5">
+                            <span>├─ Spine_Chain (3)</span>
+                            <span class="text-[10px] text-slate-500">FK/IK</span>
+                        </div>
+                        <div class="flex items-center justify-between py-0.5">
+                            <span>├─ Head_Visor_Mesh</span>
+                            <span class="text-[10px] text-sky-400">Shader</span>
+                        </div>
+                        <div class="flex items-center justify-between py-0.5">
+                            <span>├─ IK_Hand_L / R</span>
+                            <span class="text-[10px] text-amber-400">2-Bone IK</span>
+                        </div>
+                        <div class="flex items-center justify-between py-0.5">
+                            <span>└─ IK_Foot_L / R</span>
+                            <span class="text-[10px] text-amber-400">2-Bone IK</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 pt-2 border-t border-slate-800/80 space-y-2">
+                        <label class="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-800/50">
+                            <span class="text-slate-300 font-sans text-xs">Show IK Bones & Targets</span>
+                            <input id="chk-skeleton" type="checkbox" checked class="accent-sky-400 rounded">
+                        </label>
+                        <label class="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-800/50">
+                            <span class="text-slate-300 font-sans text-xs">Manual Hand IK Override</span>
+                            <input id="chk-manual-ik" type="checkbox" class="accent-amber-400 rounded">
+                        </label>
+                        <p class="text-[10px] text-slate-500 font-sans leading-relaxed px-1">
+                            Tip: Enable <strong>Manual Hand IK Override</strong> and drag the glowing cyan spheres in the viewport to pose the skeleton arms in real time!
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center 3D WebGL Viewport -->
+        <main class="flex-1 relative bg-[#03050a] flex flex-col">
+            <div id="canvas-container" class="w-full h-full relative cursor-grab active:cursor-grabbing"></div>
+
+            <!-- Floating Viewport Overlay Controls -->
+            <div class="absolute top-3 left-3 pointer-events-none flex flex-wrap gap-2">
+                <div class="glass-panel px-2.5 py-1 rounded-md text-[11px] font-mono text-sky-300 border border-sky-500/30">
+                    SHADER: UV_XRAY_NEGATIVE_GLOW
+                </div>
+                <div id="ik-mode-badge" class="glass-panel px-2.5 py-1 rounded-md text-[11px] font-mono text-emerald-300 border border-emerald-500/30">
+                    IK SOLVER: PROCEDURAL_AUTO
+                </div>
+            </div>
+
+            <!-- Bottom Timeline Scrubber -->
+            <div class="h-14 glass-panel border-t border-sky-500/20 px-4 flex items-center space-x-4 z-10">
+                <div class="text-xs font-mono text-sky-400 w-24 shrink-0" id="time-display">00:00.00</div>
+                <div class="flex-1 relative flex items-center">
+                    <div class="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div id="beat-progress" class="h-full bg-gradient-to-r from-sky-500 to-indigo-400 w-1/3"></div>
+                    </div>
+                </div>
+                <div class="hidden sm:flex items-center space-x-2 text-[11px] font-mono text-slate-400">
+                    <span>LMB: Orbit</span>
+                    <span>•</span>
+                    <span>Scroll: Zoom</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel: GLSL Shader Inspector & Live Code Editor -->
+        <aside id="right-panel" class="w-80 glass-panel border-l border-sky-500/20 flex flex-col z-10 transition-transform duration-300 absolute lg:relative h-full right-0">
+            
+            <!-- Shader Uniforms Inspector -->
+            <div class="p-3 border-b border-slate-800/80 space-y-3 overflow-y-auto max-h-[55%]">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-xs font-bold uppercase tracking-wider text-sky-400">Bioluminescent Shader</h2>
+                    <button id="btn-preset-invert" class="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 hover:bg-sky-500/30">
+                        X-RAY NEGATIVE
+                    </button>
+                </div>
+
+                <!-- Color Pickers -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-slate-900/80 p-2 rounded border border-slate-800">
+                        <label class="block text-[10px] text-slate-400 mb-1">Rim / Glow Color</label>
+                        <div class="flex items-center space-x-2">
+                            <input id="color-rim" type="color" value="#1e90ff" class="w-6 h-6 rounded cursor-pointer bg-transparent border-0">
+                            <span id="hex-rim" class="text-[11px] font-mono text-slate-300">#1E90FF</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900/80 p-2 rounded border border-slate-800">
+                        <label class="block text-[10px] text-slate-400 mb-1">Core Shadow</label>
+                        <div class="flex items-center space-x-2">
+                            <input id="color-core" type="color" value="#030612" class="w-6 h-6 rounded cursor-pointer bg-transparent border-0">
+                            <span id="hex-core" class="text-[11px] font-mono text-slate-300">#030612</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Uniform Sliders -->
+                <div class="space-y-2.5">
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-1">
+                            <span class="text-slate-400">Fresnel X-Ray Power</span>
+                            <span id="val-fresnel" class="font-mono text-sky-400">2.40</span>
+                        </div>
+                        <input id="slider-fresnel" type="range" min="0.5" max="5.0" step="0.1" value="2.4" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-1">
+                            <span class="text-slate-400">Contour Ink Lines</span>
+                            <span id="val-contour" class="font-mono text-sky-400">0.45</span>
+                        </div>
+                        <input id="slider-contour" type="range" min="0.0" max="1.0" step="0.05" value="0.45" class="w-full">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-1">
+                            <span class="text-slate-400">UV Scanline & Pulse</span>
+                            <span id="val-scan" class="font-mono text-sky-400">0.35</span>
+                        </div>
+                        <input id="slider-scan" type="range" min="0.0" max="1.0" step="0.05" value="0.35" class="w-full">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Fragment Shader Sandbox Editor -->
+            <div class="flex-1 flex flex-col p-3 overflow-hidden">
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[11px] font-mono font-semibold text-slate-300">fragment_shader.glsl</span>
+                    <button id="btn-compile-shader" class="px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[10px] font-mono font-bold transition">
+                        COMPILE GLSL
+                    </button>
+                </div>
+                <textarea id="glsl-editor" spellcheck="false" class="flex-1 w-full bg-[#04060b] text-sky-200 font-mono text-[11px] p-2.5 rounded-lg border border-slate-800 focus:border-sky-500/50 focus:outline-none resize-none leading-relaxed"></textarea>
+                <div id="shader-status" class="mt-1.5 text-[10px] font-mono text-emerald-400 truncate">
+                    ✓ Shader compiled cleanly (0 errors)
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        /**
+         * AETHER ENGINE - WebGL Sandbox Editor
+         * Features:
+         * 1. Custom UV X-Ray / Bioluminescent Negative Rim & Contour GLSL Shader (inspired by reference video)
+         * 2. Analytical 2-Bone Inverse Kinematics (IK) Solver for Arms & Legs + Procedural Spine/Head Chain
+         * 3. 3 Distinct Procedural Dance Animations + Real-time Interactive IK Handle Dragging
+         * 4. Built-in WebAudio / Tone.js Synth Beat Generator synced to animation BPM
+         */
+
+        // ==========================================
+        // 1. SHADER SOURCE DEFINITIONS
+        // ==========================================
+        const vertexShaderSource = `
+            varying vec3 vNormal;
+            varying vec3 vViewPosition;
+            varying vec3 vWorldPos;
+            varying vec2 vUv;
+
+            void main() {
+                vUv = uv;
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPos = worldPosition.xyz;
+                vec4 mvPosition = viewMatrix * worldPosition;
+                vViewPosition = -mvPosition.xyz;
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `;
+
+        const defaultFragmentShader = `uniform float uTime;
+uniform vec3 uRimColor;
+uniform vec3 uCoreColor;
+uniform float uFresnelPower;
+uniform float uContourStrength;
+uniform float uScanlineIntensity;
+uniform float uNegativeMode;
+
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+varying vec3 vWorldPos;
+varying vec2 vUv;
+
+void main() {
+    vec3 normal = normalize(vNormal);
+    vec3 viewDir = normalize(vViewPosition);
+    
+    // Fresnel X-Ray rim calculation (creates the glowing blue silhouette)
+    float ndotv = abs(dot(normal, viewDir));
+    float fresnel = pow(1.0 - ndotv, uFresnelPower);
+    
+    // Procedural organic contour lines (like the dark ink swirls in the video)
+    float wave = sin(vWorldPos.y * 14.0 + sin(vWorldPos.x * 8.0 + uTime * 2.0) * 1.5);
+    float contour = smoothstep(0.85, 0.98, abs(wave)) * uContourStrength;
+    
+    // Subtle holographic UV scanline
+    float scan = sin(vWorldPos.y * 60.0 - uTime * 6.0) * 0.5 + 0.5;
+    float scanEffect = mix(1.0, scan, uScanlineIntensity * 0.4);
+    
+    // Combine core shadow with electric bioluminescent rim
+    vec3 baseColor = mix(uCoreColor, uRimColor * 1.65, fresnel);
+    baseColor -= vec3(contour * 0.65);
+    baseColor *= scanEffect;
+    
+    // Optional negative highlight inversion
+    if (uNegativeMode > 0.5) {
+        float spec = pow(ndotv, 12.0);
+        baseColor += uRimColor * spec * 0.35;
+    }
+
+    gl_FragColor = vec4(max(baseColor, 0.0), 1.0);
+}`;
+
+        // Populate GLSL editor textarea
+        const glslEditor = document.getElementById('glsl-editor');
+        glslEditor.value = defaultFragmentShader;
+
+        // ==========================================
+        // 2. THREE.JS SCENE & RENDERER SETUP
+        // ==========================================
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x03050a, 0.06);
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.set(0, 1.45, 4.2);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setClearColor(0x03050a);
+        container.appendChild(renderer.domElement);
+
+        // Shared Shader Uniforms
+        const shaderUniforms = {
+            uTime: { value: 0 },
+            uRimColor: { value: new THREE.Color('#1e90ff') },
+            uCoreColor: { value: new THREE.Color('#030612') },
+            uFresnelPower: { value: 2.4 },
+            uContourStrength: { value: 0.45 },
+            uScanlineIntensity: { value: 0.35 },
+            uNegativeMode: { value: 1.0 }
+        };
+
+        let holographicMaterial = new THREE.ShaderMaterial({
+            vertexShader: vertexShaderSource,
+            fragmentShader: defaultFragmentShader,
+            uniforms: shaderUniforms,
+            side: THREE.DoubleSide
+        });
+
+        // Glowing Eye / Visor Material (matches bright glowing eyes in video)
+        const eyeGlowMaterial = new THREE.MeshBasicMaterial({ color: 0x7dd3fc });
+
+        // ==========================================
+        // 3. ENVIRONMENT / SANDBOX STAGE PROPS
+        // ==========================================
+        const stageGroup = new THREE.Group();
+        scene.add(stageGroup);
+
+        // Cyberpunk / Studio Grid Floor
+        const gridHelper = new THREE.GridHelper(16, 32, 0x0ea5e9, 0x0f172a);
+        gridHelper.position.y = 0;
+        stageGroup.add(gridHelper);
+
+        // Glowing Neon Ring Pedestal
+        const ringGeo = new THREE.RingGeometry(1.15, 1.22, 64);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+        const floorRing = new THREE.Mesh(ringGeo, ringMat);
+        floorRing.rotation.x = -Math.PI / 2;
+        floorRing.position.y = 0.005;
+        stageGroup.add(floorRing);
+
+        // Background Volumetric Frame (echoes the neon frame behind the dancer in the reference video)
+        const frameGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(2.2, 2.8, 0.08));
+        const frameMat = new THREE.LineBasicMaterial({ color: 0x0284c7, transparent: true, opacity: 0.45 });
+        const neonFrame = new THREE.LineSegments(frameGeo, frameMat);
+        neonFrame.position.set(0, 1.5, -1.1);
+        stageGroup.add(neonFrame);
+
+        // ==========================================
+        // 4. PROCEDURAL IK SKELETON & STYLIZED AVATAR
+        // ==========================================
+        const avatarGroup = new THREE.Group();
+        scene.add(avatarGroup);
+
+        const skeletonDebugGroup = new THREE.Group();
+        scene.add(skeletonDebugGroup);
+
+        // Helper to create stylized sculpted limb/body segments with the custom shader
+        function createBodyPart(geo, yOffset = 0, scale = [1, 1, 1]) {
+            const mesh = new THREE.Mesh(geo, holographicMaterial);
+            mesh.position.y = yOffset;
+            mesh.scale.set(...scale);
+            return mesh;
+        }
+
+        // Joint Nodes
+        const joints = {
+            pelvis: new THREE.Object3D(),
+            chest: new THREE.Object3D(),
+            head: new THREE.Object3D(),
+            shoulderL: new THREE.Object3D(),
+            elbowL: new THREE.Object3D(),
+            wristL: new THREE.Object3D(),
+            shoulderR: new THREE.Object3D(),
+            elbowR: new THREE.Object3D(),
+            wristR: new THREE.Object3D(),
+            hipL: new THREE.Object3D(),
+            kneeL: new THREE.Object3D(),
+            ankleL: new THREE.Object3D(),
+            hipR: new THREE.Object3D(),
+            kneeR: new THREE.Object3D(),
+            ankleR: new THREE.Object3D()
+        };
+
+        Object.values(joints).forEach(j => avatarGroup.add(j));
+
+        // --- Sculpted Stylized Mesh Attachments ---
+        // Torso & Corset-like sculpted bodice
+        const pelvisMesh = createBodyPart(new THREE.CylinderGeometry(0.16, 0.19, 0.24, 20), 0, [1.1, 1, 0.85]);
+        joints.pelvis.add(pelvisMesh);
+
+        const chestMesh = createBodyPart(new THREE.CylinderGeometry(0.21, 0.15, 0.38, 24), 0.19, [1.15, 1, 0.8]);
+        joints.chest.add(chestMesh);
+
+        // Stylized Head, Bob Hair & Glowing Eyes (matching video silhouette)
+        const headMesh = createBodyPart(new THREE.SphereGeometry(0.155, 24, 24), 0.16, [0.92, 1.12, 0.98]);
+        joints.head.add(headMesh);
+
+        // Stylized Bob Hair Shell
+        const hairGeo = new THREE.SphereGeometry(0.175, 24, 24, 0, Math.PI * 2, 0, Math.PI * 0.68);
+        const hairMesh = createBodyPart(hairGeo, 0.175, [1.02, 1.15, 1.08]);
+        joints.head.add(hairMesh);
+
+        // Glowing Eyes
+        const eyeGeo = new THREE.BoxGeometry(0.045, 0.014, 0.02);
+        const leftEye = new THREE.Mesh(eyeGeo, eyeGlowMaterial);
+        leftEye.position.set(0.055, 0.16, 0.142);
+        leftEye.rotation.z = -0.12;
+        const rightEye = new THREE.Mesh(eyeGeo, eyeGlowMaterial);
+        rightEye.position.set(-0.055, 0.16, 0.142);
+        rightEye.rotation.z = 0.12;
+        joints.head.add(leftEye, rightEye);
+
+        // Limb Segment Meshes (Upper Arm, Forearm, Thigh, Shin)
+        function createLimbMesh(length, rTop, rBot) {
+            const geo = new THREE.CylinderGeometry(rTop, rBot, length, 16);
+            geo.translate(0, -length / 2, 0); // Pivot at top joint
+            return new THREE.Mesh(geo, holographicMaterial);
+        }
+
+        const upperArmL = createLimbMesh(0.32, 0.055, 0.045);
+        const forearmL = createLimbMesh(0.30, 0.045, 0.035);
+        const handMeshL = createBodyPart(new THREE.BoxGeometry(0.05, 0.11, 0.08), -0.05);
+        joints.shoulderL.add(upperArmL);
+        joints.elbowL.add(forearmL);
+        joints.wristL.add(handMeshL);
+
+        const upperArmR = createLimbMesh(0.32, 0.055, 0.045);
+        const forearmR = createLimbMesh(0.30, 0.045, 0.035);
+        const handMeshR = createBodyPart(new THREE.BoxGeometry(0.05, 0.11, 0.08), -0.05);
+        joints.shoulderR.add(upperArmR);
+        joints.elbowR.add(forearmR);
+        joints.wristR.add(handMeshR);
+
+        const thighL = createLimbMesh(0.44, 0.085, 0.062);
+        const shinL = createLimbMesh(0.44, 0.060, 0.042);
+        const footMeshL = createBodyPart(new THREE.BoxGeometry(0.08, 0.05, 0.18), -0.02);
+        footMeshL.position.z = 0.04;
+        joints.hipL.add(thighL);
+        joints.kneeL.add(shinL);
+        joints.ankleL.add(footMeshL);
+
+        const thighR = createLimbMesh(0.44, 0.085, 0.062);
+        const shinR = createLimbMesh(0.44, 0.060, 0.042);
+        const footMeshR = createBodyPart(new THREE.BoxGeometry(0.08, 0.05, 0.18), -0.02);
+        footMeshR.position.z = 0.04;
+        joints.hipR.add(thighR);
+        joints.kneeR.add(shinR);
+        joints.ankleR.add(footMeshR);
+
+        // --- Debug Skeleton Visualization (Joint Spheres + Bone Lines + Draggable IK Handles) ---
+        const jointMarkers = {};
+        const markerGeo = new THREE.SphereGeometry(0.024, 12, 12);
+        const markerMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, depthTest: false });
+        Object.keys(joints).forEach(key => {
+            const m = new THREE.Mesh(markerGeo, markerMat);
+            m.renderOrder = 999;
+            skeletonDebugGroup.add(m);
+            jointMarkers[key] = m;
+        });
+
+        // Interactive IK Target Handles (for Hands)
+        const ikHandleGeo = new THREE.OctahedronGeometry(0.055, 1);
+        const ikHandleMatL = new THREE.MeshBasicMaterial({ color: 0xf59e0b, wireframe: true });
+        const ikHandleMatR = new THREE.MeshBasicMaterial({ color: 0xf59e0b, wireframe: true });
+
+        const ikHandleL = new THREE.Mesh(ikHandleGeo, ikHandleMatL);
+        const ikHandleR = new THREE.Mesh(ikHandleGeo, ikHandleMatR);
+        ikHandleL.position.set(0.35, 1.35, 0.35);
+        ikHandleR.position.set(-0.35, 1.35, 0.35);
+        skeletonDebugGroup.add(ikHandleL, ikHandleR);
+
+        // Bone Line Segments
+        const boneConnections = [
+            ['pelvis', 'chest'], ['chest', 'head'],
+            ['chest', 'shoulderL'], ['shoulderL', 'elbowL'], ['elbowL', 'wristL'],
+            ['chest', 'shoulderR'], ['shoulderR', 'elbowR'], ['elbowR', 'wristR'],
+            ['pelvis', 'hipL'], ['hipL', 'kneeL'], ['kneeL', 'ankleL'],
+            ['pelvis', 'hipR'], ['hipR', 'kneeR'], ['kneeR', 'ankleR']
+        ];
+        const boneLineGeo = new THREE.BufferGeometry();
+        const bonePositions = new Float32Array(boneConnections.length * 2 * 3);
+        boneLineGeo.setAttribute('position', new THREE.BufferAttribute(bonePositions, 3));
+        const boneLineMat = new THREE.LineBasicMaterial({ color: 0x7dd3fc, depthTest: false, transparent: true, opacity: 0.85 });
+        const boneLines = new THREE.LineSegments(boneLineGeo, boneLineMat);
+        boneLines.renderOrder = 998;
+        skeletonDebugGroup.add(boneLines);
+
+        // ==========================================
+        // 5. ANALYTICAL 2-BONE IK SOLVER
+        // ==========================================
+        const _vA = new THREE.Vector3();
+        const _vB = new THREE.Vector3();
+        const _dir = new THREE.Vector3();
+        const _poleDir = new THREE.Vector3();
+        const _ortho = new THREE.Vector3();
+        const _up = new THREE.Vector3(0, -1, 0);
+        const _quat = new THREE.Quaternion();
+
+        /**
+         * Solves a 2-Bone Inverse Kinematics chain (e.g., Shoulder -> Elbow -> Wrist)
+         * using the Law of Cosines and a Pole Vector for natural bend orientation.
+         */
+        function solveTwoBoneIK(rootPos, targetPos, polePos, len1, len2, outMidPos) {
+            _dir.subVectors(targetPos, rootPos);
+            let dist = _dir.length();
+            const maxLen = (len1 + len2) * 0.995;
+            const minLen = Math.abs(len1 - len2) + 0.01;
+            dist = THREE.MathUtils.clamp(dist, minLen, maxLen);
+            _dir.normalize();
+
+            // Law of Cosines for angle at root joint
+            const cosAngle = THREE.MathUtils.clamp(
+                (len1 * len1 + dist * dist - len2 * len2) / (2 * len1 * dist),
+                -1, 1
+            );
+            const sinAngle = Math.sqrt(Math.max(0, 1 - cosAngle * cosAngle));
+
+            // Orthogonal bend direction toward pole vector
+            _poleDir.subVectors(polePos, rootPos);
+            _ortho.copy(_poleDir).addScaledVector(_dir, -_poleDir.dot(_dir));
+            if (_ortho.lengthSq() < 1e-6) {
+                _ortho.set(0, 0, 1);
+            }
+            _ortho.normalize();
+
+            // Mid joint (elbow or knee) world position
+            outMidPos.copy(rootPos)
+                .addScaledVector(_dir, len1 * cosAngle)
+                .addScaledVector(_ortho, len1 * sinAngle);
+
+            // End effector clamped position
+            const outEndPos = new THREE.Vector3().copy(rootPos).addScaledVector(_dir, dist);
+            return outEndPos;
+        }
+
+        function orientLimb(jointObj, startPos, endPos) {
+            jointObj.position.copy(startPos);
+            _vA.subVectors(endPos, startPos).normalize();
+            _quat.setFromUnitVectors(_up, _vA);
+            jointObj.quaternion.copy(_quat);
+        }
+
+        // ==========================================
+        // 6. THREE PROCEDURAL DANCING ANIMATIONS
+        // ==========================================
+        let currentDance = 0;
+        let simTime = 0;
+        let isPlaying = true;
+        let animSpeed = 1.0;
+        let animAmp = 1.0;
+        let manualHandIK = false;
+
+        function updateDanceAnimation(t) {
+            const amp = animAmp;
+            const pelvisBaseY = 0.94;
+
+            // Default targets
+            const targetHandL = new THREE.Vector3();
+            const targetHandR = new THREE.Vector3();
+            const poleElbowL = new THREE.Vector3(0.55, 1.1, -0.35);
+            const poleElbowR = new THREE.Vector3(-0.55, 1.1, -0.35);
+
+            const targetFootL = new THREE.Vector3(0.16, 0.06, 0.0);
+            const targetFootR = new THREE.Vector3(-0.16, 0.06, 0.0);
+            const poleKneeL = new THREE.Vector3(0.22, 0.5, 0.6);
+            const poleKneeR = new THREE.Vector3(-0.22, 0.5, 0.6);
+
+            let pelvisPos = new THREE.Vector3(0, pelvisBaseY, 0);
+            let pelvisRotY = 0;
+            let pelvisRotZ = 0;
+            let chestTiltX = 0;
+            let chestTiltZ = 0;
+            let chestTwistY = 0;
+            let headLookY = 0;
+            let headTiltZ = 0;
+
+            if (currentDance === 0) {
+                // ---------------------------------------------------------
+                // DANCE 01: NEON CLUB GROOVE (Rhythmic hip sway, bounce & arm wave)
+                // ---------------------------------------------------------
+                const beat = t * 4.2;
+                const bounce = Math.abs(Math.sin(beat)) * 0.07 * amp;
+                const sway = Math.sin(beat * 0.5) * 0.14 * amp;
+
+                pelvisPos.set(sway, pelvisBaseY - bounce, Math.cos(beat * 0.5) * 0.04 * amp);
+                pelvisRotZ = -sway * 0.9;
+                pelvisRotY = Math.sin(beat * 0.5) * 0.25 * amp;
+
+                chestTiltX = 0.08 + Math.sin(beat * 2.0) * 0.06 * amp;
+                chestTiltZ = sway * 0.6;
+                chestTwistY = -pelvisRotY * 0.8;
+
+                headLookY = Math.sin(beat * 0.5) * 0.35 * amp;
+                headTiltZ = Math.cos(beat * 0.5) * 0.15 * amp;
+
+                // Expressive hand gestures (inspired by close-up hand framing in reference)
+                targetHandL.set(
+                    0.22 + Math.sin(beat * 0.5) * 0.18 * amp,
+                    1.38 + Math.sin(beat) * 0.12 * amp,
+                    0.36 + Math.cos(beat * 0.5) * 0.12 * amp
+                );
+                targetHandR.set(
+                    -0.28 + Math.cos(beat * 0.5) * 0.15 * amp,
+                    1.15 + Math.cos(beat) * 0.14 * amp,
+                    0.32 + Math.sin(beat) * 0.12 * amp
+                );
+
+                // Alternating foot step
+                targetFootL.y = 0.06 + Math.max(0, Math.sin(beat * 0.5)) * 0.08 * amp;
+                targetFootR.y = 0.06 + Math.max(0, -Math.sin(beat * 0.5)) * 0.08 * amp;
+
+            } else if (currentDance === 1) {
+                // ---------------------------------------------------------
+                // DANCE 02: CYBER VOGUE & TUTTING (Sharp geometric IK locks)
+                // ---------------------------------------------------------
+                const step = t * 2.8;
+                // Quantized snapping curve for robotic/vogue precision
+                const snap = (x) => Math.floor(x) + Math.pow(x - Math.floor(x), 0.25);
+                const q = snap(step);
+                const phase = Math.floor(step) % 4;
+
+                pelvisPos.set(
+                    Math.sin(q * Math.PI * 0.5) * 0.12 * amp,
+                    pelvisBaseY - Math.abs(Math.sin(q * Math.PI)) * 0.06 * amp,
+                    0
+                );
+                pelvisRotY = Math.cos(q * Math.PI * 0.5) * 0.3 * amp;
+                chestTwistY = -pelvisRotY * 1.2;
+                headLookY = (phase % 2 === 0 ? 0.35 : -0.35) * amp;
+                headTiltZ = (phase === 1 ? 0.25 : -0.15) * amp;
+
+                // Geometric 90-degree Tutting hand poses framing the face & chest
+                if (phase === 0) {
+                    targetHandL.set(0.12, 1.56, 0.34);
+                    targetHandR.set(-0.35, 1.28, 0.25);
+                    poleElbowL.set(0.55, 1.56, 0.1);
+                } else if (phase === 1) {
+                    targetHandL.set(0.35, 1.28, 0.25);
+                    targetHandR.set(-0.12, 1.56, 0.34);
+                    poleElbowR.set(-0.55, 1.56, 0.1);
+                } else if (phase === 2) {
+                    targetHandL.set(0.15, 1.48, 0.38);
+                    targetHandR.set(-0.15, 1.32, 0.38);
+                } else {
+                    targetHandL.set(0.42, 1.45, 0.15);
+                    targetHandR.set(-0.42, 1.45, 0.15);
+                    poleElbowL.set(0.45, 1.05, 0.0);
+                    poleElbowR.set(-0.45, 1.05, 0.0);
+                }
+
+            } else {
+                // ---------------------------------------------------------
+                // DANCE 03: LIQUID HYPNOTIC FLOW (Sine-wave spine & zero-G arms)
+                // ---------------------------------------------------------
+                const flow = t * 2.4;
+                const wave1 = Math.sin(flow);
+                const wave2 = Math.sin(flow - 0.8);
+                const wave3 = Math.sin(flow - 1.6);
+
+                pelvisPos.set(wave1 * 0.18 * amp, pelvisBaseY + Math.cos(flow * 2.0) * 0.04 * amp, 0);
+                pelvisRotZ = -wave1 * 0.22 * amp;
+                chestTiltZ = wave2 * 0.26 * amp;
+                chestTiltX = Math.cos(flow) * 0.14 * amp;
+                headTiltZ = wave3 * 0.28 * amp;
+                headLookY = Math.sin(flow * 0.5) * 0.25 * amp;
+
+                // Continuous figure-8 infinity trails with arms
+                targetHandL.set(
+                    0.34 + Math.sin(flow) * 0.24 * amp,
+                    1.32 + Math.sin(flow * 2.0) * 0.22 * amp,
+                    0.26 + Math.cos(flow) * 0.18 * amp
+                );
+                targetHandR.set(
+                    -0.34 + Math.sin(flow + Math.PI) * 0.24 * amp,
+                    1.32 + Math.sin(flow * 2.0 + Math.PI) * 0.22 * amp,
+                    0.26 + Math.cos(flow + Math.PI) * 0.18 * amp
+                );
+                poleElbowL.set(0.6, 1.35 + Math.cos(flow) * 0.25, -0.15);
+                poleElbowR.set(-0.6, 1.35 - Math.cos(flow) * 0.25, -0.15);
+            }
+
+            // --- Apply Pelvis, Spine & Head Transforms ---
+            joints.pelvis.position.copy(pelvisPos);
+            joints.pelvis.rotation.set(0, pelvisRotY, pelvisRotZ);
+
+            // Spine extends upward from pelvis
+            const spineUp = new THREE.Vector3(0, 0.36, 0).applyEuler(new THREE.Euler(chestTiltX, pelvisRotY + chestTwistY, pelvisRotZ + chestTiltZ));
+            joints.chest.position.copy(pelvisPos).add(spineUp);
+            joints.chest.rotation.set(chestTiltX, pelvisRotY + chestTwistY, pelvisRotZ + chestTiltZ);
+
+            // Neck & Head
+            const neckUp = new THREE.Vector3(0, 0.40, 0).applyQuaternion(joints.chest.quaternion);
+            joints.head.position.copy(joints.chest.position).add(neckUp);
+            joints.head.rotation.set(chestTiltX * 0.5, headLookY, headTiltZ);
+
+            // Shoulder & Hip Socket World Positions
+            const shoulderOffsetL = new THREE.Vector3(0.21, 0.33, 0).applyQuaternion(joints.chest.quaternion);
+            const shoulderOffsetR = new THREE.Vector3(-0.21, 0.33, 0).applyQuaternion(joints.chest.quaternion);
+            const shoulderPosL = joints.chest.position.clone().add(shoulderOffsetL);
+            const shoulderPosR = joints.chest.position.clone().add(shoulderOffsetR);
+
+            const hipOffsetL = new THREE.Vector3(0.11, -0.06, 0).applyQuaternion(joints.pelvis.quaternion);
+            const hipOffsetR = new THREE.Vector3(-0.11, -0.06, 0).applyQuaternion(joints.pelvis.quaternion);
+            const hipPosL = joints.pelvis.position.clone().add(hipOffsetL);
+            const hipPosR = joints.pelvis.position.clone().add(hipOffsetR);
+
+            // If Manual Hand IK Override is active, use the 3D draggable handles
+            if (manualHandIK) {
+                targetHandL.copy(ikHandleL.position);
+                targetHandR.copy(ikHandleR.position);
+            } else {
+                ikHandleL.position.copy(targetHandL);
+                ikHandleR.position.copy(targetHandR);
+            }
+
+            // --- Solve 2-Bone IK for Both Arms ---
+            const elbowPosL = new THREE.Vector3();
+            const solvedWristL = solveTwoBoneIK(shoulderPosL, targetHandL, poleElbowL, 0.32, 0.30, elbowPosL);
+            orientLimb(joints.shoulderL, shoulderPosL, elbowPosL);
+            orientLimb(joints.elbowL, elbowPosL, solvedWristL);
+            joints.wristL.position.copy(solvedWristL);
+            joints.wristL.quaternion.copy(joints.elbowL.quaternion);
+
+            const elbowPosR = new THREE.Vector3();
+            const solvedWristR = solveTwoBoneIK(shoulderPosR, targetHandR, poleElbowR, 0.32, 0.30, elbowPosR);
+            orientLimb(joints.shoulderR, shoulderPosR, elbowPosR);
+            orientLimb(joints.elbowR, elbowPosR, solvedWristR);
+            joints.wristR.position.copy(solvedWristR);
+            joints.wristR.quaternion.copy(joints.elbowR.quaternion);
+
+            // --- Solve 2-Bone IK for Both Legs ---
+            const kneePosL = new THREE.Vector3();
+            const solvedAnkleL = solveTwoBoneIK(hipPosL, targetFootL, poleKneeL, 0.44, 0.44, kneePosL);
+            orientLimb(joints.hipL, hipPosL, kneePosL);
+            orientLimb(joints.kneeL, kneePosL, solvedAnkleL);
+            joints.ankleL.position.copy(solvedAnkleL);
+
+            const kneePosR = new THREE.Vector3();
+            const solvedAnkleR = solveTwoBoneIK(hipPosR, targetFootR, poleKneeR, 0.44, 0.44, kneePosR);
+            orientLimb(joints.hipR, hipPosR, kneePosR);
+            orientLimb(joints.kneeR, kneePosR, solvedAnkleR);
+            joints.ankleR.position.copy(solvedAnkleR);
+
+            // --- Update Skeleton Debug Lines & Joint Spheres ---
+            Object.keys(joints).forEach(key => {
+                jointMarkers[key].position.copy(joints[key].position);
+            });
+
+            const posAttr = boneLines.geometry.attributes.position;
+            boneConnections.forEach((pair, i) => {
+                const p1 = joints[pair[0]].position;
+                const p2 = joints[pair[1]].position;
+                posAttr.setXYZ(i * 2, p1.x, p1.y, p1.z);
+                posAttr.setXYZ(i * 2 + 1, p2.x, p2.y, p2.z);
+            });
+            posAttr.needsUpdate = true;
+        }
+
+        // ==========================================
+        // 7. ORBIT CAMERA & IK HANDLE RAYCASTING
+        // ==========================================
+        let isOrbiting = false;
+        let draggedHandle = null;
+        let prevMouse = { x: 0, y: 0 };
+        let spherical = { radius: 4.2, theta: 0.15, phi: 1.32 };
+        let cameraTarget = new THREE.Vector3(0, 1.15, 0);
+
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+        function updateCameraPosition() {
+            spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.2, Math.PI - 0.15);
+            spherical.radius = THREE.MathUtils.clamp(spherical.radius, 1.4, 10.0);
+
+            camera.position.x = cameraTarget.x + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta);
+            camera.position.y = cameraTarget.y + spherical.radius * Math.cos(spherical.phi);
+            camera.position.z = cameraTarget.z + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta);
+            camera.lookAt(cameraTarget);
+        }
+        updateCameraPosition();
+
+        function getPointerNDC(clientX, clientY) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+            pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        }
+
+        function onPointerDown(clientX, clientY) {
+            prevMouse = { x: clientX, y: clientY };
+            if (manualHandIK) {
+                getPointerNDC(clientX, clientY);
+                raycaster.setFromCamera(pointer, camera);
+                const hits = raycaster.intersectObjects([ikHandleL, ikHandleR]);
+                if (hits.length > 0) {
+                    draggedHandle = hits[0].object;
+                    dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), draggedHandle.position);
+                    return;
+                }
+            }
+            isOrbiting = true;
+        }
+
+        function onPointerMove(clientX, clientY) {
+            if (draggedHandle) {
+                getPointerNDC(clientX, clientY);
+                raycaster.setFromCamera(pointer, camera);
+                const intersectPt = new THREE.Vector3();
+                if (raycaster.ray.intersectPlane(dragPlane, intersectPt)) {
+                    draggedHandle.position.copy(intersectPt);
+                }
+                return;
+            }
+            if (!isOrbiting) return;
+            const dx = clientX - prevMouse.x;
+            const dy = clientY - prevMouse.y;
+            prevMouse = { x: clientX, y: clientY };
+
+            spherical.theta -= dx * 0.007;
+            spherical.phi -= dy * 0.007;
+            updateCameraPosition();
+        }
+
+        function onPointerUp() {
+            isOrbiting = false;
+            draggedHandle = null;
+        }
+
+        renderer.domElement.addEventListener('mousedown', e => onPointerDown(e.clientX, e.clientY));
+        window.addEventListener('mousemove', e => onPointerMove(e.clientX, e.clientY));
+        window.addEventListener('mouseup', onPointerUp);
+
+        renderer.domElement.addEventListener('touchstart', e => {
+            if (e.touches.length === 1) onPointerDown(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: true });
+        window.addEventListener('touchmove', e => {
+            if (e.touches.length === 1) onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: true });
+        window.addEventListener('touchend', onPointerUp);
+
+        renderer.domElement.addEventListener('wheel', e => {
+            e.preventDefault();
+            spherical.radius += e.deltaY * 0.003;
+            updateCameraPosition();
+        }, { passive: false });
+
+        // ==========================================
+        // 8. UI CONTROLS & GLSL LIVE COMPILER
+        // ==========================================
+        // Dance Selection Buttons
+        document.querySelectorAll('.dance-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentDance = parseInt(btn.dataset.dance, 10);
+                document.querySelectorAll('.dance-btn').forEach(b => {
+                    b.className = 'dance-btn w-full text-left p-2.5 rounded-lg bg-slate-900/60 hover:bg-slate-800/80 border border-slate-800 text-slate-300 transition flex items-center justify-between';
+                    b.querySelector('span').className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400';
+                });
+                btn.className = 'dance-btn w-full text-left p-2.5 rounded-lg bg-sky-500/20 border border-sky-400/50 text-white transition flex items-center justify-between';
+                btn.querySelector('span').className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200';
+                btn.querySelector('span').textContent = 'ACTIVE';
+            });
+        });
+
+        // Animation Sliders
+        document.getElementById('slider-speed').addEventListener('input', e => {
+            animSpeed = parseFloat(e.target.value);
+            document.getElementById('val-speed').textContent = animSpeed.toFixed(2) + 'x';
+        });
+        document.getElementById('slider-amp').addEventListener('input', e => {
+            animAmp = parseFloat(e.target.value);
+            document.getElementById('val-amp').textContent = animAmp.toFixed(2);
+        });
+
+        // Skeleton & IK Checkboxes
+        document.getElementById('chk-skeleton').addEventListener('change', e => {
+            skeletonDebugGroup.visible = e.target.checked;
+        });
+        document.getElementById('chk-manual-ik').addEventListener('change', e => {
+            manualHandIK = e.target.checked;
+            const badge = document.getElementById('ik-mode-badge');
+            if (manualHandIK) {
+                badge.textContent = 'IK SOLVER: MANUAL_DRAG_HANDS';
+                badge.className = 'glass-panel px-2.5 py-1 rounded-md text-[11px] font-mono text-amber-300 border border-amber-500/40';
+                skeletonDebugGroup.visible = true;
+                document.getElementById('chk-skeleton').checked = true;
+            } else {
+                badge.textContent = 'IK SOLVER: PROCEDURAL_AUTO';
+                badge.className = 'glass-panel px-2.5 py-1 rounded-md text-[11px] font-mono text-emerald-300 border border-emerald-500/30';
+            }
+        });
+
+        // Shader Uniforms Controls
+        document.getElementById('color-rim').addEventListener('input', e => {
+            shaderUniforms.uRimColor.value.set(e.target.value);
+            document.getElementById('hex-rim').textContent = e.target.value.toUpperCase();
+        });
+        document.getElementById('color-core').addEventListener('input', e => {
+            shaderUniforms.uCoreColor.value.set(e.target.value);
+            document.getElementById('hex-core').textContent = e.target.value.toUpperCase();
+        });
+        document.getElementById('slider-fresnel').addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            shaderUniforms.uFresnelPower.value = v;
+            document.getElementById('val-fresnel').textContent = v.toFixed(2);
+        });
+        document.getElementById('slider-contour').addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            shaderUniforms.uContourStrength.value = v;
+            document.getElementById('val-contour').textContent = v.toFixed(2);
+        });
+        document.getElementById('slider-scan').addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            shaderUniforms.uScanlineIntensity.value = v;
+            document.getElementById('val-scan').textContent = v.toFixed(2);
+        });
+
+        // Preset Toggle
+        document.getElementById('btn-preset-invert').addEventListener('click', e => {
+            shaderUniforms.uNegativeMode.value = shaderUniforms.uNegativeMode.value > 0.5 ? 0.0 : 1.0;
+            e.target.textContent = shaderUniforms.uNegativeMode.value > 0.5 ? 'X-RAY NEGATIVE' : 'STANDARD RIM';
+        });
+
+        // Live GLSL Shader Compilation
+        document.getElementById('btn-compile-shader').addEventListener('click', () => {
+            const statusEl = document.getElementById('shader-status');
+            const newFrag = glslEditor.value;
+            try {
+                const testMat = new THREE.ShaderMaterial({
+                    vertexShader: vertexShaderSource,
+                    fragmentShader: newFrag,
+                    uniforms: shaderUniforms,
+                    side: THREE.DoubleSide
+                });
+                // Force WebGL program validation
+                renderer.compile(scene, camera);
+                avatarGroup.traverse(obj => {
+                    if (obj.isMesh && obj.material === holographicMaterial) {
+                        obj.material = testMat;
+                    }
+                });
+                holographicMaterial.dispose();
+                holographicMaterial = testMat;
+                statusEl.textContent = '✓ Shader compiled cleanly (0 errors)';
+                statusEl.className = 'mt-1.5 text-[10px] font-mono text-emerald-400 truncate';
+            } catch (err) {
+                statusEl.textContent = '✕ GLSL Error: ' + err.message;
+                statusEl.className = 'mt-1.5 text-[10px] font-mono text-rose-400 truncate';
+            }
+        });
+
+        // Transport Play/Pause & Camera Reset
+        document.getElementById('btn-play').addEventListener('click', () => {
+            isPlaying = !isPlaying;
+            document.getElementById('icon-play').classList.toggle('hidden', isPlaying);
+            document.getElementById('icon-pause').classList.toggle('hidden', !isPlaying);
+        });
+
+        document.getElementById('btn-reset-cam').addEventListener('click', () => {
+            spherical = { radius: 4.2, theta: 0.15, phi: 1.32 };
+            cameraTarget.set(0, 1.15, 0);
+            updateCameraPosition();
+        });
+
+        // Mobile Panel Toggle
+        document.getElementById('toggle-panels').addEventListener('click', () => {
+            document.getElementById('left-panel').classList.toggle('-translate-x-full');
+            document.getElementById('right-panel').classList.toggle('translate-x-full');
+        });
+
+        // ==========================================
+        // 9. TONE.JS PROCEDURAL SYNTH BEAT
+        // ==========================================
+        let audioActive = false;
+        let beatLoop = null;
+        document.getElementById('btn-audio').addEventListener('click', async () => {
+            const dot = document.getElementById('audio-dot');
+            if (!audioActive) {
+                await Tone.start();
+                const kick = new Tone.MembraneSynth({ octaves: 4, pitchDecay: 0.05 }).toDestination();
+                const bass = new Tone.MonoSynth({
+                    oscillator: { type: 'sawtooth' },
+                    filterEnvelope: { attack: 0.01, decay: 0.2, sustain: 0.1, baseFrequency: 120, octaves: 2.5 }
+                }).toDestination();
+                bass.volume.value = -10;
+
+                const notes = ['C2', 'C2', 'Eb2', 'F2', 'G2', 'Bb1', 'C2', 'G1'];
+                let stepIdx = 0;
+
+                beatLoop = new Tone.Loop(time => {
+                    if (stepIdx % 2 === 0) kick.triggerAttackRelease('C1', '8n', time);
+                    bass.triggerAttackRelease(notes[stepIdx % notes.length], '16n', time);
+                    stepIdx++;
+                }, '8n').start(0);
+
+                Tone.Transport.bpm.value = 118;
+                Tone.Transport.start();
+                audioActive = true;
+                dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
+            } else {
+                Tone.Transport.stop();
+                if (beatLoop) beatLoop.dispose();
+                audioActive = false;
+                dot.className = 'w-2 h-2 rounded-full bg-slate-500';
+            }
+        });
+
+        // ==========================================
+        // 10. MAIN RENDER LOOP & RESIZE HANDLER
+        // ==========================================
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let lastFpsUpdate = lastFrameTime;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const dt = (now - lastFrameTime) / 1000;
+            lastFrameTime = now;
+
+            if (isPlaying) {
+                simTime += dt * animSpeed;
+                shaderUniforms.uTime.value = simTime;
+                floorRing.rotation.z = simTime * 0.4;
+            }
+
+            // Update IK Skeleton & Dance Choreography
+            updateDanceAnimation(simTime);
+
+            // Update Timeline UI
+            const mins = String(Math.floor(simTime / 60)).padStart(2, '0');
+            const secs = (simTime % 60).toFixed(2).padStart(5, '0');
+            document.getElementById('time-display').textContent = `${mins}:${secs}`;
+            document.getElementById('beat-progress').style.width = `${((simTime * 25) % 100)}%`;
+
+            // FPS Counter
+            frameCount++;
+            if (now - lastFpsUpdate >= 500) {
+                document.getElementById('fps-counter').textContent = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+                frameCount = 0;
+                lastFpsUpdate = now;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            if (!container) return;
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        window.onload = function () {
+            animate();
+        };
+    </script>
+</body>
+</html>
