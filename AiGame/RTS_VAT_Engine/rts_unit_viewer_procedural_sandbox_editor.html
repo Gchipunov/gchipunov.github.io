@@ -1,0 +1,1735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTS Unit Forge - Procedural WebGL Sandbox Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js r128 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0b0e14;
+            color: #e2e8f0;
+            overflow: hidden;
+            user-select: none;
+        }
+        .font-tactical {
+            font-family: 'Chakra Petch', sans-serif;
+        }
+        /* Custom scrollbar for tactical panels */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #f59e0b;
+        }
+        .tactical-panel {
+            background: rgba(15, 20, 30, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+        }
+        .tactical-btn {
+            transition: all 0.15s ease;
+        }
+        .tactical-btn:active {
+            transform: scale(0.97);
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            outline: none;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen relative flex flex-col md:flex-row">
+
+    <!-- WebGL Viewport Container -->
+    <div id="canvas-container" class="relative flex-1 h-full w-full cursor-grab active:cursor-grabbing">
+        <canvas id="webgl-canvas"></canvas>
+
+        <!-- Top HUD Bar -->
+        <div class="absolute top-3 left-3 right-3 md:right-auto flex flex-wrap items-center gap-2 pointer-events-none z-10">
+            <div class="tactical-panel px-4 py-2 rounded-lg flex items-center gap-3 pointer-events-auto border-l-4 border-amber-500">
+                <div>
+                    <div class="text-[10px] uppercase tracking-widest text-amber-400 font-bold">RTS Asset Forge v2.4</div>
+                    <h1 id="unit-title-display" class="font-tactical text-lg md:text-xl font-bold tracking-wide text-white uppercase">JAGUAR - ONSLAUGHT</h1>
+                </div>
+                <span id="unit-class-badge" class="text-[10px] font-tactical uppercase px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/40 font-semibold">
+                    SIEGE ARMOR
+                </span>
+            </div>
+
+            <!-- Quick Camera & Simulation Tools -->
+            <div class="tactical-panel p-1.5 rounded-lg flex items-center gap-1 pointer-events-auto">
+                <button id="btn-test-fire" class="tactical-btn bg-red-600 hover:bg-red-500 text-white font-tactical font-bold text-xs px-3 py-2 rounded flex items-center gap-1.5 shadow-lg shadow-red-900/40">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    TEST FIRE [SPACE]
+                </button>
+                <button id="btn-auto-turret" class="tactical-btn bg-slate-800 hover:bg-slate-700 text-slate-200 font-tactical text-xs px-3 py-2 rounded border border-slate-700" title="Toggle Turret Sweep">
+                    SWEEP: OFF
+                </button>
+                <button id="btn-wireframe" class="tactical-btn bg-slate-800 hover:bg-slate-700 text-slate-200 font-tactical text-xs px-3 py-2 rounded border border-slate-700" title="Toggle Wireframe">
+                    MESH
+                </button>
+                <button id="btn-reset-cam" class="tactical-btn bg-slate-800 hover:bg-slate-700 text-slate-200 font-tactical text-xs px-2.5 py-2 rounded border border-slate-700" title="Reset Camera">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Bottom Left Controls Hint & Live Stats -->
+        <div class="absolute bottom-3 left-3 flex flex-col gap-2 pointer-events-none z-10 max-w-xs">
+            <div class="tactical-panel p-3 rounded-lg pointer-events-auto">
+                <div class="text-[10px] font-tactical uppercase tracking-wider text-slate-400 mb-2 flex justify-between">
+                    <span>Combat Telemetry</span>
+                    <span id="poly-count" class="text-amber-400">0 TRIS</span>
+                </div>
+                <div class="space-y-2 text-xs">
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-0.5">
+                            <span class="text-slate-300">FIREPOWER</span>
+                            <span id="stat-dmg-val" class="font-tactical font-bold text-red-400">850</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div id="stat-dmg-bar" class="bg-red-500 h-full transition-all duration-300" style="width: 85%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-0.5">
+                            <span class="text-slate-300">ARMOR RATING</span>
+                            <span id="stat-arm-val" class="font-tactical font-bold text-amber-400">720</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div id="stat-arm-bar" class="bg-amber-500 h-full transition-all duration-300" style="width: 72%"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[11px] mb-0.5">
+                            <span class="text-slate-300">MOBILITY</span>
+                            <span id="stat-spd-val" class="font-tactical font-bold text-emerald-400">54 KM/H</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div id="stat-spd-bar" class="bg-emerald-500 h-full transition-all duration-300" style="width: 54%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="hidden sm:block text-[11px] text-slate-400 bg-slate-950/70 px-2.5 py-1 rounded border border-slate-800/80">
+                LMB / Drag: Orbit • Scroll / Pinch: Zoom • Right-Drag: Pan
+            </div>
+        </div>
+
+        <!-- Toast Notification Box (Replaces alert) -->
+        <div id="toast-box" class="fixed top-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white font-tactical text-xs px-4 py-2 rounded-lg shadow-xl opacity-0 pointer-events-none transition-opacity duration-300 z-50">
+            Blueprint JSON copied to clipboard!
+        </div>
+    </div>
+
+    <!-- Right / Bottom Modular Inspector Sidebar -->
+    <div class="tactical-panel w-full md:w-80 lg:w-96 h-[44vh] md:h-full border-t md:border-t-0 md:border-l border-slate-800 flex flex-col z-20">
+        <!-- Sidebar Tabs -->
+        <div class="flex border-b border-slate-800 bg-slate-950/50">
+            <button data-tab="weapons" class="tab-btn flex-1 py-3 font-tactical text-xs font-bold uppercase tracking-wider text-amber-400 border-b-2 border-amber-500 bg-amber-500/10">
+                Weapons
+            </button>
+            <button data-tab="chassis" class="tab-btn flex-1 py-3 font-tactical text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200">
+                Chassis & Paint
+            </button>
+            <button data-tab="export" class="tab-btn flex-1 py-3 font-tactical text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200">
+                VMF / JSON
+            </button>
+        </div>
+
+        <!-- Scrollable Content Area -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-5">
+
+            <!-- TAB 1: WEAPONS & TURRETS -->
+            <div id="tab-weapons" class="tab-content space-y-5">
+                <!-- Primary Main Cannon Selector -->
+                <div>
+                    <label class="block font-tactical text-xs uppercase tracking-wider text-amber-400 mb-2">
+                        1. Primary Turret Cannon
+                    </label>
+                    <div class="grid grid-cols-1 gap-2" id="cannon-options">
+                        <button data-cannon="twin_onslaught" class="option-card active text-left p-2.5 rounded-lg border border-amber-500 bg-amber-500/15 transition">
+                            <div class="flex justify-between items-center">
+                                <span class="font-tactical font-bold text-sm text-white">Twin Onslaught Cannons</span>
+                                <span class="text-[10px] bg-red-500/20 text-red-300 px-1.5 py-0.5 rounded font-mono">HEAVY AP</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-0.5">Dual wide-bore siege barrels with reinforced muzzle brakes.</p>
+                        </button>
+
+                        <button data-cannon="single_hv" class="option-card text-left p-2.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:border-slate-500 transition">
+                            <div class="flex justify-between items-center">
+                                <span class="font-tactical font-bold text-sm text-white">140mm Rail-Sabot Cannon</span>
+                                <span class="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-mono">SNIPER</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-0.5">Extended long-range barrel with thermal shroud & recoil damper.</p>
+                        </button>
+
+                        <button data-cannon="quad_autocannon" class="option-card text-left p-2.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:border-slate-500 transition">
+                            <div class="flex justify-between items-center">
+                                <span class="font-tactical font-bold text-sm text-white">Quad Flak Autocannons</span>
+                                <span class="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono">RAPID AA</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-0.5">Four high-velocity rotary autocannons for infantry & air suppression.</p>
+                        </button>
+
+                        <button data-cannon="plasma_howitzer" class="option-card text-left p-2.5 rounded-lg border border-slate-700/80 bg-slate-900/60 hover:border-slate-500 transition">
+                            <div class="flex justify-between items-center">
+                                <span class="font-tactical font-bold text-sm text-white">Thermobaric Siege Mortar</span>
+                                <span class="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono">SPLASH</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-0.5">Short ultra-thick siege cannon with glowing energy coils.</p>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Secondary Machine Guns ("Machine Guys") -->
+                <div>
+                    <label class="block font-tactical text-xs uppercase tracking-wider text-amber-400 mb-2">
+                        2. Secondary Machine Guns (Anti-Infantry)
+                    </label>
+                    <div class="grid grid-cols-2 gap-2" id="mg-options">
+                        <button data-mg="none" class="mg-card p-2 rounded-lg border border-slate-700/80 bg-slate-900/60 text-left hover:border-slate-500">
+                            <div class="font-tactical font-bold text-xs text-white">None (Clean)</div>
+                            <div class="text-[10px] text-slate-400">No pintle mount</div>
+                        </button>
+                        <button data-mg="pintle_hmg" class="mg-card active p-2 rounded-lg border border-amber-500 bg-amber-500/15 text-left">
+                            <div class="font-tactical font-bold text-xs text-white">.50 Cal Pintle MG</div>
+                            <div class="text-[10px] text-slate-400">Roof turret + ammo box</div>
+                        </button>
+                        <button data-mg="twin_gatling" class="mg-card p-2 rounded-lg border border-slate-700/80 bg-slate-900/60 text-left hover:border-slate-500">
+                            <div class="font-tactical font-bold text-xs text-white">Dual Minigun Pods</div>
+                            <div class="text-[10px] text-slate-400">Side-cheek rotary barrels</div>
+                        </button>
+                        <button data-mg="hull_bolter" class="mg-card p-2 rounded-lg border border-slate-700/80 bg-slate-900/60 text-left hover:border-slate-500">
+                            <div class="font-tactical font-bold text-xs text-white">Hull + Roof MGs</div>
+                            <div class="text-[10px] text-slate-400">Full 360° suppression</div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Fine Tuning Sliders -->
+                <div class="bg-slate-900/70 p-3 rounded-lg border border-slate-800 space-y-3">
+                    <div class="font-tactical text-xs uppercase text-slate-300">Procedural Barrel & Turret Rig</div>
+                    <div>
+                        <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+                            <span>Barrel Length Scale</span>
+                            <span id="val-barrel-len" class="text-amber-400 font-mono">1.00x</span>
+                        </div>
+                        <input id="slider-barrel-len" type="range" min="0.7" max="1.45" step="0.05" value="1.0" class="w-full accent-amber-500 cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+                            <span>Turret Yaw Angle</span>
+                            <span id="val-turret-yaw" class="text-amber-400 font-mono">0°</span>
+                        </div>
+                        <input id="slider-turret-yaw" type="range" min="-180" max="180" step="1" value="0" class="w-full accent-amber-500 cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-[11px] text-slate-400 mb-1">
+                            <span>Gun Elevation</span>
+                            <span id="val-gun-pitch" class="text-amber-400 font-mono">4°</span>
+                        </div>
+                        <input id="slider-gun-pitch" type="range" min="-5" max="28" step="1" value="4" class="w-full accent-amber-500 cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: CHASSIS & FACTION PAINT -->
+            <div id="tab-chassis" class="tab-content hidden space-y-5">
+                <div>
+            <!-- TAB 3: SANDBOX DEV JSON & VALVE HAMMER VMF EXPORT -->
+            <div id="tab-export" class="tab-content hidden space-y-4">
+                <!-- Format Switcher -->
+                <div class="flex rounded-lg bg-slate-950 p-1 border border-slate-800">
+                    <button id="fmt-vmf" class="flex-1 py-1.5 rounded font-tactical text-xs font-bold bg-amber-500 text-slate-950 transition">
+                        HAMMER .VMF
+                    </button>
+                    <button id="fmt-json" class="flex-1 py-1.5 rounded font-tactical text-xs font-bold text-slate-400 hover:text-white transition">
+                        ENGINE JSON
+                    </button>
+                </div>
+
+                <!-- Hammer VMF Settings Panel -->
+                <div id="vmf-controls" class="bg-slate-900/80 p-3 rounded-lg border border-slate-800 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="font-tactical text-xs uppercase text-amber-400">Source VMF Brush Mode</span>
+                        <span class="text-[10px] font-mono text-slate-400">VDC Spec v4</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-1.5" id="vmf-mode-options">
+                        <button data-vmfmode="static_world" class="vmf-mode-btn active text-left p-2 rounded border border-amber-500 bg-amber-500/15">
+                            <div class="font-tactical font-bold text-xs text-white">1. Static World Brushes (world)</div>
+                            <div class="text-[10px] text-slate-400">Exports raw convex 6-plane world solids first for Hammer inspection.</div>
+                        </button>
+                        <button data-vmfmode="physbox_split" class="vmf-mode-btn text-left p-2 rounded border border-slate-700 bg-slate-950/60 hover:border-slate-500">
+                            <div class="font-tactical font-bold text-xs text-white">2. Split func_physbox (Hull + Turret)</div>
+                            <div class="text-[10px] text-slate-400">Separate physics hull & parented turret brush entities (Metal).</div>
+                        </button>
+                        <button data-vmfmode="physbox_single" class="vmf-mode-btn text-left p-2 rounded border border-slate-700 bg-slate-950/60 hover:border-slate-500">
+                            <div class="font-tactical font-bold text-xs text-white">3. Single Unified func_physbox</div>
+                            <div class="text-[10px] text-slate-400">Combines all tank solids into one rigid func_physbox entity.</div>
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 pt-1">
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-1">Scale (HU / Unit)</label>
+                            <select id="vmf-scale" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono">
+                                <option value="16">16 HU (Compact)</option>
+                                <option value="32" selected>32 HU (Standard ~144 HU)</option>
+                                <option value="48">48 HU (Heavy Scale)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] text-slate-400 mb-1">Base Dev Texture</label>
+                            <select id="vmf-texture" class="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 font-mono">
+                                <option value="DEV/DEV_MEASUREGENERIC01">DEV_MEASURE01</option>
+                                <option value="METAL/METALWALL048A" selected>METALWALL048A</option>
+                                <option value="TOOLS/TOOLSNODRAW">TOOLSNODRAW</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between gap-2">
+                    <span id="export-header-label" class="font-tactical text-xs uppercase text-amber-400">VMF Brush Output</span>
+                    <div class="flex gap-1.5">
+                        <button id="btn-copy-json" class="tactical-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-tactical font-bold text-xs px-2.5 py-1.5 rounded">
+                            COPY
+                        </button>
+                        <button id="btn-download-file" class="tactical-btn bg-amber-600 hover:bg-amber-500 text-slate-950 font-tactical font-bold text-xs px-3 py-1.5 rounded flex items-center gap-1">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            DOWNLOAD .VMF
+                        </button>
+                    </div>
+                </div>
+
+                <pre id="json-output" class="bg-slate-950 border border-slate-800 rounded-lg p-3 text-[10px] font-mono text-emerald-400 overflow-x-auto max-h-56 leading-relaxed"></pre>
+
+                <button id="btn-randomize" class="w-full tactical-btn bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white font-tactical font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    RANDOMIZE PROCEDURAL VARIANT
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // ============================================================================
+        // RTS UNIT FORGE - PROCEDURAL 3D TANK & WEAPON SANDBOX EDITOR
+        // ============================================================================
+
+        // Application State
+        const state = {
+            cannon: 'twin_onslaught',     // 'twin_onslaught' | 'single_hv' | 'quad_autocannon' | 'plasma_howitzer'
+            mg: 'pintle_hmg',             // 'none' | 'pintle_hmg' | 'twin_gatling' | 'hull_bolter'
+            hull: 'jaguar_heavy',         // 'jaguar_heavy' | 'siege_dozer' | 'hover_skiff'
+            faction: 'onslaught',         // 'onslaught' | 'desert_storm' | 'cobalt_연합' | 'stealth_ops'
+            barrelLength: 1.0,
+            turretYaw: 0,                 // degrees
+            gunPitch: 4,                  // degrees
+            roughness: 0.45,
+            showRing: true,
+            autoSweep: false,
+            wireframe: false,
+            exportFormat: 'vmf',          // 'vmf' | 'json'
+            vmfMode: 'static_world',      // 'static_world' | 'physbox_split' | 'physbox_single'
+            vmfScale: 32,
+            vmfTexture: 'METAL/METALWALL048A'
+        };
+
+        // Faction Color Palettes
+        const FACTIONS = {
+            onslaught: {
+                name: 'JAGUAR - ONSLAUGHT',
+                primary: 0xc82820,    // Crimson Red armor plates (matching screenshot)
+                secondary: 0xd8dce3,  // Off-white / silver turret top
+                trim: 0x7c7648,       // Olive-tan mechanical deck
+                dark: 0x1e2229,       // Gunmetal / tracks
+                glow: 0xff4500
+            },
+            desert_storm: {
+                name: 'SCORPION - DUNE',
+                primary: 0xc28e46,
+                secondary: 0xe2d5b5,
+                trim: 0x6b583e,
+                dark: 0x26231f,
+                glow: 0xf59e0b
+            },
+            'cobalt_연합': {
+                name: 'PALADIN - AEGIS',
+                primary: 0x1d56b8,
+                secondary: 0xe2e8f0,
+                trim: 0x475569,
+                dark: 0x171e2b,
+                glow: 0x38bdf8
+            },
+            stealth_ops: {
+                name: 'VIPER - SPECTRE',
+                primary: 0x272a30,
+                secondary: 0x3f444e,
+                trim: 0x181a1f,
+                dark: 0x0f1115,
+                glow: 0x10b981
+            }
+        };
+
+        // Weapon & Hull Stat Tables
+        const CANNON_STATS = {
+            twin_onslaught: { dmg: 850, arm: 40, spd: 0, label: 'SIEGE ARMOR' },
+            single_hv:      { dmg: 920, arm: 20, spd: 5, label: 'TANK DESTROYER' },
+            quad_autocannon:{ dmg: 680, arm: 10, spd: 8, label: 'AA / SUPPRESSION' },
+            plasma_howitzer:{ dmg: 990, arm: 30, spd: -6, label: 'ARTILLERY SIEGE' }
+        };
+
+        const MG_STATS = {
+            none:         { dmg: 0, spd: 4 },
+            pintle_hmg:   { dmg: 90, spd: 0 },
+            twin_gatling: { dmg: 160, spd: -2 },
+            hull_bolter:  { dmg: 140, spd: -1 }
+        };
+
+        const HULL_STATS = {
+            jaguar_heavy: { arm: 680, spd: 54 },
+            siege_dozer:  { arm: 860, spd: 42 },
+            hover_skiff:  { arm: 520, spd: 78 }
+        };
+
+        // Three.js Core Globals
+        let scene, camera, renderer;
+        let unitRoot, hullGroup, turretGroup, gunElevationGroup;
+        let selectionRing, gridHelper;
+        let muzzlePoints = [];
+        let gatlingBarrels = [];
+        let thrusterMeshes = [];
+        let recoilOffset = 0;
+
+        // Projectiles & VFX pools
+        const projectiles = [];
+        const particles = [];
+
+        // Camera Orbit State
+        const camState = {
+            theta: 0.72,      // Horizontal angle
+            phi: 0.92,        // Vertical angle from top
+            radius: 9.2,
+            target: new THREE.Vector3(0, 0.9, 0),
+            isDragging: false,
+            isPanning: false,
+            prevX: 0,
+            prevY: 0,
+            pinchDist: 0
+        };
+
+        // Procedural Texture Generator (Canvas-based metallic panel grit & tread pattern)
+        function createArmorTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 256, 256);
+
+            // Subtle metallic scratches & panel seams
+            ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(4, 4, 248, 248);
+
+            for (let i = 0; i < 400; i++) {
+                const x = Math.random() * 256;
+                const y = Math.random() * 256;
+                const w = Math.random() * 12 + 2;
+                ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+                ctx.fillRect(x, y, w, 1.5);
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        const armorBumpTex = createArmorTexture();
+
+        // Helper to create PBR Materials for current faction
+        function getMaterials() {
+            const pal = FACTIONS[state.faction];
+            return {
+                primary: new THREE.MeshStandardMaterial({
+                    color: pal.primary,
+                    roughness: state.roughness,
+                    metalness: 0.35,
+                    bumpMap: armorBumpTex,
+                    bumpScale: 0.015,
+                    wireframe: state.wireframe
+                }),
+                secondary: new THREE.MeshStandardMaterial({
+                    color: pal.secondary,
+                    roughness: state.roughness * 0.9,
+                    metalness: 0.4,
+                    bumpMap: armorBumpTex,
+                    bumpScale: 0.015,
+                    wireframe: state.wireframe
+                }),
+                trim: new THREE.MeshStandardMaterial({
+                    color: pal.trim,
+                    roughness: 0.55,
+                    metalness: 0.45,
+                    wireframe: state.wireframe
+                }),
+                dark: new THREE.MeshStandardMaterial({
+                    color: pal.dark,
+                    roughness: 0.5,
+                    metalness: 0.75,
+                    wireframe: state.wireframe
+                }),
+                chrome: new THREE.MeshStandardMaterial({
+                    color: 0x94a3b8,
+                    roughness: 0.25,
+                    metalness: 0.9,
+                    wireframe: state.wireframe
+                }),
+                glow: new THREE.MeshStandardMaterial({
+                    color: pal.glow,
+                    emissive: pal.glow,
+                    emissiveIntensity: 1.8,
+                    roughness: 0.2,
+                    wireframe: state.wireframe
+                })
+            };
+        }
+
+        // ============================================================================
+        // PROCEDURAL 3D MODEL BUILDERS
+        // ============================================================================
+
+        function buildUnit() {
+            // Clear existing unit geometry
+            while (unitRoot.children.length > 0) {
+                unitRoot.remove(unitRoot.children[0]);
+            }
+            muzzlePoints = [];
+            gatlingBarrels = [];
+            thrusterMeshes = [];
+
+            const mats = getMaterials();
+
+            // 1. HULL & LOCOMOTION ASSEMBLY
+            hullGroup = new THREE.Group();
+            unitRoot.add(hullGroup);
+
+            // Central Armored Core Hull
+            const coreGeo = new THREE.BoxGeometry(2.5, 0.72, 4.3);
+            const coreMesh = new THREE.Mesh(coreGeo, mats.trim);
+            coreMesh.position.set(0, 0.68, 0);
+            coreMesh.castShadow = true;
+            coreMesh.receiveShadow = true;
+            hullGroup.add(coreMesh);
+
+            // Sloped Front Glacis Plate
+            const glacisGeo = new THREE.BoxGeometry(2.45, 0.45, 1.1);
+            const glacisMesh = new THREE.Mesh(glacisGeo, mats.primary);
+            glacisMesh.position.set(0, 0.65, 2.15);
+            glacisMesh.rotation.x = 0.36;
+            glacisMesh.castShadow = true;
+            hullGroup.add(glacisMesh);
+
+            // Rear Engine Deck & Exhaust Vents
+            const engineDeck = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.35, 1.3), mats.dark);
+            engineDeck.position.set(0, 0.95, -1.45);
+            engineDeck.castShadow = true;
+            hullGroup.add(engineDeck);
+
+            for (let side of [-0.65, 0.65]) {
+                const exhaust = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.25, 0.4), mats.chrome);
+                exhaust.position.set(side, 1.05, -1.95);
+                hullGroup.add(exhaust);
+            }
+
+            // Hull Locomotion Variants
+            if (state.hull === 'hover_skiff') {
+                // Mag-Lev Hover Pods instead of tracks
+                for (let side of [-1, 1]) {
+                    const nacelle = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.48, 4.4), mats.primary);
+                    nacelle.position.set(side * 1.68, 0.62, 0);
+                    nacelle.castShadow = true;
+                    hullGroup.add(nacelle);
+
+                    // 4 Glowing Hover Thruster Pads
+                    for (let zOff of [-1.4, 1.4]) {
+                        const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.16, 16), mats.glow);
+                        pad.position.set(side * 1.68, 0.32, zOff);
+                        hullGroup.add(pad);
+                        thrusterMeshes.push(pad);
+                    }
+                }
+            } else {
+                // Quad-Track Sponson Assembly (Inspired by Jaguar Onslaught screenshot)
+                for (let side of [-1, 1]) {
+                    // Upper Armored Fender / Sponson Skirt
+                    const fender = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.42, 4.7), mats.primary);
+                    fender.position.set(side * 1.68, 0.78, 0.05);
+                    fender.castShadow = true;
+                    fender.receiveShadow = true;
+                    hullGroup.add(fender);
+
+                    // Top Reactive Armor Shoulder Pad
+                    const shoulderPad = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.22, 1.15), mats.secondary);
+                    shoulderPad.position.set(side * 1.65, 1.08, 0.55);
+                    shoulderPad.castShadow = true;
+                    hullGroup.add(shoulderPad);
+
+                    // Front & Rear Split Crawler Track Pods
+                    for (let zPos of [1.25, -1.25]) {
+                        const trackPod = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.56, 2.05), mats.dark);
+                        trackPod.position.set(side * 1.68, 0.34, zPos);
+                        trackPod.castShadow = true;
+                        hullGroup.add(trackPod);
+
+                        // Procedural Track Grouser Treads with Faction Accent Stripes
+                        for (let t = -0.85; t <= 0.85; t += 0.28) {
+                            const cleat = new THREE.Mesh(
+                                new THREE.BoxGeometry(0.86, 0.08, 0.12),
+                                Math.abs(t) < 0.3 ? mats.primary : mats.chrome
+                            );
+                            cleat.position.set(side * 1.68, 0.62, zPos + t);
+                            hullGroup.add(cleat);
+                        }
+                    }
+                }
+            }
+
+            // Optional Siege Dozer Blade
+            if (state.hull === 'siege_dozer') {
+                const bladeGroup = new THREE.Group();
+                bladeGroup.position.set(0, 0.48, 2.75);
+
+                const mainBlade = new THREE.Mesh(new THREE.BoxGeometry(4.1, 0.75, 0.22), mats.primary);
+                mainBlade.rotation.x = -0.25;
+                mainBlade.castShadow = true;
+                bladeGroup.add(mainBlade);
+
+                // Heavy Dozer Teeth & Hydraulic Struts
+                for (let x = -1.6; x <= 1.6; x += 0.8) {
+                    const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.22, 0.35), mats.chrome);
+                    tooth.position.set(x, -0.32, 0.15);
+                    bladeGroup.add(tooth);
+                }
+                for (let side of [-1.1, 1.1]) {
+                    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.9, 8), mats.chrome);
+                    strut.rotation.x = Math.PI / 2;
+                    strut.position.set(side, 0.05, -0.35);
+                    bladeGroup.add(strut);
+                }
+                hullGroup.add(bladeGroup);
+            }
+
+            // Optional Hull-Mounted Machine Guns ("Machine Guys")
+            if (state.mg === 'hull_bolter') {
+                for (let side of [-0.75, 0.75]) {
+                    const hullMG = buildMachineGunPod(mats, false);
+                    hullMG.position.set(side, 0.95, 1.85);
+                    hullGroup.add(hullMG);
+                    registerMuzzle(hullMG, 0, 0.05, 0.65);
+                }
+            }
+
+            // 2. TURRET ASSEMBLY
+            turretGroup = new THREE.Group();
+            turretGroup.position.set(0, 1.12, -0.15);
+            turretGroup.rotation.y = THREE.MathUtils.degToRad(state.turretYaw);
+            unitRoot.add(turretGroup);
+
+            // Turret Ring Collar
+            const ringBase = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.25, 0.18, 24), mats.dark);
+            ringBase.position.y = 0.05;
+            turretGroup.add(ringBase);
+
+            // Main Angular Turret Casemate (White/Silver top with crimson/trim cheeks)
+            const turretBody = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.62, 2.55), mats.secondary);
+            turretBody.position.set(0, 0.42, -0.1);
+            turretBody.castShadow = true;
+            turretBody.receiveShadow = true;
+            turretGroup.add(turretBody);
+
+            // Turret Side Cheek Armor Plates
+            for (let side of [-1, 1]) {
+                const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.52, 2.2), mats.primary);
+                cheek.position.set(side * 1.18, 0.38, -0.1);
+                cheek.rotation.z = side * -0.15;
+                cheek.castShadow = true;
+                turretGroup.add(cheek);
+            }
+
+            // Commander Cupola Hatch & Sensor Array on Turret Roof
+            const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, 0.18, 8), mats.secondary);
+            cupola.position.set(-0.55, 0.8, -0.55);
+            turretGroup.add(cupola);
+
+            const opticBox = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.24, 0.32), mats.dark);
+            opticBox.position.set(0.62, 0.82, 0.35);
+            turretGroup.add(opticBox);
+
+            const opticLens = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.05), mats.glow);
+            opticLens.position.set(0.62, 0.82, 0.52);
+            turretGroup.add(opticLens);
+
+            // Tactical Whip Antenna
+            const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.03, 1.45, 6), mats.dark);
+            antenna.position.set(-0.88, 1.35, -1.15);
+            turretGroup.add(antenna);
+
+            // 3. SECONDARY TURRET MACHINE GUNS ("MACHINE GUYS")
+            if (state.mg === 'pintle_hmg' || state.mg === 'hull_bolter') {
+                const pintleMount = buildMachineGunPod(mats, true);
+                pintleMount.position.set(-0.55, 0.92, -0.52);
+                turretGroup.add(pintleMount);
+                registerMuzzle(pintleMount, 0, 0.14, 0.85);
+            } else if (state.mg === 'twin_gatling') {
+                for (let side of [-1.42, 1.42]) {
+                    const gatlingPod = buildGatlingPod(mats);
+                    gatlingPod.position.set(side, 0.48, 0.35);
+                    turretGroup.add(gatlingPod);
+                    registerMuzzle(gatlingPod, 0, 0, 1.05);
+                }
+            }
+
+            // 4. GUN ELEVATION & CANNON ASSEMBLY
+            gunElevationGroup = new THREE.Group();
+            gunElevationGroup.position.set(0, 0.44, 1.05);
+            gunElevationGroup.rotation.x = THREE.MathUtils.degToRad(-state.gunPitch);
+            turretGroup.add(gunElevationGroup);
+
+            buildPrimaryCannon(mats);
+            updateTelemetry();
+            updateJsonPreview();
+        }
+
+        // Helper: Build Pintle / Hull Heavy Machine Gun
+        function buildMachineGunPod(mats, hasShield) {
+            const mgGroup = new THREE.Group();
+
+            // Tripod / Pintle Post
+            const post = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.25, 8), mats.dark);
+            post.position.y = 0.05;
+            mgGroup.add(post);
+
+            // Receiver Box
+            const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.2, 0.55), mats.dark);
+            receiver.position.set(0, 0.2, 0.05);
+            receiver.castShadow = true;
+            mgGroup.add(receiver);
+
+            // Ammo Drum Box on Side
+            const ammoBox = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.24), mats.primary);
+            ammoBox.position.set(0.17, 0.18, 0.08);
+            mgGroup.add(ammoBox);
+
+            // Perforated Cooling Shroud & Barrel
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.04, 0.65, 10), mats.chrome);
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.set(0, 0.22, 0.55);
+            mgGroup.add(barrel);
+
+            // Flash Hider
+            const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.035, 0.12, 10), mats.dark);
+            tip.rotation.x = Math.PI / 2;
+            tip.position.set(0, 0.22, 0.88);
+            mgGroup.add(tip);
+
+            if (hasShield) {
+                const shield = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, 0.04), mats.secondary);
+                shield.position.set(0, 0.26, 0.32);
+                mgGroup.add(shield);
+            }
+
+            return mgGroup;
+        }
+
+        // Helper: Build Side-Mounted Rotary Gatling Minigun Pod
+        function buildGatlingPod(mats) {
+            const pod = new THREE.Group();
+            const housing = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.34, 0.75), mats.dark);
+            housing.castShadow = true;
+            pod.add(housing);
+
+            const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.45, 12), mats.primary);
+            drum.rotation.z = Math.PI / 2;
+            drum.position.set(0, -0.05, -0.15);
+            pod.add(drum);
+
+            const cluster = new THREE.Group();
+            cluster.position.set(0, 0, 0.4);
+            for (let i = 0; i < 4; i++) {
+                const angle = (i / 4) * Math.PI * 2;
+                const b = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.75, 8), mats.chrome);
+                b.rotation.x = Math.PI / 2;
+                b.position.set(Math.cos(angle) * 0.065, Math.sin(angle) * 0.065, 0.32);
+                cluster.add(b);
+            }
+            pod.add(cluster);
+            gatlingBarrels.push(cluster);
+            return pod;
+        }
+
+        // Helper: Build Selected Main Turret Cannon
+        function buildPrimaryCannon(mats) {
+            const bLen = state.barrelLength;
+
+            if (state.cannon === 'twin_onslaught') {
+                // Iconic Dual Heavy Siege Cannons (from reference screenshot)
+                for (let side of [-0.46, 0.46]) {
+                    const bGroup = new THREE.Group();
+                    bGroup.position.set(side, 0, 0);
+
+                    // Heavy Armored Breech Block
+                    const breech = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.48, 0.85), mats.secondary);
+                    breech.position.set(0, 0.02, 0.25);
+                    breech.castShadow = true;
+                    bGroup.add(breech);
+
+                    // Thick Cylindrical Barrel
+                    const tubeLen = 1.65 * bLen;
+                    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.22, tubeLen, 18), mats.dark);
+                    tube.rotation.x = Math.PI / 2;
+                    tube.position.set(0, 0, 0.65 + tubeLen * 0.5);
+                    tube.castShadow = true;
+                    bGroup.add(tube);
+
+                    // Boxy Red Armored Muzzle Brake (Matching screenshot!)
+                    const muzzleBox = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.38, 0.68), mats.primary);
+                    muzzleBox.position.set(0, 0, 0.65 + tubeLen + 0.25);
+                    muzzleBox.castShadow = true;
+                    bGroup.add(muzzleBox);
+
+                    // Dark Bore Opening
+                    const bore = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.1, 14), mats.dark);
+                    bore.rotation.x = Math.PI / 2;
+                    bore.position.set(0, 0, 0.65 + tubeLen + 0.58);
+                    bGroup.add(bore);
+
+                    gunElevationGroup.add(bGroup);
+                    registerMuzzle(bGroup, 0, 0, 0.65 + tubeLen + 0.62);
+                }
+            } else if (state.cannon === 'single_hv') {
+                // 140mm Long-Range Rail-Sabot Cannon
+                const mantlet = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.52, 0.75), mats.primary);
+                mantlet.position.set(0, 0, 0.2);
+                mantlet.castShadow = true;
+                gunElevationGroup.add(mantlet);
+
+                const tubeLen = 2.85 * bLen;
+                const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, tubeLen, 20), mats.chrome);
+                barrel.rotation.x = Math.PI / 2;
+                barrel.position.set(0, 0, 0.5 + tubeLen * 0.5);
+                barrel.castShadow = true;
+                gunElevationGroup.add(barrel);
+
+                // Bore Evacuator Fume Extractor
+                const evac = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.55, 20), mats.secondary);
+                evac.rotation.x = Math.PI / 2;
+                evac.position.set(0, 0, 0.5 + tubeLen * 0.55);
+                gunElevationGroup.add(evac);
+
+                // Slotted Muzzle Brake
+                const brake = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.28, 0.52), mats.dark);
+                brake.position.set(0, 0, 0.5 + tubeLen + 0.2);
+                gunElevationGroup.add(brake);
+
+                registerMuzzle(gunElevationGroup, 0, 0, 0.5 + tubeLen + 0.48);
+            } else if (state.cannon === 'quad_autocannon') {
+                // Quad Flak Autocannon Array
+                const housing = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.55, 0.7), mats.primary);
+                housing.position.set(0, 0.04, 0.2);
+                housing.castShadow = true;
+                gunElevationGroup.add(housing);
+
+                const offsets = [
+                    [-0.42, 0.14], [0.42, 0.14],
+                    [-0.42, -0.12], [0.42, -0.12]
+                ];
+                const tubeLen = 1.95 * bLen;
+                offsets.forEach(([ox, oy]) => {
+                    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.11, tubeLen, 12), mats.chrome);
+                    tube.rotation.x = Math.PI / 2;
+                    tube.position.set(ox, oy, 0.5 + tubeLen * 0.5);
+                    tube.castShadow = true;
+                    gunElevationGroup.add(tube);
+
+                    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.08, 0.25, 12), mats.dark);
+                    tip.rotation.x = Math.PI / 2;
+                    tip.position.set(ox, oy, 0.5 + tubeLen + 0.1);
+                    gunElevationGroup.add(tip);
+
+                    registerMuzzle(gunElevationGroup, ox, oy, 0.5 + tubeLen + 0.25);
+                });
+            } else if (state.cannon === 'plasma_howitzer') {
+                // Short Ultra-Thick Thermobaric Siege Mortar
+                const cradle = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.62, 0.9), mats.dark);
+                cradle.position.set(0, 0.04, 0.25);
+                gunElevationGroup.add(cradle);
+
+                const tubeLen = 1.45 * bLen;
+                const outerJacket = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.44, tubeLen, 16), mats.primary);
+                outerJacket.rotation.x = Math.PI / 2;
+                outerJacket.position.set(0, 0.04, 0.6 + tubeLen * 0.5);
+                outerJacket.castShadow = true;
+                gunElevationGroup.add(outerJacket);
+
+                // Glowing Accelerator Coils
+                for (let c = 0.25; c <= 0.85; c += 0.3) {
+                    const coil = new THREE.Mesh(new THREE.TorusGeometry(0.41, 0.045, 10, 24), mats.glow);
+                    coil.position.set(0, 0.04, 0.6 + tubeLen * c);
+                    gunElevationGroup.add(coil);
+                }
+
+                registerMuzzle(gunElevationGroup, 0, 0.04, 0.6 + tubeLen + 0.15);
+            }
+        }
+
+        function registerMuzzle(parentObj, x, y, z) {
+            const anchor = new THREE.Object3D();
+            anchor.position.set(x, y, z);
+            parentObj.add(anchor);
+            muzzlePoints.push(anchor);
+        }
+
+        // ============================================================================
+        // COMBAT TEST FIRE SIMULATION & PARTICLE VFX
+        // ============================================================================
+
+        function triggerTestFire() {
+            if (!muzzlePoints.length) return;
+
+            // Apply physical gun recoil
+            recoilOffset = 0.35;
+            const pal = FACTIONS[state.faction];
+
+            muzzlePoints.forEach((anchor) => {
+                const worldPos = new THREE.Vector3();
+                const worldQuat = new THREE.Quaternion();
+                anchor.getWorldPosition(worldPos);
+                anchor.getWorldQuaternion(worldQuat);
+
+                const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(worldQuat).normalize();
+
+                // Spawn Tracer Shell
+                const shellGeo = new THREE.SphereGeometry(0.12, 8, 8);
+                shellGeo.scale(1, 1, 3.2);
+                const shellMat = new THREE.MeshBasicMaterial({ color: pal.glow });
+                const shell = new THREE.Mesh(shellGeo, shellMat);
+                shell.position.copy(worldPos);
+                shell.quaternion.copy(worldQuat);
+                scene.add(shell);
+
+                projectiles.push({
+                    mesh: shell,
+                    vel: forward.clone().multiplyScalar(38),
+                    life: 1.4
+                });
+
+                // Spawn Muzzle Flash & Smoke Puffs
+                for (let i = 0; i < 5; i++) {
+                    const pGeo = new THREE.DodecahedronGeometry(0.14 + Math.random() * 0.12, 0);
+                    const pMat = new THREE.MeshBasicMaterial({
+                        color: i < 2 ? 0xffedd5 : 0x64748b,
+                        transparent: true,
+                        opacity: 0.9
+                    });
+                    const pMesh = new THREE.Mesh(pGeo, pMat);
+                    pMesh.position.copy(worldPos);
+                    scene.add(pMesh);
+
+                    const spread = new THREE.Vector3(
+                        (Math.random() - 0.5) * 3.5,
+                        (Math.random() - 0.3) * 3.5,
+                        (Math.random() - 0.5) * 3.5
+                    );
+                    particles.push({
+                        mesh: pMesh,
+                        vel: forward.clone().multiplyScalar(4 + Math.random() * 5).add(spread),
+                        life: 0.45 + Math.random() * 0.25,
+                        maxLife: 0.7
+                    });
+                }
+            });
+        }
+
+        // ============================================================================
+        // SCENE INITIALIZATION & ENVIRONMENT
+        // ============================================================================
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+            const canvas = document.getElementById('webgl-canvas');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0b0e14);
+            scene.fog = new THREE.FogExp2(0x0b0e14, 0.032);
+
+            camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 120);
+
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.15;
+
+            // Three-Point Studio / Hangar Lighting
+            const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1e1b18, 0.65);
+            scene.add(hemiLight);
+
+            const keyLight = new THREE.DirectionalLight(0xfff1e0, 1.55);
+            keyLight.position.set(8, 14, 9);
+            keyLight.castShadow = true;
+            keyLight.shadow.mapSize.width = 2048;
+            keyLight.shadow.mapSize.height = 2048;
+            keyLight.shadow.camera.near = 2;
+            keyLight.shadow.camera.far = 35;
+            const d = 7;
+            keyLight.shadow.camera.left = -d;
+            keyLight.shadow.camera.right = d;
+            keyLight.shadow.camera.top = d;
+            keyLight.shadow.camera.bottom = -d;
+            keyLight.shadow.bias = -0.0005;
+            scene.add(keyLight);
+
+            // Warm Industrial Rim Light (Echoes the warm foundry background in screenshot)
+            const rimLight = new THREE.DirectionalLight(0xf97316, 0.75);
+            rimLight.position.set(-9, 6, -8);
+            scene.add(rimLight);
+
+            // Ground Sandbox Grid & Shadow Catcher Floor
+            const floorGeo = new THREE.PlaneGeometry(80, 80);
+            const floorMat = new THREE.MeshStandardMaterial({
+                color: 0x111622,
+                roughness: 0.85,
+                metalness: 0.2
+            });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            gridHelper = new THREE.GridHelper(32, 32, 0x334155, 0x1e293b);
+            gridHelper.position.y = 0.005;
+            scene.add(gridHelper);
+
+            // RTS Tactical Selection Ring
+            const ringGeo = new THREE.RingGeometry(2.85, 3.02, 64);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0x10b981,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.75
+            });
+            selectionRing = new THREE.Mesh(ringGeo, ringMat);
+            selectionRing.rotation.x = -Math.PI / 2;
+            selectionRing.position.y = 0.015;
+            scene.add(selectionRing);
+
+            // Root Container for Procedural Unit
+            unitRoot = new THREE.Group();
+            scene.add(unitRoot);
+
+            buildUnit();
+            setupOrbitControls(canvas);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // ============================================================================
+        // ORBIT & TOUCH CAMERA CONTROLS
+        // ============================================================================
+
+        function updateCameraPosition() {
+            camState.phi = Math.max(0.22, Math.min(Math.PI / 2 - 0.04, camState.phi));
+            camState.radius = Math.max(4.5, Math.min(22, camState.radius));
+
+            camera.position.x = camState.target.x + camState.radius * Math.sin(camState.phi) * Math.sin(camState.theta);
+            camera.position.y = camState.target.y + camState.radius * Math.cos(camState.phi);
+            camera.position.z = camState.target.z + camState.radius * Math.sin(camState.phi) * Math.cos(camState.theta);
+            camera.lookAt(camState.target);
+        }
+
+        function setupOrbitControls(domElement) {
+            domElement.addEventListener('mousedown', (e) => {
+                if (e.button === 0) camState.isDragging = true;
+                if (e.button === 2) camState.isPanning = true;
+                camState.prevX = e.clientX;
+                camState.prevY = e.clientY;
+            });
+
+            window.addEventListener('mouseup', () => {
+                camState.isDragging = false;
+                camState.isPanning = false;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                const dx = e.clientX - camState.prevX;
+                const dy = e.clientY - camState.prevY;
+                camState.prevX = e.clientX;
+                camState.prevY = e.clientY;
+
+                if (camState.isDragging) {
+                    camState.theta -= dx * 0.008;
+                    camState.phi -= dy * 0.008;
+                } else if (camState.isPanning) {
+                    camState.target.y = Math.max(0.2, Math.min(3.5, camState.target.y + dy * 0.01));
+                }
+            });
+
+            domElement.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                camState.radius += e.deltaY * 0.006;
+            }, { passive: false });
+
+            domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+            // Touch Support for Mobile/Tablet
+            domElement.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    camState.isDragging = true;
+                    camState.prevX = e.touches[0].clientX;
+                    camState.prevY = e.touches[0].clientY;
+                } else if (e.touches.length === 2) {
+                    camState.isDragging = false;
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    camState.pinchDist = Math.hypot(dx, dy);
+                }
+            }, { passive: true });
+
+            domElement.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1 && camState.isDragging) {
+                    const dx = e.touches[0].clientX - camState.prevX;
+                    const dy = e.touches[0].clientY - camState.prevY;
+                    camState.prevX = e.touches[0].clientX;
+                    camState.prevY = e.touches[0].clientY;
+                    camState.theta -= dx * 0.01;
+                    camState.phi -= dy * 0.01;
+                } else if (e.touches.length === 2) {
+                    const dx = e.touches[0].clientX - e.touches[1].clientX;
+                    const dy = e.touches[0].clientY - e.touches[1].clientY;
+                    const dist = Math.hypot(dx, dy);
+                    camState.radius -= (dist - camState.pinchDist) * 0.03;
+                    camState.pinchDist = dist;
+                }
+            }, { passive: true });
+
+            domElement.addEventListener('touchend', () => {
+                camState.isDragging = false;
+            });
+        }
+
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // ============================================================================
+        // TELEMETRY, JSON EXPORT & UI BINDINGS
+        // ============================================================================
+
+        function updateTelemetry() {
+            const cStat = CANNON_STATS[state.cannon];
+            const mStat = MG_STATS[state.mg];
+            const hStat = HULL_STATS[state.hull];
+            const pal = FACTIONS[state.faction];
+
+            const totalDmg = Math.round((cStat.dmg + mStat.dmg) * (0.85 + state.barrelLength * 0.15));
+            const totalArm = hStat.arm + cStat.arm;
+            const totalSpd = Math.max(25, hStat.spd + cStat.spd + mStat.spd);
+
+            document.getElementById('unit-title-display').textContent = pal.name;
+            document.getElementById('unit-class-badge').textContent = cStat.label;
+
+            document.getElementById('stat-dmg-val').textContent = totalDmg;
+            document.getElementById('stat-dmg-bar').style.width = Math.min(100, (totalDmg / 1150) * 100) + '%';
+
+            document.getElementById('stat-arm-val').textContent = totalArm;
+            document.getElementById('stat-arm-bar').style.width = Math.min(100, (totalArm / 950) * 100) + '%';
+
+            document.getElementById('stat-spd-val').textContent = totalSpd + ' KM/H';
+            document.getElementById('stat-spd-bar').style.width = Math.min(100, (totalSpd / 85) * 100) + '%';
+
+            // Calculate triangle count
+            let tris = 0;
+            unitRoot.traverse((obj) => {
+                if (obj.isMesh && obj.geometry) {
+                    const geo = obj.geometry;
+                    tris += geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+                }
+            });
+            document.getElementById('poly-count').textContent = Math.round(tris).toLocaleString() + ' TRIS';
+        }
+
+        // ============================================================================
+        // VALVE HAMMER VMF GENERATOR (VDC SOLID / PLANE / FUNC_PHYSBOX SPEC)
+        // ============================================================================
+
+        // Convert Three.js Y-up (X right, Y up, Z forward) to Source Hammer Z-up (X forward, Y left, Z up)
+        function toHammerCoords(vec3, scale) {
+            return new THREE.Vector3(
+                +(vec3.z * scale).toFixed(2),
+                +(-vec3.x * scale).toFixed(2),
+                +(vec3.y * scale).toFixed(2)
+            );
+        }
+
+        // Build a valid 6-sided convex Hammer brush solid from 8 transformed world-space box corners
+        function createHammerSolidFromCorners(corners, solidId, materialName, editorColor) {
+            // Corner indices of a local BoxGeometry (-x/+x, -y/+y, -z/+z):
+            // 0:(-,-,-) 1:(+,-,-) 2:(-,+,-) 3:(+,+,-) 4:(-,-,+) 5:(+,-,+) 6:(-,+,+) 7:(+,+,+)
+            // Each face uses 3 points ordered CLOCKWISE when viewed from OUTSIDE the solid (VDC VMF spec)
+            const faces = [
+                { pts: [2, 6, 7], u: [1, 0, 0], v: [0, -1, 0] }, // Top (+Y in Three -> +Z in Hammer)
+                { pts: [0, 1, 5], u: [1, 0, 0], v: [0, 1, 0]  }, // Bottom (-Y)
+                { pts: [4, 5, 7], u: [0, 1, 0], v: [0, 0, -1] }, // Front (+Z in Three -> +X in Hammer)
+                { pts: [1, 0, 2], u: [0, -1, 0], v: [0, 0, -1]}, // Back (-Z)
+                { pts: [1, 3, 7], u: [1, 0, 0], v: [0, 0, -1] }, // Right (+X in Three -> -Y in Hammer)
+                { pts: [0, 4, 6], u: [-1, 0, 0], v: [0, 0, -1]}  // Left (-X)
+            ];
+
+            let sideIdBase = solidId * 10;
+            let sidesStr = '';
+
+            faces.forEach((f, idx) => {
+                const p1 = corners[f.pts[0]];
+                const p2 = corners[f.pts[1]];
+                const p3 = corners[f.pts[2]];
+
+                // Compute orthogonal texture UV axes aligned with the face plane in Hammer space
+                const edge1 = new THREE.Vector3().subVectors(p2, p1).normalize();
+                const edge2 = new THREE.Vector3().subVectors(p3, p1);
+                const normal = new THREE.Vector3().crossVectors(edge2, edge1).normalize();
+                const vAxis = new THREE.Vector3().crossVectors(normal, edge1).normalize();
+
+                const uStr = `[${edge1.x.toFixed(4)} ${edge1.y.toFixed(4)} ${edge1.z.toFixed(4)} 0] 0.25`;
+                const vStr = `[${vAxis.x.toFixed(4)} ${vAxis.y.toFixed(4)} ${vAxis.z.toFixed(4)} 0] 0.25`;
+
+                sidesStr += `\t\tside
+\t\t{
+\t\t\t"id" "${sideIdBase + idx + 1}"
+\t\t\t"plane" "(${p1.x} ${p1.y} ${p1.z}) (${p2.x} ${p2.y} ${p2.z}) (${p3.x} ${p3.y} ${p3.z})"
+\t\t\t"material" "${materialName}"
+\t\t\t"uaxis" "${uStr}"
+\t\t\t"vaxis" "${vStr}"
+\t\t\t"rotation" "0"
+\t\t\t"lightmapscale" "16"
+\t\t\t"smoothing_groups" "0"
+\t\t}\n`;
+            });
+
+            return `\tsolid
+\t{
+\t\t"id" "${solidId}"
+${sidesStr}\t\teditor
+\t\t{
+\t\t\t"color" "${editorColor}"
+\t\t\t"visgroupshown" "1"
+\t\t\t"visgroupautoshown" "1"
+\t\t}
+\t}\n`;
+        }
+
+        // Traverse a Three.js group and convert every mesh's bounding volume into an oriented 6-plane Hammer solid
+        function collectGroupBrushes(rootGroup, scale, startSolidId, baseMat, editorColor) {
+            rootGroup.updateMatrixWorld(true);
+            let solidId = startSolidId;
+            let solidsVMF = '';
+            const boundsMin = new THREE.Vector3(Infinity, Infinity, Infinity);
+            const boundsMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+
+            rootGroup.traverse((child) => {
+                if (!child.isMesh || !child.geometry) return;
+
+                child.geometry.computeBoundingBox();
+                const bb = child.geometry.boundingBox;
+                if (!bb) return;
+
+                // Extract 8 local bounding-box vertices and transform into world -> Hammer space
+                const localPts = [
+                    new THREE.Vector3(bb.min.x, bb.min.y, bb.min.z),
+                    new THREE.Vector3(bb.max.x, bb.min.y, bb.min.z),
+                    new THREE.Vector3(bb.min.x, bb.max.y, bb.min.z),
+                    new THREE.Vector3(bb.max.x, bb.max.y, bb.min.z),
+                    new THREE.Vector3(bb.min.x, bb.min.y, bb.max.z),
+                    new THREE.Vector3(bb.max.x, bb.min.y, bb.max.z),
+                    new THREE.Vector3(bb.min.x, bb.max.y, bb.max.z),
+                    new THREE.Vector3(bb.max.x, bb.max.y, bb.max.z)
+                ];
+
+                const hammerCorners = localPts.map(pt => {
+                    const worldPt = pt.clone().applyMatrix4(child.matrixWorld);
+                    // Undo hover bobbing offset so brushes sit cleanly on ground Z=0
+                    worldPt.y -= unitRoot.position.y;
+                    const hPt = toHammerCoords(worldPt, scale);
+                    boundsMin.min(hPt);
+                    boundsMax.max(hPt);
+                    return hPt;
+                });
+
+                // Skip microscopic details (< 1.5 Hammer units) that could cause microbrush warnings
+                const diag = hammerCorners[0].distanceTo(hammerCorners[7]);
+                if (diag < 2.5) return;
+
+                // Pick appropriate Source material based on mesh material role
+                let mat = baseMat;
+                if (child.material && child.material.emissiveIntensity > 0) {
+                    mat = 'LIGHTS/WHITE001';
+                }
+
+                solidsVMF += createHammerSolidFromCorners(hammerCorners, solidId++, mat, editorColor);
+            });
+
+            const center = new THREE.Vector3().addVectors(boundsMin, boundsMax).multiplyScalar(0.5);
+            return { solidsVMF, nextId: solidId, center, count: solidId - startSolidId };
+        }
+
+        function generateVMFString() {
+            const scale = state.vmfScale;
+            const mat = state.vmfTexture;
+            const unitName = FACTIONS[state.faction].name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+            const hullRes = collectGroupBrushes(hullGroup, scale, 2, mat, '220 60 50');
+            const turretRes = collectGroupBrushes(turretGroup, scale, hullRes.nextId, mat, '210 215 225');
+
+            let worldSolids = '';
+            let entitiesBlock = '';
+            let nextEntId = turretRes.nextId + 10;
+
+            if (state.vmfMode === 'static_world') {
+                // Export all brushes as static world geometry first (best for Hammer inspection/editing)
+                worldSolids = hullRes.solidsVMF + turretRes.solidsVMF;
+            } else if (state.vmfMode === 'physbox_single') {
+                // Wrap all solids into a single unified func_physbox entity
+                const allSolids = hullRes.solidsVMF + turretRes.solidsVMF;
+                const origin = `${hullRes.center.x.toFixed(1)} ${hullRes.center.y.toFixed(1)} ${hullRes.center.z.toFixed(1)}`;
+                entitiesBlock += `entity
+{
+\t"id" "${nextEntId++}"
+\t"classname" "func_physbox"
+\t"targetname" "${unitName}_physbox"
+\t"origin" "${origin}"
+\t"material" "2"
+\t"health" "850"
+\t"massScale" "2.5"
+\t"Damagetype" "1"
+\t"PerformanceMode" "1"
+\t"spawnflags" "0"
+${allSolids}\teditor
+\t{
+\t\t"color" "220 180 40"
+\t\t"visgroupshown" "1"
+\t\t"visgroupautoshown" "1"
+\t}
+}\n`;
+            } else if (state.vmfMode === 'physbox_split') {
+                // Separate func_physbox for Hull and parented func_physbox for Turret
+                const hullOrigin = `${hullRes.center.x.toFixed(1)} ${hullRes.center.y.toFixed(1)} ${hullRes.center.z.toFixed(1)}`;
+                const turretOrigin = `${turretRes.center.x.toFixed(1)} ${turretRes.center.y.toFixed(1)} ${(1.12 * scale).toFixed(1)}`;
+
+                entitiesBlock += `entity
+{
+\t"id" "${nextEntId++}"
+\t"classname" "func_physbox"
+\t"targetname" "${unitName}_hull"
+\t"origin" "${hullOrigin}"
+\t"material" "2"
+\t"health" "1000"
+\t"massScale" "3.0"
+\t"spawnflags" "0"
+${hullRes.solidsVMF}\teditor
+\t{
+\t\t"color" "220 60 50"
+\t\t"visgroupshown" "1"
+\t\t"visgroupautoshown" "1"
+\t}
+}
+entity
+{
+\t"id" "${nextEntId++}"
+\t"classname" "func_physbox"
+\t"targetname" "${unitName}_turret"
+\t"parentname" "${unitName}_hull"
+\t"origin" "${turretOrigin}"
+\t"material" "2"
+\t"health" "600"
+\t"massScale" "1.2"
+\t"spawnflags" "0"
+${turretRes.solidsVMF}\teditor
+\t{
+\t\t"color" "210 215 225"
+\t\t"visgroupshown" "1"
+\t\t"visgroupautoshown" "1"
+\t}
+}\n`;
+            }
+
+            return `versioninfo
+{
+\t"editorversion" "400"
+\t"editorbuild" "8864"
+\t"mapversion" "1"
+\t"formatversion" "100"
+\t"prefab" "1"
+}
+world
+{
+\t"id" "1"
+\t"mapversion" "1"
+\t"classname" "worldspawn"
+\t"skyname" "sky_day01_01"
+${worldSolids}}
+${entitiesBlock}cameras
+{
+\t"activecamera" "-1"
+}
+`;
+        }
+
+        function updateJsonPreview() {
+            const outEl = document.getElementById('json-output');
+            if (state.exportFormat === 'vmf') {
+                outEl.textContent = generateVMFString();
+                return;
+            }
+
+            const payload = {
+                unitId: FACTIONS[state.faction].name.toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+                proceduralSeed: Math.abs(state.cannon.length * 137 + state.hull.length * 91),
+                chassis: {
+                    hullType: state.hull,
+                    factionLivery: state.faction,
+                    surfaceRoughness: state.roughness
+                },
+                hardpoints: {
+                    primaryTurret: state.cannon,
+                    secondaryMG: state.mg,
+                    barrelLengthScale: state.barrelLength,
+                    defaultYawDeg: state.turretYaw,
+                    defaultPitchDeg: state.gunPitch
+                }
+            };
+            outEl.textContent = JSON.stringify(payload, null, 2);
+        }
+
+        function bindUIEvents() {
+            // Sidebar Tabs
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => {
+                        b.classList.remove('text-amber-400', 'border-b-2', 'border-amber-500', 'bg-amber-500/10');
+                        b.classList.add('text-slate-400');
+                    });
+                    btn.classList.add('text-amber-400', 'border-b-2', 'border-amber-500', 'bg-amber-500/10');
+                    btn.classList.remove('text-slate-400');
+
+                    const target = btn.dataset.tab;
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+                    document.getElementById('tab-' + target).classList.remove('hidden');
+                    if (target === 'export') updateJsonPreview();
+                });
+            });
+
+            // Export Format Switcher (VMF vs JSON)
+            document.getElementById('fmt-vmf').addEventListener('click', () => {
+                state.exportFormat = 'vmf';
+                document.getElementById('fmt-vmf').classList.add('bg-amber-500', 'text-slate-950');
+                document.getElementById('fmt-vmf').classList.remove('text-slate-400');
+                document.getElementById('fmt-json').classList.remove('bg-amber-500', 'text-slate-950');
+                document.getElementById('fmt-json').classList.add('text-slate-400');
+                document.getElementById('vmf-controls').classList.remove('hidden');
+                document.getElementById('export-header-label').textContent = 'VMF Brush Output';
+                document.getElementById('btn-download-file').lastChild.textContent = ' DOWNLOAD .VMF';
+                updateJsonPreview();
+            });
+
+            document.getElementById('fmt-json').addEventListener('click', () => {
+                state.exportFormat = 'json';
+                document.getElementById('fmt-json').classList.add('bg-amber-500', 'text-slate-950');
+                document.getElementById('fmt-json').classList.remove('text-slate-400');
+                document.getElementById('fmt-vmf').classList.remove('bg-amber-500', 'text-slate-950');
+                document.getElementById('fmt-vmf').classList.add('text-slate-400');
+                document.getElementById('vmf-controls').classList.add('hidden');
+                document.getElementById('export-header-label').textContent = 'Unit Prefab JSON';
+                document.getElementById('btn-download-file').lastChild.textContent = ' DOWNLOAD .JSON';
+                updateJsonPreview();
+            });
+
+            // VMF Mode Cards
+            document.querySelectorAll('.vmf-mode-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.vmf-mode-btn').forEach(b => {
+                        b.classList.remove('border-amber-500', 'bg-amber-500/15');
+                        b.classList.add('border-slate-700', 'bg-slate-950/60');
+                    });
+                    btn.classList.add('border-amber-500', 'bg-amber-500/15');
+                    btn.classList.remove('border-slate-700', 'bg-slate-950/60');
+                    state.vmfMode = btn.dataset.vmfmode;
+                    updateJsonPreview();
+                });
+            });
+
+            document.getElementById('vmf-scale').addEventListener('change', (e) => {
+                state.vmfScale = parseInt(e.target.value, 10);
+                updateJsonPreview();
+            });
+
+            document.getElementById('vmf-texture').addEventListener('change', (e) => {
+                state.vmfTexture = e.target.value;
+                updateJsonPreview();
+            });
+
+            // Cannon Cards
+            document.querySelectorAll('.option-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.option-card').forEach(c => {
+                        c.classList.remove('border-amber-500', 'bg-amber-500/15');
+                        c.classList.add('border-slate-700/80', 'bg-slate-900/60');
+                    });
+                    card.classList.add('border-amber-500', 'bg-amber-500/15');
+                    card.classList.remove('border-slate-700/80', 'bg-slate-900/60');
+                    state.cannon = card.dataset.cannon;
+                    buildUnit();
+                });
+            });
+
+            // Machine Gun Cards
+            document.querySelectorAll('.mg-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.mg-card').forEach(c => {
+                        c.classList.remove('border-amber-500', 'bg-amber-500/15');
+                        c.classList.add('border-slate-700/80', 'bg-slate-900/60');
+                    });
+                    card.classList.add('border-amber-500', 'bg-amber-500/15');
+                    card.classList.remove('border-slate-700/80', 'bg-slate-900/60');
+                    state.mg = card.dataset.mg;
+                    buildUnit();
+                });
+            });
+
+            // Hull Cards
+            document.querySelectorAll('.hull-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.hull-card').forEach(c => {
+                        c.classList.remove('border-amber-500', 'bg-amber-500/15');
+                        c.classList.add('border-slate-700/80', 'bg-slate-900/60');
+                    });
+                    card.classList.add('border-amber-500', 'bg-amber-500/15');
+                    card.classList.remove('border-slate-700/80', 'bg-slate-900/60');
+                    state.hull = card.dataset.hull;
+                    buildUnit();
+                });
+            });
+
+            // Faction Livery Cards
+            document.querySelectorAll('.faction-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.faction-card').forEach(c => {
+                        c.classList.remove('border-amber-500', 'bg-amber-500/15');
+                        c.classList.add('border-slate-700', 'bg-slate-900/60');
+                    });
+                    card.classList.add('border-amber-500', 'bg-amber-500/15');
+                    card.classList.remove('border-slate-700', 'bg-slate-900/60');
+                    state.faction = card.dataset.faction;
+                    buildUnit();
+                });
+            });
+
+            // Sliders
+            document.getElementById('slider-barrel-len').addEventListener('input', (e) => {
+                state.barrelLength = parseFloat(e.target.value);
+                document.getElementById('val-barrel-len').textContent = state.barrelLength.toFixed(2) + 'x';
+                buildUnit();
+            });
+
+            document.getElementById('slider-turret-yaw').addEventListener('input', (e) => {
+                state.turretYaw = parseInt(e.target.value, 10);
+                document.getElementById('val-turret-yaw').textContent = state.turretYaw + '°';
+                if (turretGroup) turretGroup.rotation.y = THREE.MathUtils.degToRad(state.turretYaw);
+                updateJsonPreview();
+            });
+
+            document.getElementById('slider-gun-pitch').addEventListener('input', (e) => {
+                state.gunPitch = parseInt(e.target.value, 10);
+                document.getElementById('val-gun-pitch').textContent = state.gunPitch + '°';
+                if (gunElevationGroup) gunElevationGroup.rotation.x = THREE.MathUtils.degToRad(-state.gunPitch);
+                updateJsonPreview();
+            });
+
+            document.getElementById('slider-roughness').addEventListener('input', (e) => {
+                state.roughness = parseFloat(e.target.value);
+                document.getElementById('val-roughness').textContent = state.roughness.toFixed(2);
+                buildUnit();
+            });
+
+            document.getElementById('toggle-ring').addEventListener('change', (e) => {
+                state.showRing = e.target.checked;
+                selectionRing.visible = state.showRing;
+            });
+
+            // HUD Action Buttons
+            document.getElementById('btn-test-fire').addEventListener('click', triggerTestFire);
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+            // Copy Output Button (using execCommand fallback for iFrame compatibility)
+            document.getElementById('btn-copy-json').addEventListener('click', () => {
+                const text = document.getElementById('json-output').textContent;
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+
+                const toast = document.getElementById('toast-box');
+                toast.textContent = state.exportFormat === 'vmf'
+                    ? 'Hammer .VMF copied to clipboard!'
+                    : 'Blueprint JSON copied to clipboard!';
+                toast.classList.remove('opacity-0');
+                setTimeout(() => toast.classList.add('opacity-0'), 2200);
+            });
+
+            // Download .VMF / .JSON File
+            document.getElementById('btn-download-file').addEventListener('click', () => {
+                const content = document.getElementById('json-output').textContent;
+                const ext = state.exportFormat === 'vmf' ? 'vmf' : 'json';
+                const unitSlug = FACTIONS[state.faction].name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+                const filename = `${unitSlug}_${state.vmfMode}.${ext}`;
+
+                const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                const toast = document.getElementById('toast-box');
+                toast.textContent = `Downloaded ${filename}`;
+                toast.classList.remove('opacity-0');
+                setTimeout(() => toast.classList.add('opacity-0'), 2200);
+            });
+
+            // Randomize Variant Button
+            document.getElementById('btn-randomize').addEventListener('click', () => {
+                const cannons = Object.keys(CANNON_STATS);
+                const mgs = Object.keys(MG_STATS);
+                const hulls = Object.keys(HULL_STATS);
+                const factions = Object.keys(FACTIONS);
+
+                state.cannon = cannons[Math.floor(Math.random() * cannons.length)];
+                state.mg = mgs[Math.floor(Math.random() * mgs.length)];
+                state.hull = hulls[Math.floor(Math.random() * hulls.length)];
+                state.faction = factions[Math.floor(Math.random() * factions.length)];
+                state.barrelLength = +(0.8 + Math.random() * 0.55).toFixed(2);
+
+                document.getElementById('slider-barrel-len').value = state.barrelLength;
+                document.getElementById('val-barrel-len').textContent = state.barrelLength.toFixed(2) + 'x';
+                buildUnit();
+                triggerTestFire();
+            });
+        }
+
+        // ============================================================================
+        // MAIN ANIMATION LOOP
+        // ============================================================================
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(clock.getDelta(), 0.05);
+            const elapsed = clock.getElapsedTime();
+
+            // 1. Turret Sweep Animation
+            if (state.autoSweep && turretGroup) {
+                const sweepAngle = Math.sin(elapsed * 1.1) * 55;
+                turretGroup.rotation.y = THREE.MathUtils.degToRad(sweepAngle);
+            }
+
+            // 2. Barrel Recoil Recovery
+            if (recoilOffset > 0.001 && gunElevationGroup) {
+                recoilOffset = THREE.MathUtils.lerp(recoilOffset, 0, dt * 10);
+                gunElevationGroup.position.z = 1.05 - recoilOffset;
+            }
+
+            // 3. Spin Gatling Minigun Barrels
+            gatlingBarrels.forEach(cluster => {
+                cluster.rotation.z += dt * 14;
+            });
+
+            // 4. Hover Skiff Bobbing Motion
+            if (state.hull === 'hover_skiff' && unitRoot) {
+                unitRoot.position.y = 0.18 + Math.sin(elapsed * 3.2) * 0.06;
+            } else if (unitRoot) {
+                unitRoot.position.y = 0;
+            }
+
+            // 5. Update Fired Projectiles
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.mesh.position.addScaledVector(p.vel, dt);
+                p.life -= dt;
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    p.mesh.geometry.dispose();
+                    p.mesh.material.dispose();
+                    projectiles.splice(i, 1);
+                }
+            }
+
+            // 6. Update Muzzle Smoke & Flash Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const pt = particles[i];
+                pt.mesh.position.addScaledVector(pt.vel, dt);
+                pt.mesh.scale.multiplyScalar(1 + dt * 2.5);
+                pt.life -= dt;
+                pt.mesh.material.opacity = Math.max(0, pt.life / pt.maxLife);
+                if (pt.life <= 0) {
+                    scene.remove(pt.mesh);
+                    pt.mesh.geometry.dispose();
+                    pt.mesh.material.dispose();
+                    particles.splice(i, 1);
+                }
+            }
+
+            updateCameraPosition();
+            renderer.render(scene, camera);
+        }
+
+        // Start application on window load
+        window.onload = function () {
+            initScene();
+            bindUIEvents();
+            animate();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AETHER // RTS Procedural WebGL & VAT Sandbox Studio</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Three.js & OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f1f5f9;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Custom sleek scrollbars for studio panels */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.4);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(71, 85, 105, 0.6);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(16, 185, 129, 0.8);
+        }
+        /* Custom range sliders */
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            height: 5px;
+            border-radius: 999px;
+            background: #1e293b;
+            border: 1px solid #334155;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #10b981;
+            margin-top: -5px;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+            transition: transform 0.15s ease;
+        }
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            background: #34d399;
+        }
+        /* Glass panel styling */
+        .studio-glass {
+            background: rgba(13, 19, 33, 0.85);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+        }
+        @keyframes pulse-rec {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.35; transform: scale(0.85); }
+        }
+        .rec-dot {
+            animation: pulse-rec 1.1s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative overflow-hidden">
+
+    <!-- Fullscreen 3D WebGL Canvas Container -->
+    <div id="canvas-container" class="fixed inset-0 w-full h-full z-0"></div>
+
+    <!-- Custom Toast / Message Box (Replaces alert) -->
+    <div id="toast-container" class="fixed top-16 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none"></div>
+
+    <!-- TOP HUD BAR -->
+    <header class="fixed top-3 left-3 right-3 z-30 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+        <!-- Left Status Pill (Matches RTS VAT ENGINE aesthetic) -->
+        <div class="studio-glass rounded-full px-3.5 py-2 flex items-center gap-3 pointer-events-auto">
+            <div class="flex items-center gap-2">
+                <span id="engine-led" class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></span>
+                <span class="text-xs font-bold tracking-wider uppercase text-slate-100">RTS VAT &amp; SANDBOX ENGINE</span>
+            </div>
+            <span class="hidden sm:inline-block text-slate-600">|</span>
+            <div class="hidden sm:flex items-center gap-2 text-[11px] font-mono text-slate-400">
+                <span id="fps-counter" class="text-emerald-400 font-semibold">60 FPS</span>
+                <span>•</span>
+                <span id="entity-counter">14 Entities</span>
+            </div>
+        </div>
+
+        <!-- Right Quick Action Pills -->
+        <div class="studio-glass rounded-full p-1.5 flex items-center gap-1.5 pointer-events-auto">
+            <button id="btn-toggle-panels" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-100 border border-slate-700/70 transition flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+                <span id="label-toggle-panels">Hide Panels</span>
+            </button>
+
+            <button id="btn-reset-cam" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                <span>Reset Cam</span>
+            </button>
+
+            <button id="btn-record-video" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-rose-600/90 hover:bg-rose-500 text-white border border-rose-400/30 transition flex items-center gap-1.5">
+                <span id="rec-indicator" class="w-2 h-2 rounded-full bg-white"></span>
+                <span id="label-record-btn">Record WebM</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- LEFT PANEL: SCENE HIERARCHY & ENTITY SPAWNER -->
+    <aside id="left-panel" class="fixed top-16 left-3 bottom-20 w-72 max-w-[calc(100vw-1.5rem)] z-20 studio-glass rounded-2xl flex flex-col overflow-hidden transition-all duration-300">
+        <!-- Panel Header -->
+        <div class="px-3.5 py-2.5 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/50">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-200">Scene Builder &amp; Outliner</h2>
+            </div>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">CRAFT</span>
+        </div>
+
+        <!-- Spawner Palette -->
+        <div class="p-3 border-b border-slate-800/80">
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Spawn Procedural Prefab</div>
+            <div class="grid grid-cols-2 gap-1.5">
+                <button onclick="spawnEntity('unit')" class="p-2 rounded-xl bg-slate-800/80 hover:bg-emerald-600/25 border border-slate-700/70 hover:border-emerald-500/50 text-left transition group">
+                    <div class="text-xs font-semibold text-slate-100 group-hover:text-emerald-300 flex items-center gap-1.5">
+                        <span>🤖</span> RTS Trooper
+                    </div>
+                    <div class="text-[10px] text-slate-400">VAT Rigged Unit</div>
+                </button>
+
+                <button onclick="spawnEntity('platform')" class="p-2 rounded-xl bg-slate-800/80 hover:bg-emerald-600/25 border border-slate-700/70 hover:border-emerald-500/50 text-left transition group">
+                    <div class="text-xs font-semibold text-slate-100 group-hover:text-emerald-300 flex items-center gap-1.5">
+                        <span>🟩</span> Turf Terrace
+                    </div>
+                    <div class="text-[10px] text-slate-400">Elevated Arena</div>
+                </button>
+
+                <button onclick="spawnEntity('beacon')" class="p-2 rounded-xl bg-slate-800/80 hover:bg-sky-600/25 border border-slate-700/70 hover:border-sky-500/50 text-left transition group">
+                    <div class="text-xs font-semibold text-slate-100 group-hover:text-sky-300 flex items-center gap-1.5">
+                        <span>💠</span> Energy Pylon
+                    </div>
+                    <div class="text-[10px] text-slate-400">Shader Crystal</div>
+                </button>
+
+                <button onclick="spawnEntity('barrier')" class="p-2 rounded-xl bg-slate-800/80 hover:bg-amber-600/25 border border-slate-700/70 hover:border-amber-500/50 text-left transition group">
+                    <div class="text-xs font-semibold text-slate-100 group-hover:text-amber-300 flex items-center gap-1.5">
+                        <span>🛡️</span> Tactical Wall
+                    </div>
+                    <div class="text-[10px] text-slate-400">Cover Barricade</div>
+                </button>
+            </div>
+
+            <!-- Custom Video Screen Billboard Spawner -->
+            <div class="mt-2 pt-2 border-t border-slate-800/80">
+                <div class="text-[10px] font-semibold uppercase tracking-wider text-sky-400 mb-1.5">3D Video / Stream Billboard</div>
+                <div class="grid grid-cols-2 gap-1.5">
+                    <button onclick="spawnEntity('video-demo')" class="px-2.5 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/30 border border-sky-500/40 text-xs font-medium text-sky-200 transition flex items-center justify-center gap-1">
+                        <span>📺</span> Holoscreen
+                    </button>
+                    <label class="px-2.5 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/40 text-xs font-medium text-indigo-200 transition flex items-center justify-center gap-1 cursor-pointer">
+                        <span>📁</span> Load MP4
+                        <input id="video-upload-input" type="file" accept="video/*" class="hidden" onchange="handleVideoUpload(event)">
+                    </label>
+                </div>
+                <button onclick="spawnWebcamScreen()" class="mt-1.5 w-full px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-[11px] font-medium text-slate-300 transition flex items-center justify-center gap-1.5">
+                    <span>📷</span> Attach Live Webcam Feed to 3D Stage
+                </button>
+            </div>
+        </div>
+
+        <!-- Scene Outliner List -->
+        <div class="px-3.5 py-2 bg-slate-900/40 border-b border-slate-800/80 flex items-center justify-between">
+            <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Scene Hierarchy</span>
+            <button onclick="spawnSquadWave()" class="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300">+ Spawn Squad (5)</button>
+        </div>
+        <div id="scene-outliner" class="flex-1 overflow-y-auto p-2 space-y-1">
+            <!-- Populated dynamically -->
+        </div>
+    </aside>
+
+    <!-- RIGHT PANEL: INSPECTOR, IK/VAT SHADERS & ENVIRONMENT -->
+    <aside id="right-panel" class="fixed top-16 right-3 bottom-20 w-76 max-w-[calc(100vw-1.5rem)] z-20 studio-glass rounded-2xl flex flex-col overflow-hidden transition-all duration-300" style="width: 19rem;">
+        <!-- Panel Header -->
+        <div class="px-3.5 py-2.5 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/50">
+            <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                <h2 class="text-xs font-bold uppercase tracking-wider text-slate-200">Inspector &amp; VAT Studio</h2>
+            </div>
+            <span id="selected-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 truncate max-w-[95px]">None</span>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-3 space-y-4">
+            <!-- Selected Object Transform Section -->
+            <div id="inspector-object-section" class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Transform &amp; Actions</span>
+                    <div class="flex items-center gap-1">
+                        <button onclick="focusSelected()" title="Focus Camera" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-sky-300 border border-slate-700">Focus</button>
+                        <button onclick="duplicateSelected()" title="Duplicate" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-emerald-300 border border-slate-700">Clone</button>
+                        <button onclick="deleteSelected()" title="Delete" class="px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-800 text-[10px] text-rose-300 border border-rose-800/70">Del</button>
+                    </div>
+                </div>
+
+                <!-- Position Sliders -->
+                <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/90 space-y-2">
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-rose-400 font-mono font-bold w-6">POS X</span>
+                        <input id="inp-pos-x" type="range" min="-25" max="25" step="0.1" value="0" class="flex-1 mx-2" oninput="updateTransformFromUI()">
+                        <span id="val-pos-x" class="font-mono text-[11px] text-slate-300 w-10 text-right">0.0</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-emerald-400 font-mono font-bold w-6">POS Y</span>
+                        <input id="inp-pos-y" type="range" min="0" max="15" step="0.1" value="0" class="flex-1 mx-2" oninput="updateTransformFromUI()">
+                        <span id="val-pos-y" class="font-mono text-[11px] text-slate-300 w-10 text-right">0.0</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-sky-400 font-mono font-bold w-6">POS Z</span>
+                        <input id="inp-pos-z" type="range" min="-25" max="25" step="0.1" value="0" class="flex-1 mx-2" oninput="updateTransformFromUI()">
+                        <span id="val-pos-z" class="font-mono text-[11px] text-slate-300 w-10 text-right">0.0</span>
+                    </div>
+                </div>
+
+                <!-- Rotation & Uniform Scale -->
+                <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/90 space-y-2">
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-400 font-mono w-12">ROT Y</span>
+                        <input id="inp-rot-y" type="range" min="0" max="360" step="1" value="0" class="flex-1 mx-2" oninput="updateTransformFromUI()">
+                        <span id="val-rot-y" class="font-mono text-[11px] text-slate-300 w-10 text-right">0°</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-400 font-mono w-12">SCALE</span>
+                        <input id="inp-scale" type="range" min="0.3" max="3.0" step="0.05" value="1" class="flex-1 mx-2" oninput="updateTransformFromUI()">
+                        <span id="val-scale" class="font-mono text-[11px] text-slate-300 w-10 text-right">1.00x</span>
+                    </div>
+                </div>
+
+                <!-- Material / Shader Tint -->
+                <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                    <span class="text-[11px] font-medium text-slate-300">Primary Shader Tint</span>
+                    <div class="flex items-center gap-2">
+                        <button onclick="applyPresetTint('#f59e0b')" class="w-4 h-4 rounded-full bg-amber-500 border border-white/30" title="Vanguard Gold"></button>
+                        <button onclick="applyPresetTint('#10b981')" class="w-4 h-4 rounded-full bg-emerald-500 border border-white/30" title="Emerald Ops"></button>
+                        <button onclick="applyPresetTint('#38bdf8')" class="w-4 h-4 rounded-full bg-sky-400 border border-white/30" title="Aether Cyan"></button>
+                        <button onclick="applyPresetTint('#f43f5e')" class="w-4 h-4 rounded-full bg-rose-500 border border-white/30" title="Crimson Striker"></button>
+                        <input id="inp-tint" type="color" value="#f59e0b" class="w-6 h-6 rounded bg-transparent border-0 cursor-pointer" oninput="updateMaterialTint(this.value)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Procedural VAT & IK Animation Studio -->
+            <div class="pt-3 border-t border-slate-800/80 space-y-2.5">
+                <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">VAT &amp; IK Procedural Rig</span>
+                    <span class="text-[10px] font-mono text-slate-400">GPU-Style</span>
+                </div>
+
+                <!-- Animation State Selector -->
+                <div class="grid grid-cols-2 gap-1.5">
+                    <button id="anim-btn-patrol" onclick="setGlobalAnimMode('patrol')" class="anim-mode-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-emerald-600 text-white border border-emerald-400/50 transition">
+                        RTS Patrol
+                    </button>
+                    <button id="anim-btn-combat" onclick="setGlobalAnimMode('combat')" class="anim-mode-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition">
+                        Combat Aim
+                    </button>
+                    <button id="anim-btn-dance" onclick="setGlobalAnimMode('dance')" class="anim-mode-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition">
+                        IK Groove Dance
+                    </button>
+                    <button id="anim-btn-idle" onclick="setGlobalAnimMode('idle')" class="anim-mode-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition">
+                        Tactical Idle
+                    </button>
+                </div>
+
+                <!-- VAT Vertex Displacement & Speed -->
+                <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/90 space-y-2">
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-300">VAT Wave Amp</span>
+                        <input id="inp-vat-amp" type="range" min="0" max="1.5" step="0.05" value="0.25" class="w-28" oninput="updateVATSettings()">
+                        <span id="val-vat-amp" class="font-mono text-[11px] text-emerald-400 w-9 text-right">0.25</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-300">IK Bob Freq</span>
+                        <input id="inp-ik-freq" type="range" min="0.5" max="4.0" step="0.1" value="1.6" class="w-28" oninput="updateVATSettings()">
+                        <span id="val-ik-freq" class="font-mono text-[11px] text-emerald-400 w-9 text-right">1.6x</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Environment & Arena Shader Settings -->
+            <div class="pt-3 border-t border-slate-800/80 space-y-2.5">
+                <span class="text-[10px] font-semibold uppercase tracking-wider text-amber-400">World &amp; Arena Shader</span>
+                <div class="bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/90 space-y-2.5">
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-300">Atmosphere Sky</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="setSkyPreset('#1d84e8')" class="px-2 py-0.5 rounded bg-sky-600/40 border border-sky-400/50 text-[10px] text-sky-200">RTS Day</button>
+                            <button onclick="setSkyPreset('#090d16')" class="px-2 py-0.5 rounded bg-slate-800 border border-slate-600 text-[10px] text-slate-300">Aether</button>
+                            <input id="inp-sky-color" type="color" value="#1d84e8" class="w-5 h-5 rounded bg-transparent cursor-pointer" oninput="setSkyPreset(this.value)">
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-300">Sun Elevation</span>
+                        <input id="inp-sun-elev" type="range" min="5" max="85" step="1" value="48" class="w-28" oninput="updateEnvironment()">
+                        <span id="val-sun-elev" class="font-mono text-[11px] text-slate-300 w-9 text-right">48°</span>
+                    </div>
+
+                    <div class="flex items-center justify-between text-[11px]">
+                        <span class="text-slate-300">Fog Density</span>
+                        <input id="inp-fog" type="range" min="0" max="0.035" step="0.001" value="0.008" class="w-28" oninput="updateEnvironment()">
+                        <span id="val-fog" class="font-mono text-[11px] text-slate-300 w-9 text-right">.008</span>
+                    </div>
+
+                    <div class="flex items-center justify-between text-[11px] pt-1">
+                        <span class="text-slate-300">Geometric Arena Grid</span>
+                        <button id="btn-toggle-grid" onclick="toggleArenaGrid()" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold">
+                            Diamond Tiles: ON
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- BOTTOM VIDEO TIMELINE & PLAYBACK SCRUBBER BAR -->
+    <footer id="bottom-timeline" class="fixed bottom-3 left-3 right-3 z-30 studio-glass rounded-2xl px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 transition-all duration-300">
+        <!-- Playback Transport Controls -->
+        <div class="flex items-center gap-2">
+            <button id="btn-play-pause" onclick="togglePlayback()" class="w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow transition" title="Play / Pause Simulation & Video">
+                <svg id="icon-pause" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                <svg id="icon-play" class="w-4 h-4 hidden" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+
+            <button onclick="stepFrame(-1)" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition" title="Step Back">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z"/></svg>
+            </button>
+
+            <button onclick="stepFrame(1)" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition" title="Step Forward">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z"/></svg>
+            </button>
+
+            <div class="font-mono text-xs text-slate-300 bg-slate-900/90 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                <span id="timeline-time" class="text-emerald-400 font-semibold">00:00.00</span>
+                <span class="text-slate-600 mx-1">/</span>
+                <span id="timeline-frame" class="text-slate-400">F:0000</span>
+            </div>
+        </div>
+
+        <!-- Scrubber Track -->
+        <div class="flex-1 flex items-center gap-3 min-w-[180px]">
+            <span class="text-[10px] font-mono uppercase text-slate-400 hidden md:inline">VAT / Video Timeline</span>
+            <input id="timeline-scrubber" type="range" min="0" max="1000" value="0" class="w-full" oninput="scrubTimeline(this.value)">
+        </div>
+
+        <!-- Speed Multiplier & Loop Toggle -->
+        <div class="flex items-center gap-2">
+            <button id="btn-speed" onclick="cyclePlaybackSpeed()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-mono font-semibold text-sky-300 border border-slate-700 transition">
+                1.0x
+            </button>
+            <button id="btn-loop" onclick="toggleLoop()" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition flex items-center gap-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                <span>Loop</span>
+            </button>
+        </div>
+    </footer>
+
+    <script>
+        /**
+         * AETHER // RTS Procedural WebGL & VAT Sandbox Studio
+         * Complete self-contained 3D scene editor, procedural VAT/IK unit animator,
+         * 3D video texture screen loader, and WebM canvas video recorder.
+         */
+
+        // ==========================================
+        // 1. GLOBAL ENGINE STATE
+        // ==========================================
+        const state = {
+            isPlaying: true,
+            loop: true,
+            playbackSpeed: 1.0,
+            simTime: 0,
+            frameCount: 0,
+            timelineDuration: 30, // 30-second loop window
+            animMode: 'patrol',   // 'patrol' | 'combat' | 'dance' | 'idle'
+            vatAmp: 0.25,
+            ikFreq: 1.6,
+            panelsVisible: true,
+            gridVisible: true,
+            skyColor: '#1d84e8',
+            sunElevation: 48,
+            fogDensity: 0.008,
+            selectedId: null,
+            entities: [],
+            nextEntityId: 1,
+            isRecording: false,
+            mediaRecorder: null,
+            recordedChunks: []
+        };
+
+        // Three.js core globals
+        let scene, camera, renderer, controls;
+        let dirLight, hemiLight, ambientLight;
+        let floorMesh, floorTexture;
+        let raycaster, mouse;
+        let selectionRing;
+        let lastFrameTime = performance.now();
+        let fpsFrames = 0, fpsLastTime = performance.now();
+
+        // Keep track of dynamic video elements for cleanup/playback sync
+        const activeVideos = [];
+
+        // ==========================================
+        // 2. TOAST NOTIFICATION SYSTEM (No alert)
+        // ==========================================
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const colors = {
+                info: 'bg-slate-900/95 border-sky-500/50 text-sky-200',
+                success: 'bg-slate-900/95 border-emerald-500/50 text-emerald-200',
+                warn: 'bg-slate-900/95 border-amber-500/50 text-amber-200',
+                danger: 'bg-rose-950/95 border-rose-500/60 text-rose-200'
+            };
+            toast.className = `px-4 py-2 rounded-full border text-xs font-medium shadow-xl backdrop-blur-md transition-all duration-300 transform translate-y-0 opacity-100 ${colors[type] || colors.info}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-8px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ==========================================
+        // 3. PROCEDURAL TEXTURE GENERATORS
+        // ==========================================
+        // Generates the iconic concentric geometric diamond/square tile floor texture
+        function createGeometricFloorTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            // Base slate metallic gradient
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(0, 0, 512, 512);
+
+            const cx = 256, cy = 256;
+            const rings = [
+                { size: 490, color: '#94a3b8' },
+                { size: 440, color: '#1e293b' },
+                { size: 370, color: '#cbd5e1' },
+                { size: 320, color: '#334155' },
+                { size: 240, color: '#e2e8f0' },
+                { size: 190, color: '#475569' },
+                { size: 115, color: '#94a3b8' },
+                { size: 70,  color: '#1e293b' }
+            ];
+
+            // Outer concentric squares
+            rings.forEach(r => {
+                ctx.fillStyle = r.color;
+                ctx.fillRect(cx - r.size / 2, cy - r.size / 2, r.size, r.size);
+            });
+
+            // Inner rotated diamond accent
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = '#64748b';
+            ctx.fillRect(-130, -130, 260, 260);
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(-105, -105, 210, 210);
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(-75, -75, 150, 150);
+            ctx.restore();
+
+            // Crisp border bevel
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 8;
+            ctx.strokeRect(4, 4, 504, 504);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(18, 18);
+            tex.anisotropy = 8;
+            return tex;
+        }
+
+        // Generates a procedural animated canvas texture for the demo Holoscreen
+        function createProceduralHoloVideoTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 360;
+            const ctx = canvas.getContext('2d');
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+
+            return {
+                texture,
+                update: (t) => {
+                    // Dark cyber background
+                    ctx.fillStyle = '#070d19';
+                    ctx.fillRect(0, 0, 640, 360);
+
+                    // Animated grid lines
+                    ctx.strokeStyle = 'rgba(16, 185, 129, 0.22)';
+                    ctx.lineWidth = 1;
+                    const offset = (t * 40) % 40;
+                    for (let x = offset; x < 640; x += 40) {
+                        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 360); ctx.stroke();
+                    }
+                    for (let y = offset; y < 360; y += 40) {
+                        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(640, y); ctx.stroke();
+                    }
+
+                    // Audio/VAT waveform visualizer bars
+                    const bars = 32;
+                    for (let i = 0; i < bars; i++) {
+                        const wave = Math.sin(t * 4 + i * 0.35) * 0.5 + 0.5;
+                        const wave2 = Math.cos(t * 2.5 - i * 0.2) * 0.5 + 0.5;
+                        const h = 25 + wave * wave2 * 140;
+                        const hue = 155 + i * 2;
+                        ctx.fillStyle = `hsla(${hue}, 85%, 55%, 0.85)`;
+                        ctx.fillRect(40 + i * 17.5, 290 - h, 12, h);
+                    }
+
+                    // HUD Header text
+                    ctx.fillStyle = '#34d399';
+                    ctx.font = 'bold 20px monospace';
+                    ctx.fillText('AETHER // VAT TELEMETRY & VIDEO STREAM', 38, 46);
+
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.font = '14px monospace';
+                    ctx.fillText(`MODE: ${state.animMode.toUpperCase()}  |  TIME: ${t.toFixed(2)}s  |  SYNC: LOCKED`, 38, 72);
+
+                    // Scanning laser line
+                    const scanY = ((t * 90) % 360);
+                    ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
+                    ctx.fillRect(0, scanY, 640, 4);
+
+                    texture.needsUpdate = true;
+                }
+            };
+        }
+
+        // ==========================================
+        // 4. INITIALIZE THREE.JS SCENE
+        // ==========================================
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(state.skyColor);
+            scene.fog = new THREE.FogExp2(state.skyColor, state.fogDensity);
+
+            camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 250);
+            camera.position.set(11, 8.5, 14.5);
+
+            renderer = new THREE.WebGLRenderer({
+                antialias: true,
+                preserveDrawingBuffer: true // Essential for MediaRecorder & screenshots
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // OrbitControls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.06;
+            controls.maxPolarAngle = Math.PI / 2 - 0.03;
+            controls.minDistance = 2.5;
+            controls.maxDistance = 65;
+            controls.target.set(0, 1.5, 0);
+
+            // Lighting setup
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+            scene.add(ambientLight);
+
+            hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x334155, 0.55);
+            hemiLight.position.set(0, 30, 0);
+            scene.add(hemiLight);
+
+            dirLight = new THREE.DirectionalLight(0xfffbeb, 1.15);
+            dirLight.position.set(16, 26, 14);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 1;
+            dirLight.shadow.camera.far = 85;
+            const d = 26;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            dirLight.shadow.bias = -0.0005;
+            scene.add(dirLight);
+
+            // Geometric Tile Arena Floor
+            floorTexture = createGeometricFloorTexture();
+            const floorGeo = new THREE.PlaneGeometry(90, 90);
+            const floorMat = new THREE.MeshStandardMaterial({
+                map: floorTexture,
+                roughness: 0.45,
+                metalness: 0.15
+            });
+            floorMesh = new THREE.Mesh(floorGeo, floorMat);
+            floorMesh.rotation.x = -Math.PI / 2;
+            floorMesh.receiveShadow = true;
+            scene.add(floorMesh);
+
+            // Selection Indicator Ring
+            const ringGeo = new THREE.RingGeometry(0.85, 1.08, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0x34d399,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.85
+            });
+            selectionRing = new THREE.Mesh(ringGeo, ringMat);
+            selectionRing.rotation.x = -Math.PI / 2;
+            selectionRing.visible = false;
+            scene.add(selectionRing);
+
+            // Raycasting for clicking objects in 3D viewport
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+            renderer.domElement.addEventListener('pointerdown', onCanvasPointerDown);
+
+            // Resize listener
+            window.addEventListener('resize', onWindowResize);
+
+            // Populate initial RTS Sandbox Battleground Scene (matching screenshot aesthetics)
+            buildInitialSandboxScene();
+        }
+
+        // ==========================================
+        // 5. PROCEDURAL PREFAB BUILDERS (RTS & VAT)
+        // ==========================================
+        function createRTSTrooperMesh(primaryHex = '#f59e0b') {
+            const root = new THREE.Group();
+
+            // Materials matching the faceted low-poly RTS aesthetic
+            const armorMat = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                roughness: 0.35,
+                metalness: 0.4,
+                flatShading: true
+            });
+            const accentMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(primaryHex),
+                roughness: 0.3,
+                metalness: 0.25,
+                flatShading: true
+            });
+            const weaponMat = new THREE.MeshStandardMaterial({
+                color: 0x0f172a,
+                roughness: 0.25,
+                metalness: 0.7,
+                flatShading: true
+            });
+
+            // Rig pivots for procedural IK/VAT animation
+            const hips = new THREE.Group();
+            hips.position.y = 0.95;
+            root.add(hips);
+
+            // Stylized faceted legs
+            const legGeo = new THREE.CylinderGeometry(0.11, 0.08, 0.95, 5);
+            const leftLeg = new THREE.Mesh(legGeo, armorMat);
+            leftLeg.position.set(-0.16, -0.47, 0);
+            leftLeg.castShadow = true;
+            hips.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(legGeo, armorMat);
+            rightLeg.position.set(0.16, -0.47, 0);
+            rightLeg.castShadow = true;
+            hips.add(rightLeg);
+
+            // Torso / Chestplate
+            const torso = new THREE.Group();
+            torso.position.y = 0.1;
+            hips.add(torso);
+
+            const chestGeo = new THREE.CylinderGeometry(0.28, 0.18, 0.78, 5);
+            const chestMesh = new THREE.Mesh(chestGeo, armorMat);
+            chestMesh.position.y = 0.38;
+            chestMesh.castShadow = true;
+            torso.add(chestMesh);
+
+            // Gold/Accent V-shaped collar & shoulder armor
+            const shoulderGeo = new THREE.BoxGeometry(0.68, 0.18, 0.34);
+            const shoulderMesh = new THREE.Mesh(shoulderGeo, accentMat);
+            shoulderMesh.position.y = 0.68;
+            shoulderMesh.castShadow = true;
+            torso.add(shoulderMesh);
+
+            // Angular Samurai/Sci-Fi Helmet Head
+            const headGroup = new THREE.Group();
+            headGroup.position.y = 0.95;
+            torso.add(headGroup);
+
+            const skullGeo = new THREE.ConeGeometry(0.22, 0.42, 5);
+            const skullMesh = new THREE.Mesh(skullGeo, armorMat);
+            skullMesh.rotation.x = Math.PI;
+            skullMesh.castShadow = true;
+            headGroup.add(skullMesh);
+
+            // Visor & Crest
+            const crestGeo = new THREE.CylinderGeometry(0.28, 0.05, 0.16, 4);
+            const crestMesh = new THREE.Mesh(crestGeo, accentMat);
+            crestMesh.position.y = 0.16;
+            crestMesh.rotation.y = Math.PI / 4;
+            headGroup.add(crestMesh);
+
+            // Arms + Pulse Rifle
+            const armsGroup = new THREE.Group();
+            armsGroup.position.set(0, 0.58, 0.12);
+            torso.add(armsGroup);
+
+            const armGeo = new THREE.BoxGeometry(0.12, 0.48, 0.12);
+            const leftArm = new THREE.Mesh(armGeo, armorMat);
+            leftArm.position.set(-0.34, -0.15, 0.15);
+            leftArm.rotation.x = -Math.PI / 3;
+            armsGroup.add(leftArm);
+
+            const rightArm = new THREE.Mesh(armGeo, armorMat);
+            rightArm.position.set(0.34, -0.15, 0.15);
+            rightArm.rotation.x = -Math.PI / 3;
+            armsGroup.add(rightArm);
+
+            // Long low-poly rifle
+            const rifleGeo = new THREE.BoxGeometry(0.08, 0.11, 1.15);
+            const rifle = new THREE.Mesh(rifleGeo, weaponMat);
+            rifle.position.set(0.12, -0.18, 0.45);
+            rifle.castShadow = true;
+            armsGroup.add(rifle);
+
+            const barrelTip = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.16), accentMat);
+            barrelTip.position.set(0.12, -0.14, 0.85);
+            armsGroup.add(barrelTip);
+
+            return {
+                mesh: root,
+                accentMat,
+                rig: { hips, torso, headGroup, leftLeg, rightLeg, armsGroup }
+            };
+        }
+
+        function createElevatedPlatformMesh(primaryHex = '#22c55e') {
+            const group = new THREE.Group();
+
+            // Concrete/Slate stepped base (like the screenshot's platforms)
+            const baseGeo = new THREE.BoxGeometry(6.4, 0.85, 6.4);
+            const baseMat = new THREE.MeshStandardMaterial({
+                color: 0x94a3b8,
+                roughness: 0.65,
+                metalness: 0.1
+            });
+            const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+            baseMesh.position.y = 0.425;
+            baseMesh.castShadow = true;
+            baseMesh.receiveShadow = true;
+            group.add(baseMesh);
+
+            // Vibrant green turf top deck
+            const topGeo = new THREE.BoxGeometry(6.0, 0.35, 6.0);
+            const topMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(primaryHex),
+                roughness: 0.55,
+                metalness: 0.05
+            });
+            const topMesh = new THREE.Mesh(topGeo, topMat);
+            topMesh.position.y = 1.025;
+            topMesh.castShadow = true;
+            topMesh.receiveShadow = true;
+            group.add(topMesh);
+
+            return { mesh: group, accentMat: topMat };
+        }
+
+        function createEnergyBeaconMesh(primaryHex = '#38bdf8') {
+            const group = new THREE.Group();
+
+            const pedGeo = new THREE.CylinderGeometry(0.7, 0.95, 0.45, 6);
+            const pedMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.6 });
+            const ped = new THREE.Mesh(pedGeo, pedMat);
+            ped.position.y = 0.225;
+            ped.castShadow = true;
+            group.add(ped);
+
+            const crystalGeo = new THREE.OctahedronGeometry(0.55, 0);
+            const crystalMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(primaryHex),
+                emissive: new THREE.Color(primaryHex),
+                emissiveIntensity: 0.55,
+                roughness: 0.2,
+                metalness: 0.3
+            });
+            const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+            crystal.position.y = 1.45;
+            crystal.castShadow = true;
+            group.add(crystal);
+
+            return { mesh: group, accentMat: crystalMat, crystal };
+        }
+
+        function createBarrierMesh(primaryHex = '#f59e0b') {
+            const group = new THREE.Group();
+            const bodyGeo = new THREE.BoxGeometry(2.6, 0.9, 0.55);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.5, metalness: 0.4 });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 0.45;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            group.add(body);
+
+            const stripeGeo = new THREE.BoxGeometry(2.64, 0.16, 0.58);
+            const stripeMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(primaryHex), roughness: 0.3 });
+            const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+            stripe.position.y = 0.72;
+            group.add(stripe);
+
+            return { mesh: group, accentMat: stripeMat };
+        }
+
+        function createVideoBillboardMesh(videoElement = null, primaryHex = '#38bdf8') {
+            const group = new THREE.Group();
+
+            // Frame stand
+            const frameGeo = new THREE.BoxGeometry(5.2, 3.1, 0.22);
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.4, metalness: 0.7 });
+            const frame = new THREE.Mesh(frameGeo, frameMat);
+            frame.position.y = 2.0;
+            frame.castShadow = true;
+            group.add(frame);
+
+            // Support pillars
+            const postGeo = new THREE.CylinderGeometry(0.1, 0.14, 2.0, 8);
+            const leftPost = new THREE.Mesh(postGeo, frameMat);
+            leftPost.position.set(-2.1, 1.0, 0);
+            group.add(leftPost);
+
+            const rightPost = new THREE.Mesh(postGeo, frameMat);
+            rightPost.position.set(2.1, 1.0, 0);
+            group.add(rightPost);
+
+            // Screen surface
+            let screenTexture;
+            let holoUpdater = null;
+
+            if (videoElement) {
+                screenTexture = new THREE.VideoTexture(videoElement);
+                screenTexture.minFilter = THREE.LinearFilter;
+                screenTexture.magFilter = THREE.LinearFilter;
+                screenTexture.format = THREE.RGBFormat;
+            } else {
+                const holo = createProceduralHoloVideoTexture();
+                screenTexture = holo.texture;
+                holoUpdater = holo.update;
+            }
+
+            const screenGeo = new THREE.PlaneGeometry(4.9, 2.8);
+            const screenMat = new THREE.MeshBasicMaterial({
+                map: screenTexture,
+                side: THREE.DoubleSide
+            });
+            const screenMesh = new THREE.Mesh(screenGeo, screenMat);
+            screenMesh.position.set(0, 2.0, 0.13);
+            group.add(screenMesh);
+
+            // Neon trim bar
+            const trimMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(primaryHex) });
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(5.24, 0.08, 0.26), trimMat);
+            trim.position.y = 3.58;
+            group.add(trim);
+
+            return {
+                mesh: group,
+                accentMat: trimMat,
+                holoUpdater,
+                videoElement
+            };
+        }
+
+        // ==========================================
+        // 6. ENTITY SPAWNING & SCENE MANAGEMENT
+        // ==========================================
+        function spawnEntity(type, customOpts = {}) {
+            const id = state.nextEntityId++;
+            const pos = customOpts.position || {
+                x: (Math.random() - 0.5) * 10,
+                y: 0,
+                z: (Math.random() - 0.5) * 10
+            };
+            const rotY = customOpts.rotationY !== undefined ? customOpts.rotationY : Math.random() * Math.PI * 2;
+            const scale = customOpts.scale || 1.0;
+
+            let built, label, defaultColor;
+
+            switch (type) {
+                case 'unit':
+                    defaultColor = customOpts.color || '#f59e0b';
+                    built = createRTSTrooperMesh(defaultColor);
+                    label = `RTS Trooper #${id}`;
+                    break;
+                case 'platform':
+                    defaultColor = customOpts.color || '#22c55e';
+                    built = createElevatedPlatformMesh(defaultColor);
+                    label = `Turf Terrace #${id}`;
+                    break;
+                case 'beacon':
+                    defaultColor = customOpts.color || '#38bdf8';
+                    built = createEnergyBeaconMesh(defaultColor);
+                    label = `Energy Pylon #${id}`;
+                    break;
+                case 'barrier':
+                    defaultColor = customOpts.color || '#f59e0b';
+                    built = createBarrierMesh(defaultColor);
+                    label = `Tactical Wall #${id}`;
+                    break;
+                case 'video-demo':
+                    defaultColor = customOpts.color || '#38bdf8';
+                    built = createVideoBillboardMesh(null, defaultColor);
+                    label = `Holo Video Screen #${id}`;
+                    break;
+                case 'video-file':
+                    defaultColor = customOpts.color || '#a855f7';
+                    built = createVideoBillboardMesh(customOpts.videoElement, defaultColor);
+                    label = customOpts.label || `Video Billboard #${id}`;
+                    break;
+                default:
+                    return null;
+            }
+
+            const mesh = built.mesh;
+            mesh.position.set(pos.x, pos.y, pos.z);
+            mesh.rotation.y = rotY;
+            mesh.scale.setScalar(scale);
+
+            // Tag all children with entityId for raycasting selection
+            mesh.traverse(child => {
+                if (child.isMesh) {
+                    child.userData.entityId = id;
+                }
+            });
+
+            scene.add(mesh);
+
+            const entity = {
+                id,
+                type,
+                label,
+                mesh,
+                accentMat: built.accentMat,
+                color: defaultColor,
+                rig: built.rig || null,
+                crystal: built.crystal || null,
+                holoUpdater: built.holoUpdater || null,
+                videoElement: built.videoElement || null,
+                phaseOffset: Math.random() * Math.PI * 2,
+                basePos: new THREE.Vector3(pos.x, pos.y, pos.z)
+            };
+
+            state.entities.push(entity);
+            updateOutlinerUI();
+            selectEntity(id);
+
+            if (!customOpts.silent) {
+                showToast(`Spawned ${label}`, 'success');
+            }
+            return entity;
+        }
+
+        function spawnSquadWave() {
+            const centerX = (Math.random() - 0.5) * 8;
+            const centerZ = (Math.random() - 0.5) * 8;
+            for (let i = 0; i < 5; i++) {
+                const angle = (i / 5) * Math.PI * 2;
+                spawnEntity('unit', {
+                    position: {
+                        x: centerX + Math.cos(angle) * 2.2,
+                        y: 0,
+                        z: centerZ + Math.sin(angle) * 2.2
+                    },
+                    rotationY: -angle + Math.PI / 2,
+                    silent: true
+                });
+            }
+            showToast('Deployed 5-Unit RTS Vanguard Squad', 'success');
+        }
+
+        // Build the initial composition inspired by the RTS Procedural WebGL & VAT Viewer
+        function buildInitialSandboxScene() {
+            // Elevated green terrain platforms
+            spawnEntity('platform', { position: { x: -4.5, y: 0, z: -4.5 }, rotationY: 0, silent: true });
+            spawnEntity('platform', { position: { x: 4.5, y: 0, z: -5.5 }, rotationY: 0, silent: true });
+
+            // Units perched on the green elevated terraces (y = 1.2)
+            const elevatedPositions = [
+                { x: -5.8, y: 1.2, z: -4.2 },
+                { x: -4.2, y: 1.2, z: -5.5 },
+                { x: -3.2, y: 1.2, z: -3.6 },
+                { x: 3.4,  y: 1.2, z: -5.0 },
+                { x: 5.2,  y: 1.2, z: -6.1 },
+                { x: 5.8,  y: 1.2, z: -4.2 }
+            ];
+            elevatedPositions.forEach(pos => {
+                spawnEntity('unit', { position: pos, rotationY: 0.3, silent: true });
+            });
+
+            // Ground squad units on the geometric tile floor
+            const groundPositions = [
+                { x: -1.8, y: 0, z: 2.2 },
+                { x: 1.6,  y: 0, z: 3.0 },
+                { x: 0.4,  y: 0, z: 5.2 },
+                { x: -3.2, y: 0, z: 0.5 },
+                { x: 3.1,  y: 0, z: 0.8 }
+            ];
+            groundPositions.forEach(pos => {
+                spawnEntity('unit', { position: pos, rotationY: -0.4, silent: true });
+            });
+
+            // Energy Beacon & Holoscreen Billboard
+            spawnEntity('beacon', { position: { x: 0, y: 0, z: -1.5 }, rotationY: 0, silent: true });
+            spawnEntity('video-demo', { position: { x: 0, y: 0, z: -9.5 }, rotationY: 0, silent: true });
+
+            // Select the first trooper by default
+            if (state.entities.length > 2) {
+                selectEntity(state.entities[2].id);
+            }
+        }
+
+        // ==========================================
+        // 7. VIDEO UPLOAD & WEBCAM 3D TEXTURE HANDLERS
+        // ==========================================
+        function handleVideoUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const url = URL.createObjectURL(file);
+            const video = document.createElement('video');
+            video.src = url;
+            video.crossOrigin = 'anonymous';
+            video.loop = true;
+            video.muted = true;
+            video.playsInline = true;
+            video.play().catch(() => {});
+
+            activeVideos.push(video);
+
+            spawnEntity('video-file', {
+                videoElement: video,
+                label: `Video: ${file.name.slice(0, 14)}`,
+                position: { x: 0, y: 0, z: -2 },
+                rotationY: 0
+            });
+
+            event.target.value = '';
+        }
+
+        async function spawnWebcamScreen() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showToast('Webcam API not supported in this browser.', 'warn');
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.muted = true;
+                video.playsInline = true;
+                await video.play();
+                activeVideos.push(video);
+
+                spawnEntity('video-file', {
+                    videoElement: video,
+                    label: 'Live Webcam Stage',
+                    position: { x: 0, y: 0, z: -2 },
+                    rotationY: 0,
+                    color: '#10b981'
+                });
+            } catch (err) {
+                showToast('Camera permission denied or unavailable.', 'warn');
+            }
+        }
+
+        // ==========================================
+        // 8. SELECTION, INSPECTOR & TRANSFORM SYNC
+        // ==========================================
+        function getSelectedEntity() {
+            return state.entities.find(e => e.id === state.selectedId) || null;
+        }
+
+        function selectEntity(id) {
+            state.selectedId = id;
+            const ent = getSelectedEntity();
+
+            updateOutlinerUI();
+
+            const badge = document.getElementById('selected-badge');
+            const section = document.getElementById('inspector-object-section');
+
+            if (!ent) {
+                badge.textContent = 'None';
+                selectionRing.visible = false;
+                section.classList.add('opacity-40', 'pointer-events-none');
+                return;
+            }
+
+            badge.textContent = ent.label;
+            section.classList.remove('opacity-40', 'pointer-events-none');
+
+            // Position selection ring under selected entity
+            selectionRing.visible = true;
+            selectionRing.position.set(ent.mesh.position.x, ent.mesh.position.y + 0.03, ent.mesh.position.z);
+            selectionRing.scale.setScalar(ent.type === 'platform' ? 3.5 : 1.0);
+
+            // Sync Inspector sliders
+            document.getElementById('inp-pos-x').value = ent.mesh.position.x;
+            document.getElementById('val-pos-x').textContent = ent.mesh.position.x.toFixed(1);
+
+            document.getElementById('inp-pos-y').value = ent.mesh.position.y;
+            document.getElementById('val-pos-y').textContent = ent.mesh.position.y.toFixed(1);
+
+            document.getElementById('inp-pos-z').value = ent.mesh.position.z;
+            document.getElementById('val-pos-z').textContent = ent.mesh.position.z.toFixed(1);
+
+            const deg = Math.round(((ent.mesh.rotation.y * 180 / Math.PI) % 360 + 360) % 360);
+            document.getElementById('inp-rot-y').value = deg;
+            document.getElementById('val-rot-y').textContent = `${deg}°`;
+
+            document.getElementById('inp-scale').value = ent.mesh.scale.x;
+            document.getElementById('val-scale').textContent = `${ent.mesh.scale.x.toFixed(2)}x`;
+
+            document.getElementById('inp-tint').value = ent.color;
+        }
+
+        function updateTransformFromUI() {
+            const ent = getSelectedEntity();
+            if (!ent) return;
+
+            const x = parseFloat(document.getElementById('inp-pos-x').value);
+            const y = parseFloat(document.getElementById('inp-pos-y').value);
+            const z = parseFloat(document.getElementById('inp-pos-z').value);
+            const rotDeg = parseFloat(document.getElementById('inp-rot-y').value);
+            const scl = parseFloat(document.getElementById('inp-scale').value);
+
+            ent.mesh.position.set(x, y, z);
+            ent.basePos.set(x, y, z);
+            ent.mesh.rotation.y = (rotDeg * Math.PI) / 180;
+            ent.mesh.scale.setScalar(scl);
+
+            document.getElementById('val-pos-x').textContent = x.toFixed(1);
+            document.getElementById('val-pos-y').textContent = y.toFixed(1);
+            document.getElementById('val-pos-z').textContent = z.toFixed(1);
+            document.getElementById('val-rot-y').textContent = `${rotDeg}°`;
+            document.getElementById('val-scale').textContent = `${scl.toFixed(2)}x`;
+
+            selectionRing.position.set(x, y + 0.03, z);
+        }
+
+        function updateMaterialTint(hex) {
+            const ent = getSelectedEntity();
+            if (!ent || !ent.accentMat) return;
+            ent.color = hex;
+            ent.accentMat.color.set(hex);
+            if (ent.accentMat.emissive) {
+                ent.accentMat.emissive.set(hex);
+            }
+            document.getElementById('inp-tint').value = hex;
+        }
+
+        function applyPresetTint(hex) {
+            updateMaterialTint(hex);
+        }
+
+        function focusSelected() {
+            const ent = getSelectedEntity();
+            if (!ent) return;
+            controls.target.copy(ent.mesh.position).add(new THREE.Vector3(0, 1, 0));
+            camera.position.copy(ent.mesh.position).add(new THREE.Vector3(4.5, 3.8, 5.5));
+            showToast(`Focused on ${ent.label}`, 'info');
+        }
+
+        function duplicateSelected() {
+            const ent = getSelectedEntity();
+            if (!ent) return;
+            spawnEntity(ent.type, {
+                position: {
+                    x: ent.mesh.position.x + 1.4,
+                    y: ent.mesh.position.y,
+                    z: ent.mesh.position.z + 1.4
+                },
+                rotationY: ent.mesh.rotation.y,
+                scale: ent.mesh.scale.x,
+                color: ent.color,
+                videoElement: ent.videoElement
+            });
+        }
+
+        function deleteSelected() {
+            const ent = getSelectedEntity();
+            if (!ent) return;
+            scene.remove(ent.mesh);
+            state.entities = state.entities.filter(e => e.id !== ent.id);
+            showToast(`Removed ${ent.label}`, 'warn');
+            const next = state.entities[state.entities.length - 1];
+            selectEntity(next ? next.id : null);
+            updateOutlinerUI();
+        }
+
+        function updateOutlinerUI() {
+            const list = document.getElementById('scene-outliner');
+            document.getElementById('entity-counter').textContent = `${state.entities.length} Entities`;
+
+            list.innerHTML = state.entities.map(ent => {
+                const active = ent.id === state.selectedId;
+                const icons = {
+                    'unit': '🤖',
+                    'platform': '🟩',
+                    'beacon': '💠',
+                    'barrier': '🛡️',
+                    'video-demo': '📺',
+                    'video-file': '🎬'
+                };
+                return `
+                    <div onclick="selectEntity(${ent.id})"
+                         class="px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between cursor-pointer transition ${
+                             active
+                             ? 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-200 font-semibold'
+                             : 'hover:bg-slate-800/80 text-slate-300 border border-transparent'
+                         }">
+                        <div class="flex items-center gap-2 truncate">
+                            <span>${icons[ent.type] || '📦'}</span>
+                            <span class="truncate">${ent.label}</span>
+                        </div>
+                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${ent.color}"></span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function onCanvasPointerDown(event) {
+            if (event.button !== 0) return;
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const meshes = state.entities.map(e => e.mesh);
+            const hits = raycaster.intersectObjects(meshes, true);
+
+            if (hits.length > 0) {
+                let obj = hits[0].object;
+                while (obj && obj.userData.entityId === undefined) {
+                    obj = obj.parent;
+                }
+                if (obj && obj.userData.entityId !== undefined) {
+                    selectEntity(obj.userData.entityId);
+                }
+            }
+        }
+
+        // ==========================================
+        // 9. PROCEDURAL VAT & IK ANIMATION ENGINE
+        // ==========================================
+        function setGlobalAnimMode(mode) {
+            state.animMode = mode;
+            document.querySelectorAll('.anim-mode-btn').forEach(btn => {
+                btn.className = 'anim-mode-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition';
+            });
+            const activeBtn = document.getElementById(`anim-btn-${mode}`);
+            if (activeBtn) {
+                activeBtn.className = 'anim-mode-btn px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-emerald-600 text-white border border-emerald-400/50 transition';
+            }
+            showToast(`VAT Rig Mode: ${mode.toUpperCase()}`, 'info');
+        }
+
+        function updateVATSettings() {
+            state.vatAmp = parseFloat(document.getElementById('inp-vat-amp').value);
+            state.ikFreq = parseFloat(document.getElementById('inp-ik-freq').value);
+            document.getElementById('val-vat-amp').textContent = state.vatAmp.toFixed(2);
+            document.getElementById('val-ik-freq').textContent = `${state.ikFreq.toFixed(1)}x`;
+        }
+
+        function animateEntities(t) {
+            const amp = state.vatAmp;
+            const freq = state.ikFreq;
+
+            state.entities.forEach(ent => {
+                const phase = t * freq * 2.5 + ent.phaseOffset;
+
+                // Update holographic video screen canvas
+                if (ent.holoUpdater) {
+                    ent.holoUpdater(t);
+                }
+
+                // Spin energy crystals
+                if (ent.type === 'beacon' && ent.crystal) {
+                    ent.crystal.rotation.y = t * 1.4 + ent.phaseOffset;
+                    ent.crystal.position.y = 1.45 + Math.sin(t * 2.5 + ent.phaseOffset) * 0.14;
+                }
+
+                // Procedural IK & VAT-style Vertex/Limb deformation for RTS Troopers
+                if (ent.type === 'unit' && ent.rig) {
+                    const { hips, torso, headGroup, leftLeg, rightLeg, armsGroup } = ent.rig;
+
+                    if (state.animMode === 'patrol') {
+                        // Marching stride + subtle circular patrol sway
+                        hips.position.y = 0.95 + Math.abs(Math.sin(phase * 1.4)) * 0.08 * (amp * 3);
+                        leftLeg.rotation.x = Math.sin(phase * 1.4) * 0.45 * (amp * 2.5);
+                        rightLeg.rotation.x = -Math.sin(phase * 1.4) * 0.45 * (amp * 2.5);
+                        torso.rotation.y = Math.sin(phase * 0.7) * 0.18;
+                        armsGroup.rotation.x = Math.cos(phase * 1.4) * 0.08;
+                        headGroup.rotation.y = Math.sin(phase * 0.5) * 0.25;
+                    } else if (state.animMode === 'combat') {
+                        // Tactical combat stance + rifle recoil pulse
+                        hips.position.y = 0.88 + Math.sin(phase * 2.0) * 0.03;
+                        leftLeg.rotation.x = -0.22;
+                        rightLeg.rotation.x = 0.25;
+                        torso.rotation.y = -0.25 + Math.sin(phase * 0.8) * 0.12;
+                        const recoil = Math.max(0, Math.sin(phase * 3.5)) * 0.15 * (amp * 3);
+                        armsGroup.position.z = 0.12 - recoil;
+                        armsGroup.rotation.x = -recoil * 0.6;
+                        headGroup.rotation.y = 0.2;
+                    } else if (state.animMode === 'dance') {
+                        // AETHER IK Groove Dance Shader Motion
+                        const beat = phase * 1.8;
+                        hips.position.y = 0.92 + Math.abs(Math.sin(beat)) * 0.18 * (amp * 3.2);
+                        hips.rotation.z = Math.sin(beat * 0.5) * 0.16 * (amp * 2.5);
+                        torso.rotation.z = -Math.sin(beat * 0.5) * 0.22 * (amp * 2.5);
+                        torso.rotation.y = Math.cos(beat * 0.5) * 0.35;
+                        leftLeg.rotation.x = Math.sin(beat) * 0.35;
+                        rightLeg.rotation.x = -Math.sin(beat) * 0.35;
+                        armsGroup.rotation.x = -0.5 + Math.sin(beat * 2) * 0.35 * (amp * 2.5);
+                        headGroup.rotation.z = Math.sin(beat) * 0.2;
+                    } else {
+                        // Tactical Idle breathing
+                        hips.position.y = 0.95 + Math.sin(phase) * 0.03 * (amp * 3);
+                        leftLeg.rotation.x = 0;
+                        rightLeg.rotation.x = 0;
+                        torso.rotation.y = Math.sin(phase * 0.5) * 0.08;
+                        torso.rotation.z = 0;
+                        armsGroup.rotation.x = Math.sin(phase) * 0.04;
+                        headGroup.rotation.y = Math.sin(phase * 0.4) * 0.15;
+                    }
+                }
+            });
+
+            // Keep selection ring synced with active entity
+            const sel = getSelectedEntity();
+            if (sel && selectionRing.visible) {
+                selectionRing.position.set(sel.mesh.position.x, sel.mesh.position.y + 0.03, sel.mesh.position.z);
+                selectionRing.rotation.z = t * 0.8;
+            }
+        }
+
+        // ==========================================
+        // 10. ENVIRONMENT & HUD CONTROLS
+        // ==========================================
+        function setSkyPreset(hex) {
+            state.skyColor = hex;
+            scene.background.set(hex);
+            scene.fog.color.set(hex);
+            document.getElementById('inp-sky-color').value = hex;
+        }
+
+        function updateEnvironment() {
+            state.sunElevation = parseFloat(document.getElementById('inp-sun-elev').value);
+            state.fogDensity = parseFloat(document.getElementById('inp-fog').value);
+
+            document.getElementById('val-sun-elev').textContent = `${state.sunElevation}°`;
+            document.getElementById('val-fog').textContent = state.fogDensity.toFixed(3).replace(/^0/, '');
+
+            const rad = (state.sunElevation * Math.PI) / 180;
+            dirLight.position.set(16, Math.sin(rad) * 35, Math.cos(rad) * 28);
+            scene.fog.density = state.fogDensity;
+        }
+
+        function toggleArenaGrid() {
+            state.gridVisible = !state.gridVisible;
+            const btn = document.getElementById('btn-toggle-grid');
+            if (state.gridVisible) {
+                floorMesh.material.map = floorTexture;
+                btn.textContent = 'Diamond Tiles: ON';
+                btn.className = 'px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold';
+            } else {
+                floorMesh.material.map = null;
+                floorMesh.material.color.set(0x334155);
+                btn.textContent = 'Diamond Tiles: OFF';
+                btn.className = 'px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 text-[10px] font-semibold';
+            }
+            floorMesh.material.needsUpdate = true;
+        }
+
+        // Top HUD Buttons
+        document.getElementById('btn-toggle-panels').addEventListener('click', () => {
+            state.panelsVisible = !state.panelsVisible;
+            const left = document.getElementById('left-panel');
+            const right = document.getElementById('right-panel');
+            const bottom = document.getElementById('bottom-timeline');
+            const label = document.getElementById('label-toggle-panels');
+
+            if (state.panelsVisible) {
+                left.classList.remove('-translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                right.classList.remove('translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                bottom.classList.remove('translate-y-[150%]', 'opacity-0', 'pointer-events-none');
+                label.textContent = 'Hide Panels';
+            } else {
+                left.classList.add('-translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                right.classList.add('translate-x-[120%]', 'opacity-0', 'pointer-events-none');
+                bottom.classList.add('translate-y-[150%]', 'opacity-0', 'pointer-events-none');
+                label.textContent = 'Show Panels';
+            }
+        });
+
+        document.getElementById('btn-reset-cam').addEventListener('click', () => {
+            camera.position.set(11, 8.5, 14.5);
+            controls.target.set(0, 1.5, 0);
+            controls.update();
+            showToast('Camera reset to Tactical Overview', 'info');
+        });
+
+        // ==========================================
+        // 11. TIMELINE & PLAYBACK CONTROLS
+        // ==========================================
+        function togglePlayback() {
+            state.isPlaying = !state.isPlaying;
+            document.getElementById('icon-pause').classList.toggle('hidden', !state.isPlaying);
+            document.getElementById('icon-play').classList.toggle('hidden', state.isPlaying);
+
+            activeVideos.forEach(v => {
+                if (state.isPlaying) v.play().catch(() => {});
+                else v.pause();
+            });
+        }
+
+        function stepFrame(dir) {
+            state.isPlaying = false;
+            document.getElementById('icon-pause').classList.add('hidden');
+            document.getElementById('icon-play').classList.remove('hidden');
+
+            state.simTime = Math.max(0, state.simTime + dir * (1 / 30));
+            state.frameCount = Math.max(0, state.frameCount + dir);
+            animateEntities(state.simTime);
+            updateTimelineUI();
+        }
+
+        function scrubTimeline(val) {
+            const pct = parseFloat(val) / 1000;
+            state.simTime = pct * state.timelineDuration;
+            state.frameCount = Math.floor(state.simTime * 60);
+
+            activeVideos.forEach(v => {
+                if (v.duration && !isNaN(v.duration)) {
+                    v.currentTime = pct * v.duration;
+                }
+            });
+
+            animateEntities(state.simTime);
+            updateTimelineUI();
+        }
+
+        function cyclePlaybackSpeed() {
+            const speeds = [0.5, 1.0, 1.5, 2.0];
+            const idx = (speeds.indexOf(state.playbackSpeed) + 1) % speeds.length;
+            state.playbackSpeed = speeds[idx];
+            document.getElementById('btn-speed').textContent = `${state.playbackSpeed.toFixed(1)}x`;
+        }
+
+        function toggleLoop() {
+            state.loop = !state.loop;
+            const btn = document.getElementById('btn-loop');
+            if (state.loop) {
+                btn.className = 'px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition flex items-center gap-1';
+            } else {
+                btn.className = 'px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 text-xs font-semibold transition flex items-center gap-1';
+            }
+        }
+
+        function updateTimelineUI() {
+            const loopedTime = state.simTime % state.timelineDuration;
+            const mins = Math.floor(loopedTime / 60).toString().padStart(2, '0');
+            const secs = (loopedTime % 60).toFixed(2).padStart(5, '0');
+            document.getElementById('timeline-time').textContent = `${mins}:${secs}`;
+            document.getElementById('timeline-frame').textContent = `F:${String(state.frameCount).padStart(4, '0')}`;
+            document.getElementById('timeline-scrubber').value = Math.floor((loopedTime / state.timelineDuration) * 1000);
+        }
+
+        // ==========================================
+        // 12. CANVAS VIDEO RECORDER (WebM Export)
+        // ==========================================
+        document.getElementById('btn-record-video').addEventListener('click', () => {
+            if (state.isRecording) {
+                stopCanvasRecording();
+            } else {
+                startCanvasRecording();
+            }
+        });
+
+        function startCanvasRecording() {
+            try {
+                const canvas = renderer.domElement;
+                const stream = canvas.captureStream(60);
+                const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+                    ? 'video/webm;codecs=vp9'
+                    : 'video/webm';
+
+                state.recordedChunks = [];
+                state.mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+                state.mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) {
+                        state.recordedChunks.push(e.data);
+                    }
+                };
+
+                state.mediaRecorder.onstop = () => {
+                    const blob = new Blob(state.recordedChunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `aether-rts-scene-${Date.now()}.webm`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                    showToast('Exported WebM video capture!', 'success');
+                };
+
+                state.mediaRecorder.start();
+                state.isRecording = true;
+
+                document.getElementById('label-record-btn').textContent = 'Stop & Export';
+                document.getElementById('rec-indicator').classList.add('rec-dot', 'bg-rose-200');
+                showToast('Recording 3D WebGL Viewport...', 'danger');
+            } catch (err) {
+                showToast('MediaRecorder unavailable on this device.', 'warn');
+            }
+        }
+
+        function stopCanvasRecording() {
+            if (state.mediaRecorder && state.isRecording) {
+                state.mediaRecorder.stop();
+                state.isRecording = false;
+                document.getElementById('label-record-btn').textContent = 'Record WebM';
+                document.getElementById('rec-indicator').classList.remove('rec-dot', 'bg-rose-200');
+            }
+        }
+
+        // ==========================================
+        // 13. MAIN RENDER LOOP
+        // ==========================================
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animateLoop(now) {
+            requestAnimationFrame(animateLoop);
+
+            const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+            lastFrameTime = now;
+
+            // FPS Counter
+            fpsFrames++;
+            if (now - fpsLastTime >= 500) {
+                const fps = Math.round((fpsFrames * 1000) / (now - fpsLastTime));
+                document.getElementById('fps-counter').textContent = `${fps} FPS`;
+                fpsFrames = 0;
+                fpsLastTime = now;
+            }
+
+            if (state.isPlaying) {
+                state.simTime += dt * state.playbackSpeed;
+                state.frameCount++;
+
+                if (!state.loop && state.simTime >= state.timelineDuration) {
+                    state.simTime = state.timelineDuration;
+                    togglePlayback();
+                }
+
+                animateEntities(state.simTime);
+                updateTimelineUI();
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function () {
+            initScene();
+            animateLoop(performance.now());
+        };
+    </script>
+</body>
+</html>
