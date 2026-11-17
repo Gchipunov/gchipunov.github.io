@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snowy RTS Scene Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111827; color: #e5e7eb; font-family: 'Inter', sans-serif; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 0; }
+        .ui-layer { position: relative; z-index: 10; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Custom scrollbar for outliner */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+        .selected-tool { background-color: #3b82f6; color: white; border-color: #60a5fa; }
+    </style>
+</head>
+<body class="flex flex-col h-screen antialiased selection:bg-blue-500/30">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Hidden Video Element for VideoTexture -->
+    <video id="billboard-video" loop playsinline crossorigin="anonymous" preload="auto" style="display:none;" muted>
+        <source src="ScreenRecording_11-16-2026%2020-36-12_1.mp4" type="video/mp4">
+    </video>
+
+    <!-- Top Toolbar -->
+    <div class="ui-layer pointer-events-auto flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 shadow-md h-14">
+        <div class="flex items-center space-x-4">
+            <div class="font-bold text-lg tracking-wider text-blue-400">RTS<span class="text-white">BUILDER</span></div>
+            <div class="h-6 w-px bg-gray-700 mx-2"></div>
+            <button id="btn-build-mode" class="selected-tool px-3 py-1.5 rounded text-sm font-medium border border-gray-600 hover:bg-gray-700 transition-colors" onclick="setMode('build')">
+                🔨 Build
+            </button>
+            <button id="btn-delete-mode" class="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 bg-gray-800 hover:bg-gray-700 transition-colors" onclick="setMode('delete')">
+                🗑️ Delete
+            </button>
+        </div>
+        <div class="flex items-center space-x-3">
+            <button id="btn-play-video" class="px-3 py-1.5 rounded text-sm font-medium border border-green-600 bg-green-900/50 hover:bg-green-800 transition-colors text-green-300" onclick="toggleVideo()">
+                ▶️ Play Billboards
+            </button>
+            <button class="px-3 py-1.5 rounded text-sm font-medium border border-gray-600 bg-gray-800 hover:bg-gray-700 transition-colors" onclick="clearScene()">
+                ⚠️ Clear Scene
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="ui-layer flex flex-1 h-[calc(100vh-3.5rem)]">
+        
+        <!-- Left Sidebar (Build Menu) -->
+        <div class="pointer-events-auto w-64 bg-gray-900 border-r border-gray-700 flex flex-col shadow-lg">
+            <div class="px-4 py-3 border-b border-gray-800 bg-gray-950">
+                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Object Palette</h2>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-2 content-start">
+                <!-- Build Items -->
+                <button class="build-item p-3 border border-gray-700 rounded bg-gray-800 hover:bg-gray-700 flex flex-col items-center justify-center transition-colors focus:outline-none selected-tool" onclick="selectItem('hq', this)">
+                    <div class="text-2xl mb-1">🏢</div>
+                    <span class="text-xs font-medium">Command HQ</span>
+                </button>
+                <button class="build-item p-3 border border-gray-700 rounded bg-gray-800 hover:bg-gray-700 flex flex-col items-center justify-center transition-colors focus:outline-none" onclick="selectItem('tent', this)">
+                    <div class="text-2xl mb-1">⛺</div>
+                    <span class="text-xs font-medium">Barracks</span>
+                </button>
+                <button class="build-item p-3 border border-gray-700 rounded bg-gray-800 hover:bg-gray-700 flex flex-col items-center justify-center transition-colors focus:outline-none" onclick="selectItem('tower', this)">
+                    <div class="text-2xl mb-1">🗼</div>
+                    <span class="text-xs font-medium">Defense Tower</span>
+                </button>
+                <button class="build-item p-3 border border-gray-700 rounded bg-gray-800 hover:bg-gray-700 flex flex-col items-center justify-center transition-colors focus:outline-none" onclick="selectItem('tank', this)">
+                    <div class="text-2xl mb-1">🚜</div>
+                    <span class="text-xs font-medium">Vehicle</span>
+                </button>
+                <button class="build-item p-3 border border-gray-700 rounded bg-gray-800 hover:bg-gray-700 flex flex-col items-center justify-center transition-colors focus:outline-none" onclick="selectItem('tree', this)">
+                    <div class="text-2xl mb-1">🌲</div>
+                    <span class="text-xs font-medium">Pine Tree</span>
+                </button>
+                <button class="build-item p-3 border border-gray-700 rounded bg-gray-800 hover:bg-gray-700 flex flex-col items-center justify-center transition-colors focus:outline-none" onclick="selectItem('billboard', this)">
+                    <div class="text-2xl mb-1">📺</div>
+                    <span class="text-xs font-medium">Video Board</span>
+                </button>
+            </div>
+            
+            <!-- Instructions -->
+            <div class="p-4 border-t border-gray-700 bg-gray-950">
+                <p class="text-xs text-gray-400 leading-relaxed">
+                    <strong class="text-gray-200">Controls:</strong><br>
+                    • Left Click: Place/Delete<br>
+                    • Right Click + Drag: Pan<br>
+                    • Scroll: Zoom
+                </p>
+            </div>
+        </div>
+
+        <!-- Center Area (Empty, allows clicks to pass through to canvas) -->
+        <div class="flex-1 pointer-events-none relative">
+            <div id="status-message" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900/80 text-white px-4 py-2 rounded-full text-sm backdrop-blur-sm border border-gray-700 shadow-xl opacity-0 transition-opacity duration-300">
+                Ready
+            </div>
+        </div>
+
+        <!-- Right Sidebar (Scene Outliner & Properties) -->
+        <div class="pointer-events-auto w-64 bg-gray-900 border-l border-gray-700 flex flex-col shadow-lg">
+            <div class="px-4 py-3 border-b border-gray-800 bg-gray-950 flex justify-between items-center">
+                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Scene Outliner</h2>
+                <span class="text-xs bg-gray-800 px-2 py-0.5 rounded text-gray-400" id="object-count">0</span>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2">
+                <ul id="outliner-list" class="space-y-1">
+                    <!-- Outliner items go here -->
+                    <li class="text-xs text-gray-500 italic px-2 py-1 text-center mt-4">Scene is empty</li>
+                </ul>
+            </div>
+            
+            <div class="border-t border-gray-800 bg-gray-950 p-4">
+                <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Properties</h2>
+                <div id="properties-panel" class="text-xs text-gray-400">
+                    Select an object in delete mode to view details, or place a new one.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Globals & State ---
+        let scene, camera, renderer, controls;
+        let gridHelper, plane;
+        let raycaster, mouse;
+        let snowParticles, snowSystem;
+        
+        // Materials
+        const materials = {
+            snow: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+            hqBase: new THREE.MeshLambertMaterial({ color: 0x374151 }), // Gray 700
+            hqTop: new THREE.MeshLambertMaterial({ color: 0x1e3a8a }), // Blue 900
+            tent: new THREE.MeshLambertMaterial({ color: 0x064e3b }), // Emerald 900
+            towerBase: new THREE.MeshLambertMaterial({ color: 0x4b5563 }), // Gray 600
+            tankBody: new THREE.MeshLambertMaterial({ color: 0x14532d }), // Green 900
+            tankTrack: new THREE.MeshLambertMaterial({ color: 0x111827 }),
+            treeLeaves: new THREE.MeshLambertMaterial({ color: 0x065f46 }), // Emerald 800
+            treeTrunk: new THREE.MeshLambertMaterial({ color: 0x78350f }), // Amber 900
+            billboardFrame: new THREE.MeshLambertMaterial({ color: 0x111827 }),
+            ghost: new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.5, wireframe: true }),
+            ghostError: new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.5, wireframe: true })
+        };
+
+        let videoTexture = null;
+
+        const state = {
+            mode: 'build', // 'build' | 'delete'
+            selectedItem: 'hq',
+            placedObjects: [],
+            objectCounter: 0,
+            gridSize: 2, // Size of a grid cell
+            isVideoPlaying: false
+        };
+
+        // Ghost object for placement preview
+        let ghostMesh = new THREE.Group();
+
+        init();
+        animate();
+
+        // --- Initialization ---
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xa0c4ff); // Winter sky blue
+            scene.fog = new THREE.Fog(0xa0c4ff, 20, 150);
+
+            // 2. Camera (Isometric Orthographic)
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 25; // view size
+            camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+            
+            // Set isometric angle
+            camera.position.set(50, 50, 50);
+            camera.lookAt(scene.position);
+            
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // 4. Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(30, 50, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -30;
+            dirLight.shadow.camera.right = 30;
+            dirLight.shadow.camera.top = 30;
+            dirLight.shadow.camera.bottom = -30;
+            dirLight.shadow.camera.near = 0.1;
+            dirLight.shadow.camera.far = 100;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 5. Environment (Ground & Grid)
+            const planeGeo = new THREE.PlaneGeometry(200, 200);
+            plane = new THREE.Mesh(planeGeo, materials.snow);
+            plane.rotation.x = -Math.PI / 2;
+            plane.receiveShadow = true;
+            plane.name = "Ground";
+            scene.add(plane);
+
+            gridHelper = new THREE.GridHelper(200, 100, 0x000000, 0x000000);
+            gridHelper.position.y = 0.01; // Prevent Z-fighting
+            gridHelper.material.opacity = 0.15;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+
+            // 6. Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableRotate = false; // Keep it strict isometric
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxZoom = 3;
+            controls.minZoom = 0.5;
+            // Lock panning to XZ plane roughly
+            controls.minPolarAngle = Math.PI / 4; 
+            controls.maxPolarAngle = Math.PI / 4;
+
+            // 7. Raycaster & Interactions
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // Bind events to the canvas element specifically
+            renderer.domElement.addEventListener('pointermove', onPointerMove);
+            renderer.domElement.addEventListener('click', onClick);
+            window.addEventListener('resize', onWindowResize);
+
+            // 8. Video Texture Setup
+            const video = document.getElementById('billboard-video');
+            videoTexture = new THREE.VideoTexture(video);
+            videoTexture.minFilter = THREE.LinearFilter;
+            videoTexture.magFilter = THREE.LinearFilter;
+            videoTexture.format = THREE.RGBFormat;
+            
+            // 9. Snow Particle System
+            createSnow();
+
+            // 10. Initial Ghost
+            updateGhostModel();
+            scene.add(ghostMesh);
+        }
+
+        // --- Procedural Modeling Generators ---
+
+        function createModel(type, isGhost = false) {
+            const group = new THREE.Group();
+            group.userData.type = type;
+
+            const applyMat = (mesh, actualMat) => {
+                mesh.material = isGhost ? materials.ghost : actualMat;
+                if (!isGhost) {
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                }
+            };
+
+            switch(type) {
+                case 'hq':
+                    // Base
+                    const hqBaseGeo = new THREE.BoxGeometry(4, 2, 4);
+                    const hqBase = new THREE.Mesh(hqBaseGeo);
+                    hqBase.position.y = 1;
+                    applyMat(hqBase, materials.hqBase);
+                    group.add(hqBase);
+                    // Top
+                    const hqTopGeo = new THREE.BoxGeometry(2, 1, 2);
+                    const hqTop = new THREE.Mesh(hqTopGeo);
+                    hqTop.position.y = 2.5;
+                    applyMat(hqTop, materials.hqTop);
+                    group.add(hqTop);
+                    // Antenna
+                    const antGeo = new THREE.CylinderGeometry(0.05, 0.05, 2);
+                    const ant = new THREE.Mesh(antGeo);
+                    ant.position.set(1, 3, -1);
+                    applyMat(ant, materials.hqBase);
+                    group.add(ant);
+                    break;
+                
+                case 'tent':
+                    // Triangle prism-like using CylinderGeometry with 3 segments
+                    const tentGeo = new THREE.CylinderGeometry(1.5, 1.5, 3, 3);
+                    const tent = new THREE.Mesh(tentGeo);
+                    tent.rotation.z = Math.PI / 2;
+                    tent.rotation.x = Math.PI / 2;
+                    tent.position.y = 0.75;
+                    applyMat(tent, materials.tent);
+                    group.add(tent);
+                    break;
+
+                case 'tower':
+                    const towerBaseGeo = new THREE.CylinderGeometry(0.8, 1.2, 4, 8);
+                    const towerBase = new THREE.Mesh(towerBaseGeo);
+                    towerBase.position.y = 2;
+                    applyMat(towerBase, materials.towerBase);
+                    group.add(towerBase);
+                    
+                    const towerTopGeo = new THREE.BoxGeometry(2, 1, 2);
+                    const towerTop = new THREE.Mesh(towerTopGeo);
+                    towerTop.position.y = 4.5;
+                    applyMat(towerTop, materials.hqBase);
+                    group.add(towerTop);
+                    break;
+
+                case 'tank':
+                    // Tracks
+                    const trackGeo = new THREE.BoxGeometry(2.4, 0.6, 3.2);
+                    const track = new THREE.Mesh(trackGeo);
+                    track.position.y = 0.3;
+                    applyMat(track, materials.tankTrack);
+                    group.add(track);
+                    // Body
+                    const bodyGeo = new THREE.BoxGeometry(1.8, 0.8, 2.6);
+                    const body = new THREE.Mesh(bodyGeo);
+                    body.position.y = 1;
+                    applyMat(body, materials.tankBody);
+                    group.add(body);
+                    // Turret
+                    const turretGeo = new THREE.BoxGeometry(1.2, 0.6, 1.4);
+                    const turret = new THREE.Mesh(turretGeo);
+                    turret.position.set(0, 1.7, -0.2);
+                    applyMat(turret, materials.tankBody);
+                    group.add(turret);
+                    // Barrel
+                    const barrelGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.5);
+                    const barrel = new THREE.Mesh(barrelGeo);
+                    barrel.rotation.x = Math.PI / 2;
+                    barrel.position.set(0, 1.7, 1);
+                    applyMat(barrel, materials.towerBase);
+                    group.add(barrel);
+                    break;
+
+                case 'tree':
+                    const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1);
+                    const trunk = new THREE.Mesh(trunkGeo);
+                    trunk.position.y = 0.5;
+                    applyMat(trunk, materials.treeTrunk);
+                    group.add(trunk);
+
+                    const leavesGeo1 = new THREE.ConeGeometry(1.2, 2, 8);
+                    const leaves1 = new THREE.Mesh(leavesGeo1);
+                    leaves1.position.y = 1.5;
+                    applyMat(leaves1, materials.treeLeaves);
+                    group.add(leaves1);
+
+                    const leavesGeo2 = new THREE.ConeGeometry(0.9, 1.5, 8);
+                    const leaves2 = new THREE.Mesh(leavesGeo2);
+                    leaves2.position.y = 2.5;
+                    applyMat(leaves2, materials.treeLeaves);
+                    group.add(leaves2);
+                    break;
+
+                case 'billboard':
+                    const standGeo = new THREE.BoxGeometry(0.4, 3, 0.4);
+                    const stand1 = new THREE.Mesh(standGeo);
+                    stand1.position.set(-2, 1.5, 0);
+                    applyMat(stand1, materials.billboardFrame);
+                    group.add(stand1);
+
+                    const stand2 = new THREE.Mesh(standGeo);
+                    stand2.position.set(2, 1.5, 0);
+                    applyMat(stand2, materials.billboardFrame);
+                    group.add(stand2);
+
+                    const screenBackGeo = new THREE.BoxGeometry(4.4, 2.6, 0.2);
+                    const screenBack = new THREE.Mesh(screenBackGeo);
+                    screenBack.position.set(0, 3, -0.1);
+                    applyMat(screenBack, materials.billboardFrame);
+                    group.add(screenBack);
+
+                    // Screen with Video
+                    const screenGeo = new THREE.PlaneGeometry(4.2, 2.4);
+                    let screenMat;
+                    if (isGhost) {
+                        screenMat = materials.ghost;
+                    } else {
+                        // Make sure we have a fresh material for each actual billboard
+                        screenMat = new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.DoubleSide });
+                    }
+                    const screen = new THREE.Mesh(screenGeo, screenMat);
+                    screen.position.set(0, 3, 0.01);
+                    if (!isGhost) screen.name = "VideoScreen";
+                    group.add(screen);
+                    break;
+            }
+
+            return group;
+        }
+
+        // --- Interaction Logic ---
+
+        function updateGhostModel() {
+            scene.remove(ghostMesh);
+            ghostMesh = createModel(state.selectedItem, true);
+            scene.add(ghostMesh);
+        }
+
+        function getIntersects(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            
+            if (state.mode === 'build') {
+                return raycaster.intersectObject(plane);
+            } else {
+                // In delete mode, intersect with placed objects
+                // Flatten the hierarchy to find meshes, then find their top-level group parent
+                const intersects = raycaster.intersectObjects(state.placedObjects, true);
+                return intersects;
+            }
+        }
+
+        function onPointerMove(event) {
+            const intersects = getIntersects(event);
+
+            if (state.mode === 'build') {
+                if (intersects.length > 0) {
+                    ghostMesh.visible = true;
+                    const p = intersects[0].point;
+                    
+                    // Snap to grid
+                    const s = state.gridSize;
+                    const snappedX = Math.round(p.x / s) * s;
+                    const snappedZ = Math.round(p.z / s) * s;
+                    
+                    ghostMesh.position.set(snappedX, 0, snappedZ);
+
+                    // Optional collision check for red ghost (not fully implemented for brevity, just keeping it visual)
+                    // You could check if snapped coords exist in placedObjects bounding boxes.
+                } else {
+                    ghostMesh.visible = false;
+                }
+            } else {
+                ghostMesh.visible = false;
+                // Highlight logic for delete mode could go here
+            }
+        }
+
+        function onClick(event) {
+            // Prevent placing if right click
+            if (event.button !== 0) return;
+
+            const intersects = getIntersects(event);
+
+            if (state.mode === 'build') {
+                if (intersects.length > 0) {
+                    const p = intersects[0].point;
+                    const s = state.gridSize;
+                    const snappedX = Math.round(p.x / s) * s;
+                    const snappedZ = Math.round(p.z / s) * s;
+
+                    // Check for overlap
+                    const isOccupied = state.placedObjects.some(obj => {
+                        return obj.position.x === snappedX && obj.position.z === snappedZ;
+                    });
+
+                    if (isOccupied) {
+                        showStatus("Location occupied!");
+                        return;
+                    }
+
+                    placeObject(state.selectedItem, snappedX, snappedZ);
+                }
+            } else if (state.mode === 'delete') {
+                if (intersects.length > 0) {
+                    // Find the root group of the intersected mesh
+                    let object = intersects[0].object;
+                    while (object.parent && object.parent !== scene) {
+                        object = object.parent;
+                    }
+                    
+                    if (state.placedObjects.includes(object)) {
+                        removeObject(object);
+                    }
+                }
+            }
+        }
+
+        // --- Core Functions ---
+
+        function placeObject(type, x, z) {
+            const obj = createModel(type, false);
+            obj.position.set(x, 0, z);
+            state.objectCounter++;
+            const id = `${type.toUpperCase()}_${state.objectCounter}`;
+            obj.userData.id = id;
+            obj.userData.timestamp = new Date().toLocaleTimeString();
+            
+            scene.add(obj);
+            state.placedObjects.push(obj);
+            
+            updateOutliner();
+            showStatus(`Built ${type}`);
+            
+            // Auto play video if it's a billboard and video is enabled
+            if (type === 'billboard' && state.isVideoPlaying) {
+               // Video plays automatically as it's the same HTML element texture
+            }
+        }
+
+        function removeObject(object) {
+            scene.remove(object);
+            state.placedObjects = state.placedObjects.filter(obj => obj !== object);
+            updateOutliner();
+            showStatus(`Removed ${object.userData.id}`);
+            document.getElementById('properties-panel').innerHTML = "Select an object in delete mode to view details, or place a new one.";
+        }
+
+        function clearScene() {
+            state.placedObjects.forEach(obj => scene.remove(obj));
+            state.placedObjects = [];
+            state.objectCounter = 0;
+            updateOutliner();
+            showStatus("Scene Cleared");
+        }
+
+        // --- Snow System ---
+        function createSnow() {
+            const particleCount = 1500;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount * 3; i += 3) {
+                // X, Y, Z
+                positions[i] = (Math.random() - 0.5) * 100;
+                positions[i + 1] = Math.random() * 50;
+                positions[i + 2] = (Math.random() - 0.5) * 100;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const pMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.3,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            snowSystem = new THREE.Points(geometry, pMaterial);
+            scene.add(snowSystem);
+        }
+
+        function animateSnow() {
+            if (!snowSystem) return;
+            const positions = snowSystem.geometry.attributes.position.array;
+            
+            for (let i = 1; i < positions.length; i += 3) {
+                positions[i] -= 0.1; // Fall speed
+                // Slight horizontal drift
+                positions[i-1] += (Math.random() - 0.5) * 0.05; 
+
+                if (positions[i] < 0) {
+                    positions[i] = 50; // Reset to top
+                    positions[i-1] = (Math.random() - 0.5) * 100; // Reset X
+                }
+            }
+            snowSystem.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            animateSnow();
+            renderer.render(scene, camera);
+        }
+
+        // --- UI & State Handling ---
+
+        function onWindowResize() {
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 25;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Exposed to Global scope for UI buttons
+        window.setMode = function(mode) {
+            state.mode = mode;
+            
+            document.getElementById('btn-build-mode').classList.remove('selected-tool', 'bg-blue-600');
+            document.getElementById('btn-delete-mode').classList.remove('selected-tool', 'bg-red-600');
+            document.getElementById('btn-build-mode').classList.add('bg-gray-800');
+            document.getElementById('btn-delete-mode').classList.add('bg-gray-800');
+
+            if (mode === 'build') {
+                document.getElementById('btn-build-mode').classList.add('selected-tool', 'bg-blue-600');
+                document.getElementById('btn-build-mode').classList.remove('bg-gray-800');
+                ghostMesh.visible = true;
+            } else {
+                document.getElementById('btn-delete-mode').classList.add('selected-tool', 'bg-red-600');
+                document.getElementById('btn-delete-mode').classList.remove('bg-gray-800');
+                ghostMesh.visible = false;
+            }
+        };
+
+        window.selectItem = function(item, btnElement) {
+            state.selectedItem = item;
+            window.setMode('build');
+            updateGhostModel();
+            
+            // Update UI
+            document.querySelectorAll('.build-item').forEach(el => el.classList.remove('selected-tool', 'bg-gray-700'));
+            document.querySelectorAll('.build-item').forEach(el => el.classList.add('bg-gray-800'));
+            
+            btnElement.classList.add('selected-tool');
+            btnElement.classList.remove('bg-gray-800');
+        };
+
+        window.toggleVideo = function() {
+            const video = document.getElementById('billboard-video');
+            const btn = document.getElementById('btn-play-video');
+            
+            if (state.isVideoPlaying) {
+                video.pause();
+                btn.innerHTML = '▶️ Play Billboards';
+                btn.classList.remove('bg-green-700', 'text-white');
+                btn.classList.add('bg-green-900/50', 'text-green-300');
+            } else {
+                // Must play muted first due to browser autoplay policies, though we set muted in HTML
+                video.play().then(() => {
+                    btn.innerHTML = '⏸️ Pause Billboards';
+                    btn.classList.add('bg-green-700', 'text-white');
+                    btn.classList.remove('bg-green-900/50', 'text-green-300');
+                }).catch(e => {
+                    console.error("Video play failed", e);
+                    showStatus("Video playback aborted (Check path/CORS)");
+                });
+            }
+            state.isVideoPlaying = !state.isVideoPlaying;
+        };
+
+        function updateOutliner() {
+            const list = document.getElementById('outliner-list');
+            const count = document.getElementById('object-count');
+            
+            count.innerText = state.placedObjects.length;
+            list.innerHTML = '';
+
+            if (state.placedObjects.length === 0) {
+                list.innerHTML = '<li class="text-xs text-gray-500 italic px-2 py-1 text-center mt-4">Scene is empty</li>';
+                return;
+            }
+
+            state.placedObjects.forEach(obj => {
+                const li = document.createElement('li');
+                li.className = "flex justify-between items-center px-2 py-1.5 hover:bg-gray-800 rounded cursor-pointer group";
+                
+                // Icon based on type
+                let icon = '📦';
+                if(obj.userData.type === 'hq') icon = '🏢';
+                if(obj.userData.type === 'tent') icon = '⛺';
+                if(obj.userData.type === 'tower') icon = '🗼';
+                if(obj.userData.type === 'tank') icon = '🚜';
+                if(obj.userData.type === 'tree') icon = '🌲';
+                if(obj.userData.type === 'billboard') icon = '📺';
+
+                li.innerHTML = `
+                    <span class="text-xs font-medium text-gray-300 group-hover:text-white truncate flex items-center">
+                        <span class="mr-2">${icon}</span> ${obj.userData.id}
+                    </span>
+                    <button class="text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-300 focus:outline-none" onclick="triggerDelete('${obj.userData.id}')">
+                        ✕
+                    </button>
+                `;
+                
+                // Click to view properties
+                li.onclick = (e) => {
+                    if (e.target.tagName !== 'BUTTON') {
+                        showProperties(obj);
+                    }
+                };
+
+                list.appendChild(li);
+            });
+        }
+
+        function showProperties(obj) {
+            const panel = document.getElementById('properties-panel');
+            panel.innerHTML = `
+                <div class="space-y-2">
+                    <div class="flex justify-between border-b border-gray-800 pb-1">
+                        <span class="text-gray-500">ID:</span>
+                        <span class="font-mono text-gray-300">${obj.userData.id}</span>
+                    </div>
+                    <div class="flex justify-between border-b border-gray-800 pb-1">
+                        <span class="text-gray-500">Type:</span>
+                        <span class="capitalize text-gray-300">${obj.userData.type}</span>
+                    </div>
+                    <div class="flex justify-between border-b border-gray-800 pb-1">
+                        <span class="text-gray-500">Position:</span>
+                        <span class="font-mono text-gray-300">X:${obj.position.x} Z:${obj.position.z}</span>
+                    </div>
+                    <div class="flex justify-between border-b border-gray-800 pb-1">
+                        <span class="text-gray-500">Placed:</span>
+                        <span class="text-gray-300">${obj.userData.timestamp}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.triggerDelete = function(id) {
+            const obj = state.placedObjects.find(o => o.userData.id === id);
+            if (obj) removeObject(obj);
+        }
+
+        let statusTimeout;
+        function showStatus(msg) {
+            const el = document.getElementById('status-message');
+            el.innerText = msg;
+            el.classList.remove('opacity-0');
+            el.classList.add('opacity-100');
+            
+            clearTimeout(statusTimeout);
+            statusTimeout = setTimeout(() => {
+                el.classList.remove('opacity-100');
+                el.classList.add('opacity-0');
+            }, 2000);
+        }
+
+    </script>
+</body>
+</html>
