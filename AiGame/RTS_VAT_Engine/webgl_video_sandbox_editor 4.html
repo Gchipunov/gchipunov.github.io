@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Video Sandbox Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Custom scrollbar for editor panels */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #2d3748; }
+        ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #718096; }
+
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+    </style>
+    
+    <!-- Import maps for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body class="text-gray-200">
+
+    <!-- Hidden Video Element for Texture -->
+    <video id="source-video" loop muted crossorigin="anonymous" playsinline style="display:none">
+        <source src="ScreenRecording_11-16-2026 20-37-57_1.mp4" type="video/mp4">
+    </video>
+
+    <!-- WebGL Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Editor UI Overlay -->
+    <div id="ui-layer">
+        
+        <!-- Top Toolbar -->
+        <div class="pointer-events-auto bg-gray-900 border-b border-gray-700 p-2 flex items-center justify-between shadow-lg">
+            <div class="flex items-center space-x-2 md:space-x-4">
+                <button id="btn-toggle-left" class="md:hidden px-3 py-1.5 bg-gray-800 text-gray-300 hover:text-white rounded border border-gray-700">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <div class="hidden md:block text-lg font-bold text-blue-400 px-4 border-r border-gray-700">
+                    <i class="fa-solid fa-cube mr-2"></i>SceneCrafter
+                </div>
+                
+                <!-- Transform Tools -->
+                <div class="flex bg-gray-800 rounded-lg p-1 space-x-1">
+                    <button id="btn-translate" class="transform-tool active px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 transition-colors" title="Translate (W)">
+                        <i class="fa-solid fa-arrows-up-down-left-right"></i>
+                    </button>
+                    <button id="btn-rotate" class="transform-tool px-3 py-1.5 rounded hover:bg-gray-700 transition-colors" title="Rotate (E)">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                    <button id="btn-scale" class="transform-tool px-3 py-1.5 rounded hover:bg-gray-700 transition-colors" title="Scale (R)">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Add Objects & Actions -->
+            <div class="flex items-center space-x-2 px-2">
+                <button id="btn-play-video" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-medium transition-colors shadow-md">
+                    <i class="fa-solid fa-play mr-2"></i>Play Video
+                </button>
+                <div class="h-6 w-px bg-gray-700 mx-2"></div>
+                <button id="btn-add-cube" class="hidden md:block px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm transition-colors border border-gray-600">
+                    + Cube
+                </button>
+                <button id="btn-add-sphere" class="hidden md:block px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm transition-colors border border-gray-600">
+                    + Sphere
+                </button>
+                <button id="btn-add-dancer" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-sm transition-colors shadow border border-purple-500 text-white font-bold">
+                    <i class="fa-solid fa-person-running mr-1"></i> + Dancer
+                </button>
+                <button id="btn-add-video" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-sm transition-colors shadow border border-indigo-500 text-white">
+                    <i class="fa-solid fa-video mr-1"></i> Add Video Screen
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Workspace Area -->
+        <div class="flex-1 flex justify-between relative overflow-hidden">
+            
+            <!-- Left Panel (Hierarchy / Simple Info) -->
+            <div id="left-panel" class="pointer-events-auto w-64 bg-gray-900 border-r border-gray-700 flex flex-col shadow-xl absolute md:relative z-20 h-full transition-transform duration-300 transform -translate-x-full md:translate-x-0">
+                <div class="p-3 bg-gray-800 border-b border-gray-700 flex justify-between items-center text-sm font-semibold uppercase tracking-wider text-gray-400">
+                    <span>Scene Outline</span>
+                    <button id="btn-close-left" class="md:hidden text-gray-400 hover:text-white"><i class="fa-solid fa-chevron-left"></i></button>
+                </div>
+                <div id="hierarchy-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                    <!-- Hierarchy items generated via JS -->
+                </div>
+            </div>
+
+            <!-- Right Panel (Inspector/Properties) -->
+            <div id="inspector-panel" class="pointer-events-auto w-72 bg-gray-900 border-l border-gray-700 flex flex-col shadow-xl absolute right-0 md:relative z-20 h-full transition-transform duration-300 transform translate-x-full hidden">
+                <div class="p-3 bg-gray-800 border-b border-gray-700 flex justify-between items-center text-sm font-semibold uppercase tracking-wider text-gray-400">
+                    <button id="btn-close-right" class="md:hidden text-gray-400 hover:text-white mr-2"><i class="fa-solid fa-chevron-right"></i></button>
+                    <span>Properties</span>
+                    <span id="selected-object-name" class="text-blue-400 text-xs font-bold ml-auto">None</span>
+                </div>
+                
+                <div class="p-4 space-y-6 overflow-y-auto">
+                    <!-- Transform Properties -->
+                    <div>
+                        <h3 class="text-xs text-gray-500 mb-3 uppercase tracking-wider">Transform</h3>
+                        
+                        <!-- Position -->
+                        <div class="mb-3 flex items-center">
+                            <span class="w-12 text-xs text-gray-400">Pos</span>
+                            <div class="flex space-x-1 flex-1">
+                                <input type="number" id="prop-pos-x" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                <input type="number" id="prop-pos-y" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                <input type="number" id="prop-pos-z" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                            </div>
+                        </div>
+
+                        <!-- Rotation -->
+                        <div class="mb-3 flex items-center">
+                            <span class="w-12 text-xs text-gray-400">Rot</span>
+                            <div class="flex space-x-1 flex-1">
+                                <input type="number" id="prop-rot-x" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                <input type="number" id="prop-rot-y" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                <input type="number" id="prop-rot-z" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                            </div>
+                        </div>
+
+                        <!-- Scale -->
+                        <div class="flex items-center">
+                            <span class="w-12 text-xs text-gray-400">Scl</span>
+                            <div class="flex space-x-1 flex-1">
+                                <input type="number" id="prop-scale-x" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                <input type="number" id="prop-scale-y" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                <input type="number" id="prop-scale-z" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-gray-700 pt-4">
+                        <button id="btn-delete" class="w-full py-2 bg-red-900/50 hover:bg-red-800/80 text-red-300 rounded text-sm transition-colors border border-red-800">
+                            <i class="fa-solid fa-trash mr-2"></i>Delete Object
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+        
+        <!-- Status Bar -->
+        <div class="pointer-events-auto bg-gray-900 border-t border-gray-700 p-1.5 flex justify-between text-xs text-gray-500">
+            <div>Left Click: Select | Drag: Orbit | Scroll: Zoom | W/E/R: Transform Tools</div>
+            <div id="status-msg">Ready</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // --- Core Engine Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111);
+        scene.fog = new THREE.Fog(0x111111, 20, 100);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 15);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // --- Post-Processing (Outline Shader) ---
+        const composer = new EffectComposer(renderer);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
+        outlinePass.edgeStrength = 8.0;
+        outlinePass.edgeGlow = 2.0;
+        outlinePass.edgeThickness = 1.5;
+        outlinePass.pulsePeriod = 2;
+        outlinePass.visibleEdgeColor.set('#00ffff'); // Cyan Neon
+        outlinePass.hiddenEdgeColor.set('#ff00ff'); // Magenta Neon
+        composer.addPass(outlinePass);
+
+        const outputPass = new OutputPass();
+        composer.addPass(outputPass);
+
+        // --- Environment Setup ---
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0x404040, 2); // Soft white light
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 3);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        const pointLight = new THREE.PointLight(0x4488ff, 5, 50);
+        pointLight.position.set(0, 5, 0);
+        scene.add(pointLight);
+
+        // Grid and Ground
+        const grid = new THREE.GridHelper(50, 50, 0x444444, 0x222222);
+        scene.add(grid);
+
+        const planeGeo = new THREE.PlaneGeometry(50, 50);
+        const planeMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, depthWrite: false });
+        const ground = new THREE.Mesh(planeGeo, planeMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // --- Controls ---
+        const orbit = new OrbitControls(camera, renderer.domElement);
+        orbit.enableDamping = true;
+        orbit.dampingFactor = 0.05;
+        orbit.maxPolarAngle = Math.PI / 2 - 0.01; // Don't go below ground
+
+        const transformControl = new TransformControls(camera, renderer.domElement);
+        transformControl.addEventListener('dragging-changed', function (event) {
+            orbit.enabled = !event.value;
+        });
+        transformControl.addEventListener('change', updateUIFromObject);
+        scene.add(transformControl);
+
+        // --- State Management ---
+        const interactableObjects = [];
+        let selectedObject = null;
+        let objectCounter = 1;
+        const dancers = []; // Track dancers for animation
+
+        // --- Video Setup ---
+        const videoElement = document.getElementById('source-video');
+        let videoTexture = null;
+        
+        function initVideoTexture() {
+            if (!videoTexture) {
+                videoTexture = new THREE.VideoTexture(videoElement);
+                videoTexture.colorSpace = THREE.SRGBColorSpace;
+            }
+            return videoTexture;
+        }
+
+        // --- Interaction (Raycasting) ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        renderer.domElement.addEventListener('pointerdown', onPointerDown);
+
+        function onPointerDown(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Ignore intersection if clicking on UI (though UI layer stops most events)
+            const intersects = raycaster.intersectObjects(interactableObjects, false);
+
+            if (intersects.length > 0) {
+                // Ignore if clicking on transform controls
+                if (transformControl.dragging) return;
+                
+                selectObject(intersects[0].object);
+            } else {
+                // If not clicking on transform controls, deselect
+                if(!transformControl.dragging && !transformControl.axis) {
+                    selectObject(null);
+                }
+            }
+        }
+
+        function selectObject(object) {
+            // Unpack from hitboxes if it's a grouped entity
+            if (object && object.userData.parentGroup) {
+                object = object.userData.parentGroup;
+            }
+
+            selectedObject = object;
+            
+            // Apply Outline Pass to Selected Object + All Dancers
+            const outlines = [...dancers];
+            if (object && !dancers.includes(object)) {
+                outlines.push(object);
+            }
+            outlinePass.selectedObjects = outlines;
+
+            const inspector = document.getElementById('inspector-panel');
+
+            if (object) {
+                transformControl.attach(object);
+                inspector.classList.remove('hidden');
+                // Allow display:flex to apply before translating
+                setTimeout(() => inspector.classList.remove('translate-x-full'), 10);
+                
+                document.getElementById('selected-object-name').textContent = object.name;
+                updateUIFromObject();
+                highlightHierarchy(object.uuid);
+            } else {
+                transformControl.detach();
+                inspector.classList.add('translate-x-full');
+                // Hide after transition ends
+                setTimeout(() => { if(!selectedObject) inspector.classList.add('hidden') }, 300);
+                
+                highlightHierarchy(null);
+            }
+        }
+
+        // --- Object Creation ---
+        function addObject(mesh, name) {
+            mesh.name = name + ' ' + objectCounter++;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.position.y = mesh.geometry.parameters.height ? mesh.geometry.parameters.height / 2 : 1;
+            
+            scene.add(mesh);
+            interactableObjects.push(mesh);
+            
+            updateHierarchyUI();
+            selectObject(mesh);
+            
+            showStatus(`Added ${mesh.name}`);
+        }
+
+        function createCube() {
+            const geometry = new THREE.BoxGeometry(2, 2, 2);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: Math.random() * 0xffffff,
+                roughness: 0.4,
+                metalness: 0.2
+            });
+            const cube = new THREE.Mesh(geometry, material);
+            addObject(cube, 'Cube');
+        }
+
+        function createSphere() {
+            const geometry = new THREE.SphereGeometry(1.5, 32, 32);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: Math.random() * 0xffffff,
+                roughness: 0.2,
+                metalness: 0.8
+            });
+            const sphere = new THREE.Mesh(geometry, material);
+            addObject(sphere, 'Sphere');
+        }
+
+        function createDancer() {
+            const dancer = new THREE.Group();
+            dancer.name = 'Neon Dancer ' + objectCounter++;
+            
+            const mat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1, metalness: 0 });
+            
+            // Helper to build procedural skeletal limbs
+            const addLimb = (w, h, d, yOff, parent) => {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+                mesh.position.y = yOff;
+                mesh.castShadow = true;
+                const pivot = new THREE.Group();
+                pivot.add(mesh);
+                parent.add(pivot);
+                return pivot;
+            };
+
+            const hips = new THREE.Group();
+            hips.position.y = 2.5;
+            dancer.add(hips);
+
+            const torso = addLimb(0.8, 1.2, 0.4, 0.6, hips);
+            const head = addLimb(0.5, 0.5, 0.5, 0.25, torso);
+            head.position.y = 1.2;
+            
+            const lArm = addLimb(0.2, 1.0, 0.2, -0.5, torso);
+            lArm.position.set(-0.55, 1.0, 0);
+            
+            const rArm = addLimb(0.2, 1.0, 0.2, -0.5, torso);
+            rArm.position.set(0.55, 1.0, 0);
+
+            const lLeg = addLimb(0.3, 1.2, 0.3, -0.6, hips);
+            lLeg.position.set(-0.25, 0, 0);
+            
+            const rLeg = addLimb(0.3, 1.2, 0.3, -0.6, hips);
+            rLeg.position.set(0.25, 0, 0);
+
+            dancer.userData = { hips, torso, head, lArm, rArm, lLeg, rLeg, phase: Math.random() * Math.PI * 2 };
+            
+            // Add a bounding box for reliable raycasting selection
+            const boxGeo = new THREE.BoxGeometry(2, 4.5, 1);
+            const boxMat = new THREE.MeshBasicMaterial({visible: false});
+            const hitbox = new THREE.Mesh(boxGeo, boxMat);
+            hitbox.position.y = 2.25;
+            dancer.add(hitbox);
+            
+            // Map the hitbox back to the parent dancer
+            hitbox.name = dancer.name;
+            hitbox.userData.parentGroup = dancer;
+            
+            scene.add(dancer);
+            interactableObjects.push(hitbox); 
+            dancers.push(dancer);
+            
+            updateHierarchyUI();
+            selectObject(hitbox); 
+            showStatus('Added Neon Dancer');
+        }
+
+        function createVideoScreen() {
+            initVideoTexture();
+            // 16:9 Aspect Ratio
+            const geometry = new THREE.PlaneGeometry(8, 4.5);
+            const material = new THREE.MeshStandardMaterial({ 
+                map: videoTexture,
+                side: THREE.DoubleSide,
+                emissive: 0xffffff,
+                emissiveMap: videoTexture,
+                emissiveIntensity: 0.5,
+                roughness: 0.2
+            });
+            const screen = new THREE.Mesh(geometry, material);
+            screen.position.y = 4.5 / 2;
+            
+            // Add a frame
+            const frameGeo = new THREE.BoxGeometry(8.2, 4.7, 0.2);
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            const frame = new THREE.Mesh(frameGeo, frameMat);
+            frame.position.z = -0.11;
+            screen.add(frame); // Child object
+            
+            scene.add(screen);
+            interactableObjects.push(screen);
+            
+            updateHierarchyUI();
+            selectObject(screen);
+            showStatus('Added Video Screen');
+        }
+
+        // --- UI Logic ---
+        
+        // Toolbar actions
+        document.getElementById('btn-add-cube').addEventListener('click', createCube);
+        document.getElementById('btn-add-sphere').addEventListener('click', createSphere);
+        document.getElementById('btn-add-dancer').addEventListener('click', createDancer);
+        document.getElementById('btn-add-video').addEventListener('click', createVideoScreen);
+        
+        // Mobile UI Toggles
+        const leftPanel = document.getElementById('left-panel');
+        document.getElementById('btn-toggle-left').addEventListener('click', () => {
+            leftPanel.classList.toggle('-translate-x-full');
+        });
+        document.getElementById('btn-close-left').addEventListener('click', () => {
+            leftPanel.classList.add('-translate-x-full');
+        });
+        document.getElementById('btn-close-right').addEventListener('click', () => {
+            document.getElementById('inspector-panel').classList.add('translate-x-full');
+        });
+
+        document.getElementById('btn-play-video').addEventListener('click', () => {
+            const btn = document.getElementById('btn-play-video');
+            if (videoElement.paused) {
+                const playPromise = videoElement.play();
+                
+                if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                        // Playback started successfully
+                        btn.innerHTML = '<i class="fa-solid fa-pause mr-2"></i>Pause Video';
+                        btn.classList.replace('bg-green-600', 'bg-yellow-600');
+                        btn.classList.replace('hover:bg-green-500', 'hover:bg-yellow-500');
+                    }).catch(error => {
+                        // Catch the AbortError to prevent the unhandled rejection
+                        console.warn("Video playback was aborted or blocked:", error);
+                        showStatus("Playback blocked or loading");
+                    });
+                }
+            } else {
+                videoElement.pause();
+                btn.innerHTML = '<i class="fa-solid fa-play mr-2"></i>Play Video';
+                btn.classList.replace('bg-yellow-600', 'bg-green-600');
+                btn.classList.replace('hover:bg-yellow-500', 'hover:bg-green-500');
+            }
+        });
+
+        document.getElementById('btn-delete').addEventListener('click', () => {
+            if(selectedObject) {
+                scene.remove(selectedObject);
+                
+                // Cleanup animation tracking
+                const dancerIdx = dancers.indexOf(selectedObject);
+                if (dancerIdx > -1) dancers.splice(dancerIdx, 1);
+                
+                // Remove from interactive hitboxes/meshes
+                const interactableToRemove = interactableObjects.find(obj => obj === selectedObject || obj.userData.parentGroup === selectedObject);
+                const index = interactableObjects.indexOf(interactableToRemove);
+                if (index > -1) {
+                    interactableObjects.splice(index, 1);
+                }
+                
+                // Dispose geometry and materials to free memory
+                if (selectedObject.geometry) selectedObject.geometry.dispose();
+                if (selectedObject.material) {
+                    if (Array.isArray(selectedObject.material)) {
+                        selectedObject.material.forEach(m => m.dispose());
+                    } else {
+                        selectedObject.material.dispose();
+                    }
+                }
+                showStatus(`Deleted ${selectedObject.name}`);
+                selectObject(null);
+                updateHierarchyUI();
+            }
+        });
+
+        // Transform Tool Buttons
+        const tools = {
+            'btn-translate': 'translate',
+            'btn-rotate': 'rotate',
+            'btn-scale': 'scale'
+        };
+
+        for (const [id, mode] of Object.entries(tools)) {
+            document.getElementById(id).addEventListener('click', (e) => {
+                setTransformMode(mode, id);
+            });
+        }
+
+        function setTransformMode(mode, activeId) {
+            transformControl.setMode(mode);
+            // Update UI buttons
+            Object.keys(tools).forEach(id => {
+                const btn = document.getElementById(id);
+                if(id === activeId) {
+                    btn.classList.add('bg-blue-600', 'text-white');
+                    btn.classList.remove('hover:bg-gray-700');
+                } else {
+                    btn.classList.remove('bg-blue-600', 'text-white');
+                    btn.classList.add('hover:bg-gray-700');
+                }
+            });
+        }
+
+        // Keyboard shortcuts
+        window.addEventListener('keydown', function (event) {
+            switch (event.key.toLowerCase()) {
+                case 'w': setTransformMode('translate', 'btn-translate'); break;
+                case 'e': setTransformMode('rotate', 'btn-rotate'); break;
+                case 'r': setTransformMode('scale', 'btn-scale'); break;
+                case 'delete': 
+                case 'backspace':
+                    if (selectedObject && !event.target.tagName.match(/INPUT|TEXTAREA/)) {
+                        document.getElementById('btn-delete').click();
+                    }
+                    break;
+            }
+        });
+
+        // Inspector Binding
+        const propInputs = ['pos-x', 'pos-y', 'pos-z', 'rot-x', 'rot-y', 'rot-z', 'scale-x', 'scale-y', 'scale-z'];
+        propInputs.forEach(id => {
+            const el = document.getElementById(`prop-${id}`);
+            el.addEventListener('change', applyUIToObject);
+            el.addEventListener('keydown', (e) => {
+                if(e.key === 'Enter') applyUIToObject();
+            });
+        });
+
+        function updateUIFromObject() {
+            if (!selectedObject) return;
+            
+            const p = selectedObject.position;
+            const r = selectedObject.rotation;
+            const s = selectedObject.scale;
+
+            const format = val => parseFloat(val.toFixed(3));
+
+            document.getElementById('prop-pos-x').value = format(p.x);
+            document.getElementById('prop-pos-y').value = format(p.y);
+            document.getElementById('prop-pos-z').value = format(p.z);
+
+            document.getElementById('prop-rot-x').value = format(THREE.MathUtils.radToDeg(r.x));
+            document.getElementById('prop-rot-y').value = format(THREE.MathUtils.radToDeg(r.y));
+            document.getElementById('prop-rot-z').value = format(THREE.MathUtils.radToDeg(r.z));
+
+            document.getElementById('prop-scale-x').value = format(s.x);
+            document.getElementById('prop-scale-y').value = format(s.y);
+            document.getElementById('prop-scale-z').value = format(s.z);
+        }
+
+        function applyUIToObject() {
+            if (!selectedObject) return;
+
+            const getVal = id => parseFloat(document.getElementById(`prop-${id}`).value) || 0;
+
+            selectedObject.position.set(getVal('pos-x'), getVal('pos-y'), getVal('pos-z'));
+            
+            selectedObject.rotation.set(
+                THREE.MathUtils.degToRad(getVal('rot-x')),
+                THREE.MathUtils.degToRad(getVal('rot-y')),
+                THREE.MathUtils.degToRad(getVal('rot-z'))
+            );
+            
+            selectedObject.scale.set(getVal('scale-x'), getVal('scale-y'), getVal('scale-z'));
+        }
+
+        // Hierarchy UI
+        function updateHierarchyUI() {
+            const list = document.getElementById('hierarchy-list');
+            list.innerHTML = '';
+            
+            // Map over original groups if they exist
+            const sceneObjects = interactableObjects.map(obj => obj.userData.parentGroup || obj);
+            
+            sceneObjects.forEach(obj => {
+                const div = document.createElement('div');
+                div.className = 'hierarchy-item flex items-center px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 rounded cursor-pointer transition-colors';
+                div.dataset.uuid = obj.uuid;
+                
+                let icon = 'fa-cube';
+                if(obj.name.includes('Sphere')) icon = 'fa-circle';
+                if(obj.name.includes('Video')) icon = 'fa-video';
+                if(obj.name.includes('Dancer')) icon = 'fa-person-running text-purple-400';
+                
+                div.innerHTML = `<i class="fa-solid ${icon} w-5 opacity-70"></i> <span class="truncate">${obj.name}</span>`;
+                
+                div.addEventListener('click', () => {
+                    selectObject(obj);
+                });
+                
+                list.appendChild(div);
+            });
+            
+            if (selectedObject) highlightHierarchy(selectedObject.uuid);
+        }
+
+        function highlightHierarchy(uuid) {
+            const items = document.querySelectorAll('.hierarchy-item');
+            items.forEach(item => {
+                if (item.dataset.uuid === uuid) {
+                    item.classList.add('bg-blue-900', 'text-white');
+                    item.classList.remove('hover:bg-gray-700');
+                } else {
+                    item.classList.remove('bg-blue-900', 'text-white');
+                    item.classList.add('hover:bg-gray-700');
+                }
+            });
+        }
+
+        function showStatus(msg) {
+            document.getElementById('status-msg').textContent = msg;
+            setTimeout(() => {
+                if (document.getElementById('status-msg').textContent === msg) {
+                    document.getElementById('status-msg').textContent = 'Ready';
+                }
+            }, 3000);
+        }
+
+        // --- Window Resize ---
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            orbit.update();
+            
+            // Animate Dancers
+            const time = performance.now() * 0.005;
+            dancers.forEach(dancer => {
+                const { hips, torso, head, lArm, rArm, lLeg, rLeg, phase } = dancer.userData;
+                const t = time + phase;
+                
+                // Breakdance Shuffle Procedural Animation
+                hips.position.y = 2.5 + Math.abs(Math.sin(t * 2)) * 0.4;
+                hips.rotation.y = Math.sin(t * 0.5) * 0.6;
+                torso.rotation.z = Math.sin(t) * 0.2;
+                head.rotation.y = Math.sin(t * 0.25) * 0.5;
+                
+                lArm.rotation.x = Math.sin(t * 2) * 1.5;
+                lArm.rotation.z = 0.3;
+                rArm.rotation.x = -Math.sin(t * 2) * 1.5;
+                rArm.rotation.z = -0.3;
+                
+                lLeg.rotation.x = Math.sin(t * 2) * 1.2;
+                rLeg.rotation.x = -Math.sin(t * 2) * 1.2;
+            });
+
+            // Use effect composer instead of standard renderer for outline glowing
+            composer.render();
+        }
+
+        // Initial setup
+        createVideoScreen(); // Start with a video screen in the scene
+        animate();
+
+    </script>
+</body>
+</html>

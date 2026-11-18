@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Video Sandbox Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Custom scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #2d3748; }
+        ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #718096; }
+
+        input[type="number"]::-webkit-inner-spin-button, 
+        input[type="number"]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+
+        #shader-editor {
+            font-family: 'Courier New', Courier, monospace;
+            white-space: pre;
+            tab-size: 4;
+        }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body class="text-gray-200">
+
+    <video id="source-video" loop muted crossorigin="anonymous" playsinline style="display:none">
+        <source src="ScreenRecording_11-16-2026 20-37-57_1.mp4" type="video/mp4">
+    </video>
+
+    <div id="canvas-container"></div>
+
+    <div id="ui-layer">
+        
+        <!-- Top Toolbar -->
+        <div class="pointer-events-auto bg-gray-900 border-b border-gray-700 p-2 flex items-center justify-between shadow-lg z-30">
+            <div class="flex items-center space-x-2 md:space-x-4">
+                <button id="btn-toggle-left" class="md:hidden px-3 py-1.5 bg-gray-800 text-gray-300 hover:text-white rounded border border-gray-700">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <div class="hidden md:block text-lg font-bold text-blue-400 px-4 border-r border-gray-700">
+                    <i class="fa-solid fa-cube mr-2"></i>SceneCrafter
+                </div>
+                
+                <!-- Transform Tools -->
+                <div class="flex bg-gray-800 rounded-lg p-1 space-x-1">
+                    <button id="btn-translate" class="transform-tool active px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-500 transition-colors" title="Translate (W)">
+                        <i class="fa-solid fa-arrows-up-down-left-right"></i>
+                    </button>
+                    <button id="btn-rotate" class="transform-tool px-3 py-1.5 rounded hover:bg-gray-700 transition-colors" title="Rotate (E)">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                    <button id="btn-scale" class="transform-tool px-3 py-1.5 rounded hover:bg-gray-700 transition-colors" title="Scale (R)">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Add Objects & Actions -->
+            <div class="flex items-center space-x-2 px-2 overflow-x-auto">
+                <button id="btn-play-video" class="px-3 py-1.5 bg-green-600 hover:bg-green-500 rounded text-sm font-medium transition-colors shadow-md whitespace-nowrap">
+                    <i class="fa-solid fa-play mr-1"></i> Video
+                </button>
+                <div class="h-6 w-px bg-gray-700 mx-1"></div>
+                <button id="btn-add-cube" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm transition-colors border border-gray-600 whitespace-nowrap">
+                    + Cube
+                </button>
+                <button id="btn-add-dancer" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-sm transition-colors border border-purple-500 text-white whitespace-nowrap">
+                    + Dancer
+                </button>
+                <button id="btn-add-city" class="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 rounded text-sm transition-colors border border-orange-500 text-white font-bold whitespace-nowrap" title="Procedurally generate a 1x1 mi city grid">
+                    <i class="fa-solid fa-city mr-1"></i> Gen City Grid
+                </button>
+                <button id="btn-add-shader" class="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded text-sm transition-colors border border-pink-500 text-white font-bold whitespace-nowrap">
+                    <i class="fa-solid fa-code mr-1"></i> + Shader Object
+                </button>
+                <button id="btn-add-sss" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-sm transition-colors border border-emerald-500 text-white font-bold whitespace-nowrap" title="Add a Subsurface Scattering (Jade) geometry">
+                    <i class="fa-solid fa-gem mr-1"></i> + SSS Object
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Workspace Area -->
+        <div class="flex-1 flex flex-col justify-between relative overflow-hidden">
+            
+            <div class="flex-1 flex justify-between relative">
+                <!-- Left Panel (Hierarchy) -->
+                <div id="left-panel" class="pointer-events-auto w-64 bg-gray-900 border-r border-gray-700 flex flex-col shadow-xl absolute md:relative z-20 h-full transition-transform duration-300 transform -translate-x-full md:translate-x-0">
+                    <div class="p-3 bg-gray-800 border-b border-gray-700 flex justify-between items-center text-sm font-semibold uppercase tracking-wider text-gray-400">
+                        <span>Scene Outline</span>
+                        <button id="btn-close-left" class="md:hidden text-gray-400 hover:text-white"><i class="fa-solid fa-chevron-left"></i></button>
+                    </div>
+                    <div id="hierarchy-list" class="flex-1 overflow-y-auto p-2 space-y-1">
+                        <!-- Hierarchy items -->
+                    </div>
+                </div>
+
+                <!-- Right Panel (Inspector) -->
+                <div id="inspector-panel" class="pointer-events-auto w-72 bg-gray-900 border-l border-gray-700 flex flex-col shadow-xl absolute right-0 md:relative z-20 h-full transition-transform duration-300 transform translate-x-full hidden">
+                    <div class="p-3 bg-gray-800 border-b border-gray-700 flex justify-between items-center text-sm font-semibold uppercase tracking-wider text-gray-400">
+                        <button id="btn-close-right" class="md:hidden text-gray-400 hover:text-white mr-2"><i class="fa-solid fa-chevron-right"></i></button>
+                        <span>Properties</span>
+                        <span id="selected-object-name" class="text-blue-400 text-xs font-bold ml-auto max-w-[100px] truncate">None</span>
+                    </div>
+                    
+                    <div class="p-4 space-y-6 overflow-y-auto flex-1">
+                        <!-- Transform Properties -->
+                        <div>
+                            <h3 class="text-xs text-gray-500 mb-3 uppercase tracking-wider">Transform</h3>
+                            
+                            <!-- Position -->
+                            <div class="mb-3 flex items-center">
+                                <span class="w-12 text-xs text-gray-400">Pos</span>
+                                <div class="flex space-x-1 flex-1">
+                                    <input type="number" id="prop-pos-x" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                    <input type="number" id="prop-pos-y" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                    <input type="number" id="prop-pos-z" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                </div>
+                            </div>
+
+                            <!-- Rotation -->
+                            <div class="mb-3 flex items-center">
+                                <span class="w-12 text-xs text-gray-400">Rot</span>
+                                <div class="flex space-x-1 flex-1">
+                                    <input type="number" id="prop-rot-x" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                    <input type="number" id="prop-rot-y" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                    <input type="number" id="prop-rot-z" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                </div>
+                            </div>
+
+                            <!-- Scale -->
+                            <div class="flex items-center">
+                                <span class="w-12 text-xs text-gray-400">Scl</span>
+                                <div class="flex space-x-1 flex-1">
+                                    <input type="number" id="prop-scale-x" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                    <input type="number" id="prop-scale-y" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                    <input type="number" id="prop-scale-z" class="w-full bg-gray-800 text-white text-xs p-1.5 rounded border border-gray-700 focus:border-blue-500 outline-none">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Effects Properties -->
+                        <div class="border-t border-gray-700 pt-4">
+                            <h3 class="text-xs text-gray-500 mb-3 uppercase tracking-wider">Outline Color</h3>
+                            <div class="flex space-x-3" id="outline-color-picker">
+                                <!-- 5 Selectable Glow Colors -->
+                                <button class="w-6 h-6 rounded-full bg-[#00ffff] border-2 border-white hover:scale-110 transition-transform shadow-[0_0_8px_#00ffff]" data-color="#00ffff" title="Cyan"></button>
+                                <button class="w-6 h-6 rounded-full bg-[#ff00ff] border-2 border-transparent hover:scale-110 transition-transform shadow-[0_0_8px_#ff00ff]" data-color="#ff00ff" title="Neon Pink"></button>
+                                <button class="w-6 h-6 rounded-full bg-[#00ff00] border-2 border-transparent hover:scale-110 transition-transform shadow-[0_0_8px_#00ff00]" data-color="#00ff00" title="Toxic Green"></button>
+                                <button class="w-6 h-6 rounded-full bg-[#0055ff] border-2 border-transparent hover:scale-110 transition-transform shadow-[0_0_8px_#0055ff]" data-color="#0055ff" title="Electric Blue"></button>
+                                <button class="w-6 h-6 rounded-full bg-[#ff2200] border-2 border-transparent hover:scale-110 transition-transform shadow-[0_0_8px_#ff2200]" data-color="#ff2200" title="Lava Red"></button>
+                            </div>
+                        </div>
+
+                        <div id="shader-controls-wrapper" class="hidden border-t border-gray-700 pt-4">
+                            <h3 class="text-xs text-pink-400 mb-3 uppercase tracking-wider"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Shader Active</h3>
+                            <button id="btn-open-shader-editor" class="w-full py-2 bg-pink-900/50 hover:bg-pink-800/80 text-pink-300 rounded text-sm transition-colors border border-pink-800">
+                                Edit Fragment Shader
+                            </button>
+                        </div>
+
+                        <div class="border-t border-gray-700 pt-4 mt-auto">
+                            <button id="btn-delete" class="w-full py-2 bg-red-900/50 hover:bg-red-800/80 text-red-300 rounded text-sm transition-colors border border-red-800">
+                                <i class="fa-solid fa-trash mr-2"></i>Delete Object
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Bottom Shader Editor Dock -->
+            <div id="bottom-shader-dock" class="pointer-events-auto h-64 bg-gray-900 border-t border-gray-700 shadow-[0_-10px_20px_rgba(0,0,0,0.5)] transform translate-y-full transition-transform duration-300 z-30 flex flex-col absolute bottom-0 left-0 w-full">
+                <div class="p-2 bg-gray-800 border-b border-gray-700 flex justify-between items-center">
+                    <div class="text-sm font-bold text-pink-400"><i class="fa-solid fa-code mr-2"></i>Hot-Reload Shader Editor (GLSL)</div>
+                    <div class="space-x-2">
+                        <button id="btn-compile-shader" class="px-4 py-1 bg-pink-600 hover:bg-pink-500 rounded text-white text-sm font-bold shadow">
+                            Compile & Apply (Ctrl+S)
+                        </button>
+                        <button id="btn-close-shader" class="text-gray-400 hover:text-white px-2">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex-1 flex bg-[#1e1e1e]">
+                    <div class="w-8 bg-gray-800 text-gray-500 text-xs text-right p-2 font-mono border-r border-gray-700 select-none">
+                        1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11
+                    </div>
+                    <textarea id="shader-editor" class="flex-1 bg-transparent text-gray-300 p-2 outline-none resize-none" spellcheck="false"></textarea>
+                </div>
+            </div>
+            
+        </div>
+        
+        <!-- Status Bar -->
+        <div class="pointer-events-auto bg-gray-900 border-t border-gray-700 p-1.5 flex justify-between text-xs text-gray-500 z-20 relative">
+            <div>Left Click: Select | Drag: Orbit | W/E/R: Transform Tools</div>
+            <div id="status-msg">Ready</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { OutlinePass } from 'three/addons/postprocessing/OutlinePass.js';
+        import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+        // --- Core Engine Setup ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a10);
+        scene.fog = new THREE.FogExp2(0x0a0a10, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1500);
+        camera.position.set(0, 20, 40);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // --- Uniforms Manager (The "Wrapper" Engine layer) ---
+        const EngineUniforms = {
+            uTime: { value: 0.0 },
+            uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+        };
+        const activeShaderMaterials = []; // Track to update uniforms
+
+        // --- Post-Processing (Outline Shader) ---
+        const composer = new EffectComposer(renderer);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+
+        const outlinePass = new OutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
+        outlinePass.edgeStrength = 5.0;
+        outlinePass.edgeGlow = 1.0;
+        outlinePass.edgeThickness = 1.0;
+        outlinePass.visibleEdgeColor.set('#00ffff'); 
+        composer.addPass(outlinePass);
+
+        const outputPass = new OutputPass();
+        composer.addPass(outputPass);
+
+        // --- Environment Setup ---
+        const ambientLight = new THREE.AmbientLight(0x222233, 2);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffddaa, 2);
+        dirLight.position.set(100, 200, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 500;
+        dirLight.shadow.camera.left = -100;
+        dirLight.shadow.camera.right = 100;
+        dirLight.shadow.camera.top = 100;
+        dirLight.shadow.camera.bottom = -100;
+        scene.add(dirLight);
+
+        const grid = new THREE.GridHelper(200, 200, 0x333344, 0x11111a);
+        scene.add(grid);
+
+        // --- Controls ---
+        const orbit = new OrbitControls(camera, renderer.domElement);
+        orbit.enableDamping = true;
+        orbit.dampingFactor = 0.05;
+        orbit.maxPolarAngle = Math.PI / 2 - 0.01; 
+
+        const transformControl = new TransformControls(camera, renderer.domElement);
+        transformControl.addEventListener('dragging-changed', function (event) {
+            orbit.enabled = !event.value;
+        });
+        transformControl.addEventListener('change', updateUIFromObject);
+        scene.add(transformControl);
+
+        // --- State Management ---
+        const interactableObjects = [];
+        let selectedObject = null;
+        let objectCounter = 1;
+        const dancers = []; 
+
+        // --- Procedural Generation Engine ---
+        class ProceduralEngine {
+            static generateCityMap(parentScene, sizeUnits = 200, blockSize = 10) {
+                const cityGroup = new THREE.Group();
+                cityGroup.name = "GTA City Grid " + objectCounter++;
+                
+                // Ground Plane
+                const groundMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 });
+                const groundGeo = new THREE.PlaneGeometry(sizeUnits, sizeUnits);
+                const ground = new THREE.Mesh(groundGeo, groundMat);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                cityGroup.add(ground);
+
+                // Instanced Mesh for Buildings (Massive Performance gain)
+                // Assuming roughly 70% of the grid is buildings
+                const maxInstances = Math.floor((sizeUnits / blockSize) * (sizeUnits / blockSize) * 4);
+                
+                const bldgGeo = new THREE.BoxGeometry(1, 1, 1);
+                // Move origin to bottom so scale affects height upwards
+                bldgGeo.translate(0, 0.5, 0); 
+                
+                const bldgMat = new THREE.MeshStandardMaterial({ 
+                    color: 0x444455, 
+                    roughness: 0.7, 
+                    metalness: 0.2 
+                });
+                
+                const instancedMesh = new THREE.InstancedMesh(bldgGeo, bldgMat, maxInstances);
+                instancedMesh.castShadow = true;
+                instancedMesh.receiveShadow = true;
+
+                const dummy = new THREE.Object3D();
+                const color = new THREE.Color();
+                let instanceCount = 0;
+
+                const halfSize = sizeUnits / 2;
+                
+                // Procedural Loop: City Blocks
+                for (let x = -halfSize; x < halfSize; x += blockSize) {
+                    for (let z = -halfSize; z < halfSize; z += blockSize) {
+                        
+                        // Leave gaps for main roads
+                        if (Math.abs(x) % (blockSize * 4) === 0 || Math.abs(z) % (blockSize * 4) === 0) continue;
+                        
+                        // Create 1-4 buildings per block
+                        const numBldgs = Math.floor(Math.random() * 4) + 1;
+                        for(let b=0; b<numBldgs; b++) {
+                            const bWidth = 2 + Math.random() * (blockSize - 4);
+                            const bDepth = 2 + Math.random() * (blockSize - 4);
+                            
+                            // Skyscraper logic based on distance from center
+                            const distFromCenter = Math.sqrt(x*x + z*z);
+                            const heightFactor = Math.max(0, 1 - (distFromCenter / halfSize));
+                            const bHeight = 5 + Math.random() * 30 * heightFactor + (Math.random() > 0.9 ? 20 : 0);
+                            
+                            const bX = x + (Math.random() * (blockSize - bWidth)) - (blockSize/2 - bWidth/2);
+                            const bZ = z + (Math.random() * (blockSize - bDepth)) - (blockSize/2 - bDepth/2);
+                            
+                            dummy.position.set(bX, 0, bZ);
+                            dummy.scale.set(bWidth, bHeight, bDepth);
+                            dummy.updateMatrix();
+                            
+                            instancedMesh.setMatrixAt(instanceCount, dummy.matrix);
+                            
+                            // Randomize color slightly (some cyberpunk neon tints)
+                            if (Math.random() > 0.9) {
+                                color.setHSL(Math.random(), 0.8, 0.5); // Neon
+                            } else {
+                                color.setHSL(0, 0, 0.2 + Math.random() * 0.3); // Concrete
+                            }
+                            instancedMesh.setColorAt(instanceCount, color);
+                            
+                            instanceCount++;
+                        }
+                    }
+                }
+                
+                instancedMesh.count = instanceCount;
+                instancedMesh.instanceMatrix.needsUpdate = true;
+                if(instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
+                
+                cityGroup.add(instancedMesh);
+                
+                // Add bounding box for raycasting selection of the whole city
+                const boxGeo = new THREE.BoxGeometry(sizeUnits, 40, sizeUnits);
+                boxGeo.translate(0, 20, 0);
+                const hitbox = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({visible: false}));
+                hitbox.userData.parentGroup = cityGroup;
+                hitbox.name = cityGroup.name;
+                cityGroup.add(hitbox);
+
+                return { group: cityGroup, hitbox: hitbox };
+            }
+        }
+
+        // --- Interaction (Raycasting) ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        renderer.domElement.addEventListener('pointerdown', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(interactableObjects, false);
+
+            if (intersects.length > 0) {
+                if (transformControl.dragging) return;
+                selectObject(intersects[0].object);
+            } else {
+                if(!transformControl.dragging && !transformControl.axis) {
+                    selectObject(null);
+                }
+            }
+        });
+
+        function selectObject(object) {
+            if (object && object.userData.parentGroup) object = object.userData.parentGroup;
+
+            selectedObject = object;
+            
+            const outlines = [...dancers];
+            if (object && !dancers.includes(object)) outlines.push(object);
+            outlinePass.selectedObjects = outlines;
+
+            const inspector = document.getElementById('inspector-panel');
+            const shaderControls = document.getElementById('shader-controls-wrapper');
+
+            if (object) {
+                transformControl.attach(object);
+                inspector.classList.remove('hidden');
+                setTimeout(() => inspector.classList.remove('translate-x-full'), 10);
+                
+                document.getElementById('selected-object-name').textContent = object.name;
+                updateUIFromObject();
+                highlightHierarchy(object.uuid);
+
+                // Show Shader button if it has a custom shader
+                if (object.userData.isShaderObject) {
+                    shaderControls.classList.remove('hidden');
+                    document.getElementById('shader-editor').value = object.userData.fragmentShaderCode;
+                } else {
+                    shaderControls.classList.add('hidden');
+                    document.getElementById('bottom-shader-dock').classList.add('translate-y-full');
+                }
+
+            } else {
+                transformControl.detach();
+                inspector.classList.add('translate-x-full');
+                document.getElementById('bottom-shader-dock').classList.add('translate-y-full');
+                setTimeout(() => { if(!selectedObject) inspector.classList.add('hidden') }, 300);
+                highlightHierarchy(null);
+            }
+        }
+
+        // --- Object Creation ---
+        function addObject(mesh, name) {
+            mesh.name = name + ' ' + objectCounter++;
+            scene.add(mesh);
+            interactableObjects.push(mesh);
+            updateHierarchyUI();
+            selectObject(mesh);
+            showStatus(`Added ${mesh.name}`);
+        }
+
+        function createCube() {
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(2, 2, 2), 
+                new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff, roughness: 0.4 })
+            );
+            mesh.position.y = 1;
+            mesh.castShadow = true;
+            addObject(mesh, 'Cube');
+        }
+
+        const defaultShaderFrag = `uniform float uTime;
+uniform vec2 uResolution;
+varying vec2 vUv;
+
+void main() {
+    vec2 st = gl_FragCoord.xy / uResolution.xy;
+    vec3 color = vec3(0.0);
+    
+    // Procedural Plasma
+    color.r = sin(vUv.x * 10.0 + uTime) * 0.5 + 0.5;
+    color.g = sin(vUv.y * 10.0 + uTime * 1.5) * 0.5 + 0.5;
+    color.b = sin((vUv.x + vUv.y) * 10.0 + uTime * 2.0) * 0.5 + 0.5;
+    
+    gl_FragColor = vec4(color, 1.0);
+}`;
+
+        const defaultShaderVert = `varying vec2 vUv;
+void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+        // SSS Shader Vertex (Passes normals and view pos for lighting)
+        const sssShaderVert = `varying vec3 vNormal;
+varying vec3 vViewPosition;
+void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+}`;
+
+        // SSS Shader Fragment (Fakes subsurface scattering using wrap lighting and backlighting)
+        const sssShaderFrag = `uniform vec2 uResolution;
+uniform float uTime;
+varying vec3 vNormal;
+varying vec3 vViewPosition;
+
+void main() {
+    vec3 normal = normalize(vNormal);
+    vec3 viewDir = normalize(vViewPosition);
+    
+    // Hardcoded directional light for the shader demo
+    vec3 lightDir = normalize(vec3(100.0, 200.0, 50.0)); 
+
+    // 1. Wrap Lighting (Fakes light scattering through the surface)
+    float wrap = 0.6;
+    float diffuse = max(0.0, (dot(normal, lightDir) + wrap) / (1.0 + wrap));
+
+    // 2. Subsurface Fake (Backlighting bleeding through edges/thin parts)
+    vec3 halfVector = normalize(lightDir + normal * 0.3); 
+    float sssAmount = pow(max(0.0, dot(viewDir, -halfVector)), 4.0);
+    
+    // 3. Rim Lighting (Fresnel effect for shiny waxy look)
+    float fresnel = pow(1.0 - max(0.0, dot(viewDir, normal)), 3.0);
+
+    // Combine Colors (Jade Green aesthetics)
+    vec3 baseJade = vec3(0.1, 0.5, 0.3);
+    vec3 sssGlow = vec3(0.7, 1.0, 0.4);
+    
+    vec3 finalColor = baseJade * diffuse;
+    finalColor += sssGlow * sssAmount * 1.2;
+    finalColor += vec3(1.0) * fresnel * 0.3; // white rim
+
+    gl_FragColor = vec4(finalColor, 1.0);
+}`;
+
+        function createShaderObject() {
+            const material = new THREE.ShaderMaterial({
+                uniforms: EngineUniforms,
+                vertexShader: defaultShaderVert,
+                fragmentShader: defaultShaderFrag
+            });
+            
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(2, 64, 64), material);
+            mesh.position.y = 2;
+            
+            // Mark for hot-reloading
+            mesh.userData = {
+                isShaderObject: true,
+                fragmentShaderCode: defaultShaderFrag
+            };
+            
+            activeShaderMaterials.push(material);
+            addObject(mesh, 'Procedural Shader Sphere');
+        }
+
+        function createSSSObject() {
+            const material = new THREE.ShaderMaterial({
+                uniforms: EngineUniforms,
+                vertexShader: sssShaderVert,
+                fragmentShader: sssShaderFrag
+            });
+            
+            // Torus Knot geometry perfectly shows off variable thickness for SSS
+            const mesh = new THREE.Mesh(new THREE.TorusKnotGeometry(1.5, 0.5, 128, 32), material);
+            mesh.position.y = 3;
+            
+            // Mark for hot-reloading so you can edit the jade color!
+            mesh.userData = {
+                isShaderObject: true,
+                fragmentShaderCode: sssShaderFrag
+            };
+            
+            activeShaderMaterials.push(material);
+            addObject(mesh, 'Subsurface Jade Knot');
+        }
+
+        function createDancer() {
+            const dancer = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x050505 });
+            
+            const addLimb = (w, h, d, yOff, parent) => {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+                mesh.position.y = yOff; mesh.castShadow = true;
+                const pivot = new THREE.Group(); pivot.add(mesh); parent.add(pivot);
+                return pivot;
+            };
+
+            const hips = new THREE.Group(); hips.position.y = 2.5; dancer.add(hips);
+            const torso = addLimb(0.8, 1.2, 0.4, 0.6, hips);
+            const head = addLimb(0.5, 0.5, 0.5, 0.25, torso); head.position.y = 1.2;
+            const lArm = addLimb(0.2, 1.0, 0.2, -0.5, torso); lArm.position.set(-0.55, 1.0, 0);
+            const rArm = addLimb(0.2, 1.0, 0.2, -0.5, torso); rArm.position.set(0.55, 1.0, 0);
+            const lLeg = addLimb(0.3, 1.2, 0.3, -0.6, hips); lLeg.position.set(-0.25, 0, 0);
+            const rLeg = addLimb(0.3, 1.2, 0.3, -0.6, hips); rLeg.position.set(0.25, 0, 0);
+
+            dancer.userData = { hips, torso, head, lArm, rArm, lLeg, rLeg, phase: Math.random() * Math.PI };
+            
+            const hitbox = new THREE.Mesh(new THREE.BoxGeometry(2, 4.5, 1), new THREE.MeshBasicMaterial({visible: false}));
+            hitbox.position.y = 2.25; hitbox.userData.parentGroup = dancer; hitbox.name = 'Neon Dancer ' + objectCounter++;
+            dancer.add(hitbox);
+            dancer.name = hitbox.name;
+            
+            scene.add(dancer);
+            interactableObjects.push(hitbox); 
+            dancers.push(dancer);
+            
+            updateHierarchyUI();
+            selectObject(hitbox); 
+        }
+
+        // --- UI Events ---
+        document.getElementById('btn-add-cube').addEventListener('click', createCube);
+        document.getElementById('btn-add-sss').addEventListener('click', createSSSObject);
+        document.getElementById('btn-add-dancer').addEventListener('click', createDancer);
+        document.getElementById('btn-add-shader').addEventListener('click', createShaderObject);
+        
+        document.getElementById('btn-add-city').addEventListener('click', () => {
+            showStatus("Generating 1x1 Mile City Grid...");
+            // Slight timeout to let UI update before heavy gen thread blocks
+            setTimeout(() => {
+                const { group, hitbox } = ProceduralEngine.generateCityMap(scene, 300, 15);
+                scene.add(group);
+                interactableObjects.push(hitbox);
+                updateHierarchyUI();
+                selectObject(hitbox);
+                showStatus("City Grid Generated (InstancedMesh)");
+            }, 50);
+        });
+
+        document.getElementById('btn-open-shader-editor').addEventListener('click', () => {
+            document.getElementById('bottom-shader-dock').classList.remove('translate-y-full');
+        });
+        document.getElementById('btn-close-shader').addEventListener('click', () => {
+            document.getElementById('bottom-shader-dock').classList.add('translate-y-full');
+        });
+
+        // Outline Color Picker Logic
+        document.querySelectorAll('#outline-color-picker button').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const colorHex = e.target.dataset.color;
+                
+                // Update Three.js Outline Pass
+                outlinePass.visibleEdgeColor.set(colorHex);
+                outlinePass.hiddenEdgeColor.set(colorHex);
+                
+                // Update UI active state (Border indicator)
+                document.querySelectorAll('#outline-color-picker button').forEach(b => b.classList.remove('border-white'));
+                document.querySelectorAll('#outline-color-picker button').forEach(b => b.classList.add('border-transparent'));
+                e.target.classList.remove('border-transparent');
+                e.target.classList.add('border-white');
+            });
+        });
+
+        // Hot Reload Logic
+        document.getElementById('btn-compile-shader').addEventListener('click', compileShader);
+        document.getElementById('shader-editor').addEventListener('keydown', (e) => {
+            if(e.key === 'Tab') {
+                e.preventDefault();
+                document.execCommand('insertText', false, '    ');
+            }
+            if(e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                compileShader();
+            }
+        });
+
+        function compileShader() {
+            if (!selectedObject || !selectedObject.userData.isShaderObject) return;
+            
+            const code = document.getElementById('shader-editor').value;
+            selectedObject.userData.fragmentShaderCode = code;
+            
+            try {
+                // Hot swap the shader
+                selectedObject.material.fragmentShader = code;
+                selectedObject.material.needsUpdate = true;
+                showStatus("Shader Compiled Successfully!");
+            } catch (err) {
+                console.error("Shader Error:", err);
+                showStatus("Shader Compilation Failed (See Console)");
+            }
+        }
+
+        // Mobile UI Toggles
+        const leftPanel = document.getElementById('left-panel');
+        document.getElementById('btn-toggle-left').addEventListener('click', () => leftPanel.classList.toggle('-translate-x-full'));
+        document.getElementById('btn-close-left').addEventListener('click', () => leftPanel.classList.add('-translate-x-full'));
+        document.getElementById('btn-close-right').addEventListener('click', () => document.getElementById('inspector-panel').classList.add('translate-x-full'));
+
+        document.getElementById('btn-delete').addEventListener('click', () => {
+            if(selectedObject) {
+                scene.remove(selectedObject);
+                if (selectedObject.userData.isShaderObject) {
+                    const idx = activeShaderMaterials.indexOf(selectedObject.material);
+                    if(idx > -1) activeShaderMaterials.splice(idx, 1);
+                }
+                const interactableToRemove = interactableObjects.find(obj => obj === selectedObject || obj.userData.parentGroup === selectedObject);
+                const index = interactableObjects.indexOf(interactableToRemove);
+                if (index > -1) interactableObjects.splice(index, 1);
+                
+                selectObject(null);
+                updateHierarchyUI();
+            }
+        });
+
+        // Transform Tool Buttons
+        const tools = {'btn-translate': 'translate', 'btn-rotate': 'rotate', 'btn-scale': 'scale'};
+        for (const [id, mode] of Object.entries(tools)) {
+            document.getElementById(id).addEventListener('click', () => setTransformMode(mode, id));
+        }
+
+        function setTransformMode(mode, activeId) {
+            transformControl.setMode(mode);
+            Object.keys(tools).forEach(id => {
+                const btn = document.getElementById(id);
+                if(id === activeId) {
+                    btn.classList.add('bg-blue-600', 'text-white'); btn.classList.remove('hover:bg-gray-700');
+                } else {
+                    btn.classList.remove('bg-blue-600', 'text-white'); btn.classList.add('hover:bg-gray-700');
+                }
+            });
+        }
+
+        window.addEventListener('keydown', function (event) {
+            if (event.target.tagName.match(/INPUT|TEXTAREA/)) return;
+            switch (event.key.toLowerCase()) {
+                case 'w': setTransformMode('translate', 'btn-translate'); break;
+                case 'e': setTransformMode('rotate', 'btn-rotate'); break;
+                case 'r': setTransformMode('scale', 'btn-scale'); break;
+                case 'delete': case 'backspace': if (selectedObject) document.getElementById('btn-delete').click(); break;
+            }
+        });
+
+        const propInputs = ['pos-x', 'pos-y', 'pos-z', 'rot-x', 'rot-y', 'rot-z', 'scale-x', 'scale-y', 'scale-z'];
+        propInputs.forEach(id => {
+            const el = document.getElementById(`prop-${id}`);
+            el.addEventListener('change', applyUIToObject);
+            el.addEventListener('keydown', (e) => { if(e.key === 'Enter') applyUIToObject(); });
+        });
+
+        function updateUIFromObject() {
+            if (!selectedObject) return;
+            const p = selectedObject.position, r = selectedObject.rotation, s = selectedObject.scale, f = v => parseFloat(v.toFixed(3));
+            document.getElementById('prop-pos-x').value = f(p.x); document.getElementById('prop-pos-y').value = f(p.y); document.getElementById('prop-pos-z').value = f(p.z);
+            document.getElementById('prop-rot-x').value = f(THREE.MathUtils.radToDeg(r.x)); document.getElementById('prop-rot-y').value = f(THREE.MathUtils.radToDeg(r.y)); document.getElementById('prop-rot-z').value = f(THREE.MathUtils.radToDeg(r.z));
+            document.getElementById('prop-scale-x').value = f(s.x); document.getElementById('prop-scale-y').value = f(s.y); document.getElementById('prop-scale-z').value = f(s.z);
+        }
+
+        function applyUIToObject() {
+            if (!selectedObject) return;
+            const get = id => parseFloat(document.getElementById(`prop-${id}`).value) || 0;
+            selectedObject.position.set(get('pos-x'), get('pos-y'), get('pos-z'));
+            selectedObject.rotation.set(THREE.MathUtils.degToRad(get('rot-x')), THREE.MathUtils.degToRad(get('rot-y')), THREE.MathUtils.degToRad(get('rot-z')));
+            selectedObject.scale.set(get('scale-x'), get('scale-y'), get('scale-z'));
+        }
+
+        function updateHierarchyUI() {
+            const list = document.getElementById('hierarchy-list');
+            list.innerHTML = '';
+            const sceneObjects = interactableObjects.map(obj => obj.userData.parentGroup || obj);
+            sceneObjects.forEach(obj => {
+                const div = document.createElement('div');
+                div.className = 'hierarchy-item flex items-center px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 rounded cursor-pointer transition-colors';
+                div.dataset.uuid = obj.uuid;
+                
+                let icon = 'fa-cube';
+                if(obj.name.includes('City')) icon = 'fa-city text-orange-400';
+                if(obj.name.includes('Shader')) icon = 'fa-wand-magic-sparkles text-pink-400';
+                if(obj.name.includes('Dancer')) icon = 'fa-person-running text-purple-400';
+                
+                div.innerHTML = `<i class="fa-solid ${icon} w-5 opacity-70"></i> <span class="truncate">${obj.name}</span>`;
+                div.addEventListener('click', () => selectObject(obj));
+                list.appendChild(div);
+            });
+            if (selectedObject) highlightHierarchy(selectedObject.uuid);
+        }
+
+        function highlightHierarchy(uuid) {
+            document.querySelectorAll('.hierarchy-item').forEach(item => {
+                if (item.dataset.uuid === uuid) { item.classList.add('bg-blue-900', 'text-white'); item.classList.remove('hover:bg-gray-700'); } 
+                else { item.classList.remove('bg-blue-900', 'text-white'); item.classList.add('hover:bg-gray-700'); }
+            });
+        }
+
+        function showStatus(msg) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            setTimeout(() => { if (el.textContent === msg) el.textContent = 'Ready'; }, 3000);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+            EngineUniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+        }, false);
+
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            orbit.update();
+            
+            const time = clock.getElapsedTime();
+            EngineUniforms.uTime.value = time; // Feed procedural engine uniforms
+            
+            dancers.forEach(dancer => {
+                const { hips, torso, head, lArm, rArm, lLeg, rLeg, phase } = dancer.userData;
+                const t = time * 5.0 + phase; 
+                hips.position.y = 2.5 + Math.abs(Math.sin(t * 2)) * 0.4;
+                hips.rotation.y = Math.sin(t * 0.5) * 0.6;
+                torso.rotation.z = Math.sin(t) * 0.2;
+                head.rotation.y = Math.sin(t * 0.25) * 0.5;
+                lArm.rotation.x = Math.sin(t * 2) * 1.5; lArm.rotation.z = 0.3;
+                rArm.rotation.x = -Math.sin(t * 2) * 1.5; rArm.rotation.z = -0.3;
+                lLeg.rotation.x = Math.sin(t * 2) * 1.2; rLeg.rotation.x = -Math.sin(t * 2) * 1.2;
+            });
+
+            composer.render();
+        }
+
+        animate();
+    </script>
+</body>
+</html>
