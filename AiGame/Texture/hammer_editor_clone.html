@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrimeWars Hammer Editor Clone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1e1e1e; /* Classic dark editor theme */
+            color: #d4d4d4;
+            margin: 0;
+            overflow: hidden;
+            user-select: none;
+        }
+        
+        /* Layout Grid */
+        .editor-layout {
+            display: grid;
+            grid-template-columns: 48px 1fr 250px;
+            grid-template-rows: 40px 1fr 24px;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Top Menu Bar */
+        .menu-bar {
+            grid-column: 1 / -1;
+            background-color: #2d2d2d;
+            border-bottom: 1px solid #111;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 13px;
+        }
+
+        .menu-item {
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .menu-item:hover {
+            background-color: #3e3e42;
+        }
+
+        /* Tool Palette (Left) */
+        .tool-palette {
+            background-color: #252526;
+            border-right: 1px solid #111;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 10px;
+            gap: 5px;
+        }
+
+        .tool-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.1s;
+            color: #858585;
+            border: 1px solid transparent;
+        }
+
+        .tool-btn:hover {
+            background-color: #3e3e42;
+            color: #fff;
+        }
+
+        .tool-btn.active {
+            background-color: #094771;
+            color: #fff;
+            border-color: #007fd4;
+        }
+
+        /* Right Panel (Properties) */
+        .property-panel {
+            background-color: #252526;
+            border-left: 1px solid #111;
+            padding: 10px;
+            font-size: 12px;
+            overflow-y: auto;
+        }
+
+        .panel-header {
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #9cdcfe;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #333;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            grid-column: 1 / -1;
+            background-color: #007acc;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            font-size: 12px;
+            justify-content: space-between;
+        }
+
+        /* 4-Way Split Viewport Area */
+        .viewport-container {
+            position: relative;
+            background-color: #1e1e1e;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* We will overlay a grid of divs over the ThreeJS canvas to act as interactive zones & labels */
+        .view-grid {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: grid;
+            grid-template-columns: 50% 50%;
+            grid-template-rows: 50% 50%;
+            pointer-events: none; /* Let clicks pass through to canvas, we manage controls in JS */
+        }
+
+        .view-pane {
+            border: 1px solid #333;
+            position: relative;
+        }
+
+        .view-label {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #d4d4d4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            pointer-events: auto; /* Allow clicking the label if needed */
+        }
+
+        /* The actual ThreeJS Canvas */
+        #editor-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="editor-layout">
+    
+    <!-- Top Menu -->
+    <div class="menu-bar">
+        <span class="font-bold text-blue-400 mr-4">CrimeWars Hammer</span>
+        <div class="menu-item">File</div>
+        <div class="menu-item">Edit</div>
+        <div class="menu-item">Map</div>
+        <div class="menu-item">View</div>
+        <div class="menu-item">Tools</div>
+        <div class="menu-item">Window</div>
+    </div>
+
+    <!-- Left Tool Palette -->
+    <div class="tool-palette">
+        <div class="tool-btn active" title="Selection Tool (Shift+S)">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+        </div>
+        <div class="tool-btn" title="Magnify">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
+        </div>
+        <div class="tool-btn" title="Camera">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        </div>
+        <div class="tool-btn" title="Entity Tool (Shift+E)">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+        </div>
+        <div class="tool-btn" title="Block Tool (Shift+B)">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+        </div>
+        <div class="tool-btn" title="Apply Texture (Shift+T)">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+        </div>
+    </div>
+
+    <!-- Main Viewport Area -->
+    <div class="viewport-container" id="viewport-container">
+        <!-- The ThreeJS Canvas -->
+        <canvas id="editor-canvas"></canvas>
+        
+        <!-- UI Overlays for views -->
+        <div class="view-grid" id="view-grid">
+            <div class="view-pane"><div class="view-label">Top (X/Y)</div></div>
+            <div class="view-pane"><div class="view-label">3D Textured</div></div>
+            <div class="view-pane"><div class="view-label">Front (Y/Z)</div></div>
+            <div class="view-pane"><div class="view-label">Side (X/Z)</div></div>
+        </div>
+    </div>
+
+    <!-- Right Properties Panel -->
+    <div class="property-panel">
+        <div class="panel-header">VisGroups</div>
+        <div class="mb-4">
+            <label class="flex items-center gap-2 mb-1"><input type="checkbox" checked class="accent-blue-500"> Auto</label>
+            <label class="flex items-center gap-2 mb-1 ml-4"><input type="checkbox" checked class="accent-blue-500"> World Geometry</label>
+            <label class="flex items-center gap-2 mb-1 ml-4"><input type="checkbox" checked class="accent-blue-500"> Entities</label>
+            <label class="flex items-center gap-2 mb-1 ml-4"><input type="checkbox" checked class="accent-blue-500"> CrimeWars Props</label>
+        </div>
+
+        <div class="panel-header mt-6">Object Properties</div>
+        <div class="space-y-2">
+            <div>
+                <span class="text-gray-400">Class:</span> 
+                <select class="w-full bg-[#3c3c3c] border border-[#555] rounded p-1 mt-1 text-white text-xs">
+                    <option>worldspawn</option>
+                    <option>prop_static</option>
+                    <option>info_player_start</option>
+                </select>
+            </div>
+            <div>
+                <span class="text-gray-400">Targetname:</span>
+                <input type="text" class="w-full bg-[#3c3c3c] border border-[#555] rounded p-1 mt-1 text-white text-xs" value="map_origin">
+            </div>
+            <button class="w-full bg-[#094771] hover:bg-[#007fd4] text-white py-1.5 rounded mt-2 border border-[#111]">Apply</button>
+        </div>
+
+        <div class="panel-header mt-6">Active Texture</div>
+        <div class="w-full h-32 bg-gray-700 rounded border border-gray-600 flex items-center justify-center relative overflow-hidden mt-2">
+            <div class="absolute inset-0 opacity-20" style="background-image: repeating-linear-gradient(45deg, #000 0, #000 10%, transparent 10%, transparent 50%); background-size: 20px 20px;"></div>
+            <span class="z-10 font-bold tracking-widest">DEV_MEASURE</span>
+        </div>
+        <button class="w-full bg-[#3c3c3c] hover:bg-[#4c4c4c] text-white py-1.5 rounded mt-2 border border-[#111]">Browse...</button>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div>For Help, press F1</div>
+        <div class="flex gap-4">
+            <span>Snap: On</span>
+            <span>Grid: 64</span>
+            <span id="coord-display">x: 0 y: 0 z: 0</span>
+        </div>
+    </div>
+
+</div>
+
+<!-- Load Three.js and OrbitControls -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    // --- Hammer Editor Clone Logic ---
+
+    // 1. Core Setup
+    const container = document.getElementById('viewport-container');
+    const canvas = document.getElementById('editor-canvas');
+    
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000); // Pitch black for orthographic views
+
+    // Layer System for Hammer Visualization:
+    // Layer 0: 3D Geometry (Textured/Solid)
+    // Layer 1: 2D Geometry (Wireframes & Grids)
+    const LAYER_3D = 0;
+    const LAYER_2D = 1;
+
+    // 2. Camera Configurations
+    const frustumSize = 1000;
+    const views = [
+        { // Top (X/Y)
+            left: 0, bottom: 0.5, width: 0.5, height: 0.5,
+            camera: new THREE.OrthographicCamera(-frustumSize/2, frustumSize/2, frustumSize/2, -frustumSize/2, 1, 4000),
+            setup: (cam) => {
+                cam.position.set(0, 1000, 0);
+                cam.lookAt(0, 0, 0);
+                cam.layers.disable(LAYER_3D);
+                cam.layers.enable(LAYER_2D); // Only see wireframes
+            }
+        },
+        { // 3D Textured Perspective
+            left: 0.5, bottom: 0.5, width: 0.5, height: 0.5,
+            camera: new THREE.PerspectiveCamera(60, 1, 1, 4000),
+            setup: (cam) => {
+                cam.position.set(300, 300, 400);
+                cam.lookAt(0, 0, 0);
+                cam.layers.enable(LAYER_3D);
+                cam.layers.disable(LAYER_2D); // Only see solids
+            }
+        },
+        { // Front (Y/Z) (Actually X/Z in Three.js depending on orientation, we use X/Y/Z mapping)
+            left: 0, bottom: 0, width: 0.5, height: 0.5,
+            camera: new THREE.OrthographicCamera(-frustumSize/2, frustumSize/2, frustumSize/2, -frustumSize/2, 1, 4000),
+            setup: (cam) => {
+                cam.position.set(0, 0, 1000);
+                cam.lookAt(0, 0, 0);
+                cam.layers.disable(LAYER_3D);
+                cam.layers.enable(LAYER_2D);
+            }
+        },
+        { // Side (X/Z)
+            left: 0.5, bottom: 0, width: 0.5, height: 0.5,
+            camera: new THREE.OrthographicCamera(-frustumSize/2, frustumSize/2, frustumSize/2, -frustumSize/2, 1, 4000),
+            setup: (cam) => {
+                cam.position.set(1000, 0, 0);
+                cam.lookAt(0, 0, 0);
+                cam.layers.disable(LAYER_3D);
+                cam.layers.enable(LAYER_2D);
+            }
+        }
+    ];
+
+    // Initialize cameras
+    views.forEach(view => view.setup(view.camera));
+
+    // Add OrbitControls to the 3D viewport only
+    // Note: In a real editor, input is routed based on mouse position. 
+    // Here we constrain OrbitControls to the top-right quadrant element DOM conceptually, 
+    // but practically we attach it to the whole canvas and let the user pan the scene globally.
+    const controls3D = new THREE.OrbitControls(views[1].camera, renderer.domElement);
+    controls3D.enableDamping = true;
+    controls3D.dampingFactor = 0.05;
+
+    // 3. Lighting (Only affects Layer 0)
+    const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+    ambientLight.layers.set(LAYER_3D);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(500, 1000, 500);
+    dirLight.layers.set(LAYER_3D);
+    scene.add(dirLight);
+
+    // 4. Map Elements (Brushes)
+    const brushes = [];
+    const solidMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x888888, 
+        roughness: 0.7,
+        polygonOffset: true,
+        polygonOffsetFactor: 1, // Prevent Z-fighting with wireframe in some setups
+        polygonOffsetUnits: 1
+    });
+    
+    // Cyan wireframe for unselected brushes in 2D views
+    const wireframeMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff });
+
+    function createHammerBrush(width, height, depth, x, y, z, colorOverride = null) {
+        const geometry = new THREE.BoxGeometry(width, height, depth);
+        const group = new THREE.Group();
+        group.position.set(x, y, z);
+
+        // 3D Solid Mesh (Layer 0)
+        let mat = solidMaterial;
+        if(colorOverride) {
+            mat = new THREE.MeshStandardMaterial({color: colorOverride, roughness: 0.7});
+        }
+        const solid = new THREE.Mesh(geometry, mat);
+        solid.layers.set(LAYER_3D);
+        group.add(solid);
+
+        // 2D Wireframe Mesh (Layer 1)
+        const edges = new THREE.EdgesGeometry(geometry);
+        const wireframe = new THREE.LineSegments(edges, wireframeMaterial);
+        wireframe.layers.set(LAYER_2D);
+        group.add(wireframe);
+
+        scene.add(group);
+        brushes.push(group);
+    }
+
+    // Build a sample map
+    createHammerBrush(800, 32, 800, 0, -16, 0); // Floor
+    createHammerBrush(800, 256, 32, 0, 128, -384); // North Wall
+    createHammerBrush(800, 256, 32, 0, 128, 384); // South Wall
+    createHammerBrush(32, 256, 736, -384, 128, 0); // West Wall
+    createHammerBrush(32, 256, 736, 384, 128, 0); // East Wall
+
+    // A prop / inner block (e.g. CrimeWars vault)
+    createHammerBrush(128, 128, 128, 0, 64, 0, 0xff5500); 
+
+    // 5. Grids for 2D Views (Layer 1)
+    const gridSize = 1000;
+    const gridDivisions = 31.25; // roughly 32 unit snap
+    
+    // Top Grid (XZ Plane)
+    const gridTop = new THREE.GridHelper(gridSize, gridDivisions, 0x444444, 0x222222);
+    gridTop.layers.set(LAYER_2D);
+    scene.add(gridTop);
+
+    // Front Grid (XY Plane)
+    const gridFront = new THREE.GridHelper(gridSize, gridDivisions, 0x444444, 0x222222);
+    gridFront.rotation.x = Math.PI / 2;
+    gridFront.layers.set(LAYER_2D);
+    scene.add(gridFront);
+
+    // Side Grid (YZ Plane)
+    const gridSide = new THREE.GridHelper(gridSize, gridDivisions, 0x444444, 0x222222);
+    gridSide.rotation.z = Math.PI / 2;
+    gridSide.layers.set(LAYER_2D);
+    scene.add(gridSide);
+
+
+    // 6. Resize Handling & Quad-Viewport Rendering
+    function updateSize() {
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        
+        if (canvas.width !== width || canvas.height !== height) {
+            renderer.setSize(width, height, false);
+            
+            // Update 3D Camera Aspect
+            views[1].camera.aspect = (width * 0.5) / (height * 0.5);
+            views[1].camera.updateProjectionMatrix();
+
+            // Update Ortho Cameras
+            const aspect = (width * 0.5) / (height * 0.5);
+            const viewSize = frustumSize;
+            
+            [0, 2, 3].forEach(idx => {
+                const cam = views[idx].camera;
+                cam.left = -viewSize * aspect / 2;
+                cam.right = viewSize * aspect / 2;
+                cam.top = viewSize / 2;
+                cam.bottom = -viewSize / 2;
+                cam.updateProjectionMatrix();
+            });
+        }
+    }
+
+    function render() {
+        updateSize();
+        controls3D.update();
+
+        const width = canvas.width;
+        const height = canvas.height;
+
+        renderer.setScissorTest(true);
+
+        views.forEach(view => {
+            const viewLeft = Math.floor(width * view.left);
+            const viewBottom = Math.floor(height * view.bottom);
+            const viewWidth = Math.floor(width * view.width);
+            const viewHeight = Math.floor(height * view.height);
+
+            // Special background for 3D view (a bit lighter to distinguish from 2D views)
+            if(view === views[1]) {
+                renderer.setClearColor(0x1a1a1a);
+            } else {
+                renderer.setClearColor(0x000000);
+            }
+
+            renderer.setViewport(viewLeft, viewBottom, viewWidth, viewHeight);
+            renderer.setScissor(viewLeft, viewBottom, viewWidth, viewHeight);
+            
+            renderer.render(scene, view.camera);
+        });
+
+        requestAnimationFrame(render);
+    }
+
+    // Start Editor Loop
+    render();
+
+    // Toolbar Interaction (Visual only for prototype)
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+        });
+    });
+
+</script>
+</body>
+</html>

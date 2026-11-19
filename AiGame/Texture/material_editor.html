@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrimeWars Material Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            margin: 0;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e1e1e; }
+        ::-webkit-scrollbar-thumb { background: #424242; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4f4f4f; }
+
+        /* Range Slider Styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #007fd4;
+            cursor: pointer;
+            margin-top: -5px;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #3c3c3c;
+            border-radius: 2px;
+        }
+
+        .panel {
+            background-color: #252526;
+            border: 1px solid #111;
+        }
+        
+        .header-bar {
+            background-color: #2d2d2d;
+            border-bottom: 1px solid #111;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header-bar flex items-center justify-between px-4 py-2 text-sm shadow-md z-10">
+    <div class="flex items-center gap-4">
+        <span class="font-bold text-red-500 uppercase tracking-wider">CrimeWars Surface Gen</span>
+        <div class="flex gap-2">
+            <button class="px-3 py-1 hover:bg-[#3e3e42] rounded transition">File</button>
+            <button class="px-3 py-1 hover:bg-[#3e3e42] rounded transition">Edit</button>
+            <button class="px-3 py-1 hover:bg-[#3e3e42] rounded transition">Export .VMT</button>
+        </div>
+    </div>
+    <div class="text-xs text-gray-500">Procedural Material Graph v1.0</div>
+</div>
+
+<!-- Main Workspace -->
+<div class="flex flex-1 overflow-hidden">
+    
+    <!-- Left Sidebar: Presets & Texture Maps -->
+    <div class="panel w-64 flex flex-col p-4 overflow-y-auto">
+        <h2 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-700 pb-2">Presets</h2>
+        <div class="flex flex-col gap-2 mb-6 text-sm">
+            <button class="preset-btn bg-[#3c3c3c] hover:bg-[#4c4c4c] text-left px-3 py-2 rounded border-l-4 border-gray-500 transition" data-preset="asphalt">Gritty Asphalt</button>
+            <button class="preset-btn bg-[#3c3c3c] hover:bg-[#4c4c4c] text-left px-3 py-2 rounded border-l-4 border-red-500 transition" data-preset="blood">Bloodstained Concrete</button>
+            <button class="preset-btn bg-[#3c3c3c] hover:bg-[#4c4c4c] text-left px-3 py-2 rounded border-l-4 border-yellow-600 transition" data-preset="rust">Rusted Metal</button>
+        </div>
+
+        <h2 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-700 pb-2">Generative Maps</h2>
+        <div class="space-y-4">
+            <div>
+                <label class="text-xs mb-1 block">Pattern Type</label>
+                <select id="pattern-type" class="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded p-1.5 text-sm text-white focus:outline-none focus:border-blue-500">
+                    <option value="noise">Static Noise</option>
+                    <option value="grid">Tile Grid</option>
+                    <option value="cellular">Cellular</option>
+                </select>
+            </div>
+            <div>
+                <label class="text-xs mb-1 block flex justify-between">
+                    <span>Noise Scale</span>
+                    <span id="scale-val" class="text-blue-400">50</span>
+                </label>
+                <input type="range" id="noise-scale" min="1" max="100" value="50">
+            </div>
+            <button id="generate-tex-btn" class="w-full bg-[#094771] hover:bg-[#007fd4] text-white py-2 rounded text-sm font-medium transition shadow-lg">Generate Base Map</button>
+        </div>
+        
+        <div class="mt-4 flex-1">
+            <label class="text-xs mb-2 block text-gray-400">2D Preview (Albedo)</label>
+            <canvas id="texture-canvas" width="256" height="256" class="w-full aspect-square bg-black border border-[#444] rounded shadow-inner"></canvas>
+            <button id="export-tex-btn" class="w-full bg-[#16825d] hover:bg-[#1e996f] text-white py-2 mt-4 rounded text-sm font-medium transition shadow-lg">Export to PNG</button>
+        </div>
+    </div>
+
+    <!-- Center: 3D Viewport -->
+    <div class="flex-1 relative bg-[#0a0a0c]">
+        <canvas id="webgl-canvas" class="w-full h-full block"></canvas>
+        <div class="absolute top-4 left-4 flex gap-2">
+            <button class="mesh-btn bg-black/50 hover:bg-black/80 backdrop-blur border border-[#333] px-3 py-1 rounded text-xs active" data-mesh="sphere">Sphere</button>
+            <button class="mesh-btn bg-black/50 hover:bg-black/80 backdrop-blur border border-[#333] px-3 py-1 rounded text-xs" data-mesh="cube">Cube</button>
+            <button class="mesh-btn bg-black/50 hover:bg-black/80 backdrop-blur border border-[#333] px-3 py-1 rounded text-xs" data-mesh="plane">Plane</button>
+        </div>
+        <div class="absolute bottom-4 right-4 bg-black/60 backdrop-blur px-3 py-2 rounded border border-[#333] text-xs font-mono text-gray-400">
+            Left Click: Rotate | Right Click: Pan | Scroll: Zoom
+        </div>
+    </div>
+
+    <!-- Right Sidebar: Properties -->
+    <div class="panel w-72 flex flex-col p-4 overflow-y-auto">
+        <h2 class="text-xs font-bold text-blue-400 uppercase tracking-widest mb-4 border-b border-gray-700 pb-2">Material Properties</h2>
+        
+        <div class="space-y-5">
+            <!-- Base Color -->
+            <div>
+                <label class="text-xs block mb-1">Base Color (Tint)</label>
+                <div class="flex gap-2">
+                    <input type="color" id="base-color" value="#888888" class="w-8 h-8 rounded cursor-pointer border border-[#444] bg-[#1e1e1e]">
+                    <input type="text" id="base-color-hex" value="#888888" class="flex-1 bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 text-sm text-gray-300">
+                </div>
+            </div>
+
+            <!-- Roughness -->
+            <div>
+                <label class="text-xs block mb-1 flex justify-between">
+                    <span>Roughness</span>
+                    <span id="roughness-val" class="text-gray-400">0.50</span>
+                </label>
+                <input type="range" id="roughness-slider" min="0" max="1" step="0.01" value="0.5">
+            </div>
+
+            <!-- Metalness -->
+            <div>
+                <label class="text-xs block mb-1 flex justify-between">
+                    <span>Metalness</span>
+                    <span id="metalness-val" class="text-gray-400">0.00</span>
+                </label>
+                <input type="range" id="metalness-slider" min="0" max="1" step="0.01" value="0">
+            </div>
+            
+            <!-- Emissive -->
+            <div class="pt-2 border-t border-[#333]">
+                <label class="text-xs block mb-1">Emissive Color</label>
+                <div class="flex gap-2">
+                    <input type="color" id="emissive-color" value="#000000" class="w-8 h-8 rounded cursor-pointer border border-[#444] bg-[#1e1e1e]">
+                    <input type="range" id="emissive-intensity" min="0" max="5" step="0.1" value="0" class="flex-1">
+                </div>
+            </div>
+
+            <!-- Environment lighting -->
+            <div class="pt-2 border-t border-[#333]">
+                <h3 class="text-xs font-semibold mb-2 text-gray-400">Lighting Setup</h3>
+                <label class="flex items-center gap-2 text-sm cursor-pointer mb-2">
+                    <input type="checkbox" id="point-light-toggle" checked class="accent-blue-500">
+                    Enable Point Light
+                </label>
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="siren-light-toggle" class="accent-red-500">
+                    Police Siren Effect (CrimeWars)
+                </label>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Load Three.js and OrbitControls -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+    // --- Procedural Texture Generator ---
+    const texCanvas = document.getElementById('texture-canvas');
+    const ctx = texCanvas.getContext('2d');
+    let generatedTexture = new THREE.CanvasTexture(texCanvas);
+    generatedTexture.wrapS = THREE.RepeatWrapping;
+    generatedTexture.wrapT = THREE.RepeatWrapping;
+
+    function generateTexture() {
+        const type = document.getElementById('pattern-type').value;
+        const scale = parseInt(document.getElementById('noise-scale').value);
+        const w = texCanvas.width;
+        const h = texCanvas.height;
+        
+        ctx.clearRect(0, 0, w, h);
+        
+        if (type === 'noise') {
+            const imgData = ctx.createImageData(w, h);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                // Blocky noise based on scale
+                const x = (i / 4) % w;
+                const y = Math.floor((i / 4) / w);
+                const blockX = Math.floor(x / (101 - scale));
+                const blockY = Math.floor(y / (101 - scale));
+                
+                // Deterministic pseudo-random based on block pos
+                const val = Math.abs(Math.sin(blockX * 12.9898 + blockY * 78.233)) * 255;
+                const c = Math.floor(val);
+                
+                data[i] = c;     // R
+                data[i+1] = c;   // G
+                data[i+2] = c;   // B
+                data[i+3] = 255; // Alpha
+            }
+            ctx.putImageData(imgData, 0, 0);
+        } 
+        else if (type === 'grid') {
+            ctx.fillStyle = '#222';
+            ctx.fillRect(0, 0, w, h);
+            const tileSize = Math.max(2, Math.floor(w / (scale / 5)));
+            
+            ctx.strokeStyle = '#888';
+            ctx.lineWidth = 2;
+            for(let x = 0; x <= w; x += tileSize) {
+                for(let y = 0; y <= h; y += tileSize) {
+                    ctx.fillStyle = `rgb(${100 + Math.random()*50}, ${100 + Math.random()*50}, ${100 + Math.random()*50})`;
+                    ctx.fillRect(x, y, tileSize - 2, tileSize - 2);
+                }
+            }
+        }
+        else if (type === 'cellular') {
+            // Simplified voronoi-ish cellular noise
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0,0,w,h);
+            const points = [];
+            const numPoints = scale;
+            for(let i=0; i<numPoints; i++) {
+                points.push({x: Math.random()*w, y: Math.random()*h});
+            }
+            
+            const imgData = ctx.createImageData(w, h);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const px = (i / 4) % w;
+                const py = Math.floor((i / 4) / w);
+                let minDist = 99999;
+                for(let p of points) {
+                    const dx = px - p.x;
+                    const dy = py - p.y;
+                    const dist = dx*dx + dy*dy; // squared distance
+                    if(dist < minDist) minDist = dist;
+                }
+                const c = Math.min(255, Math.floor(Math.sqrt(minDist) * 3));
+                data[i] = c;
+                data[i+1] = c;
+                data[i+2] = c;
+                data[i+3] = 255;
+            }
+            ctx.putImageData(imgData, 0, 0);
+        }
+
+        generatedTexture.needsUpdate = true;
+        if(material) material.needsUpdate = true;
+    }
+
+    // --- 3D Scene Setup ---
+    const canvas3d = document.getElementById('webgl-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0c);
+
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(0, 0, 4);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambientLight);
+
+    const mainLight = new THREE.PointLight(0xffffff, 1, 100);
+    mainLight.position.set(2, 3, 4);
+    scene.add(mainLight);
+
+    // CrimeWars Siren Lights (Off by default)
+    const redSiren = new THREE.PointLight(0xff0000, 0, 10);
+    redSiren.position.set(-2, 1, 2);
+    scene.add(redSiren);
+
+    const blueSiren = new THREE.PointLight(0x0000ff, 0, 10);
+    blueSiren.position.set(2, 1, -2);
+    scene.add(blueSiren);
+
+    // Initial Material creation
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        roughness: 0.5,
+        metalness: 0.0,
+        map: generatedTexture
+    });
+
+    // Meshes
+    const geometries = {
+        sphere: new THREE.SphereGeometry(1, 64, 64),
+        cube: new THREE.BoxGeometry(1.5, 1.5, 1.5),
+        plane: new THREE.PlaneGeometry(2, 2)
+    };
+    
+    let currentMesh = new THREE.Mesh(geometries.sphere, material);
+    scene.add(currentMesh);
+
+    // --- Event Listeners & UI Binding ---
+
+    // Generate initial texture
+    generateTexture();
+
+    document.getElementById('generate-tex-btn').addEventListener('click', generateTexture);
+    
+    document.getElementById('noise-scale').addEventListener('input', (e) => {
+        document.getElementById('scale-val').textContent = e.target.value;
+        // Optional: auto-generate on drag. Can be heavy for cellular
+        if(document.getElementById('pattern-type').value !== 'cellular'){
+            generateTexture();
+        }
+    });
+
+    document.getElementById('pattern-type').addEventListener('change', generateTexture);
+
+    // Export Texture functionality
+    document.getElementById('export-tex-btn').addEventListener('click', () => {
+        const link = document.createElement('a');
+        const currentType = document.getElementById('pattern-type').value;
+        link.download = `crimewars_${currentType}_base_map.png`;
+        link.href = texCanvas.toDataURL('image/png');
+        link.click();
+    });
+
+    // Properties binding
+    const updateMaterial = () => {
+        const color = document.getElementById('base-color').value;
+        const roughness = parseFloat(document.getElementById('roughness-slider').value);
+        const metalness = parseFloat(document.getElementById('metalness-slider').value);
+        const emColor = document.getElementById('emissive-color').value;
+        const emInt = parseFloat(document.getElementById('emissive-intensity').value);
+
+        material.color.set(color);
+        material.roughness = roughness;
+        material.metalness = metalness;
+        material.emissive.set(emColor);
+        material.emissiveIntensity = emInt;
+
+        document.getElementById('base-color-hex').value = color.toUpperCase();
+        document.getElementById('roughness-val').textContent = roughness.toFixed(2);
+        document.getElementById('metalness-val').textContent = metalness.toFixed(2);
+    };
+
+    document.getElementById('base-color').addEventListener('input', updateMaterial);
+    document.getElementById('base-color-hex').addEventListener('change', (e) => {
+        document.getElementById('base-color').value = e.target.value;
+        updateMaterial();
+    });
+    document.getElementById('roughness-slider').addEventListener('input', updateMaterial);
+    document.getElementById('metalness-slider').addEventListener('input', updateMaterial);
+    document.getElementById('emissive-color').addEventListener('input', updateMaterial);
+    document.getElementById('emissive-intensity').addEventListener('input', updateMaterial);
+
+    // Presets
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const preset = e.target.dataset.preset;
+            if(preset === 'asphalt') {
+                document.getElementById('pattern-type').value = 'noise';
+                document.getElementById('noise-scale').value = 95;
+                document.getElementById('base-color').value = '#333333';
+                document.getElementById('roughness-slider').value = 0.9;
+                document.getElementById('metalness-slider').value = 0.0;
+            } else if (preset === 'blood') {
+                document.getElementById('pattern-type').value = 'noise';
+                document.getElementById('noise-scale').value = 80;
+                document.getElementById('base-color').value = '#4a0000';
+                document.getElementById('roughness-slider').value = 0.4;
+                document.getElementById('metalness-slider').value = 0.1;
+            } else if (preset === 'rust') {
+                document.getElementById('pattern-type').value = 'cellular';
+                document.getElementById('noise-scale').value = 40;
+                document.getElementById('base-color').value = '#8a3c00';
+                document.getElementById('roughness-slider').value = 0.7;
+                document.getElementById('metalness-slider').value = 0.8;
+            }
+            generateTexture();
+            updateMaterial();
+            
+            // Sync slider UI text
+            document.getElementById('scale-val').textContent = document.getElementById('noise-scale').value;
+        });
+    });
+
+    // Lighting toggles
+    document.getElementById('point-light-toggle').addEventListener('change', (e) => {
+        mainLight.intensity = e.target.checked ? 1 : 0;
+    });
+
+    // Mesh switching
+    document.querySelectorAll('.mesh-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.mesh-btn').forEach(b => {
+                b.classList.remove('active', 'border-blue-500');
+                b.classList.add('border-[#333]');
+            });
+            e.target.classList.add('active', 'border-blue-500');
+            e.target.classList.remove('border-[#333]');
+
+            const type = e.target.dataset.mesh;
+            scene.remove(currentMesh);
+            currentMesh = new THREE.Mesh(geometries[type], material);
+            scene.add(currentMesh);
+        });
+    });
+
+    // Resize handling
+    function resize() {
+        const parent = canvas3d.parentElement;
+        const w = parent.clientWidth;
+        const h = parent.clientHeight;
+        if(canvas3d.width !== w || canvas3d.height !== h) {
+            renderer.setSize(w, h, false);
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+        }
+    }
+
+    // Animation loop
+    const clock = new THREE.Clock();
+    
+    function animate() {
+        requestAnimationFrame(animate);
+        resize();
+        controls.update();
+
+        // Siren logic
+        if (document.getElementById('siren-light-toggle').checked) {
+            const time = clock.getElapsedTime();
+            // Strobe effect
+            redSiren.intensity = Math.sin(time * 10) > 0.5 ? 5 : 0;
+            blueSiren.intensity = Math.sin(time * 10 + Math.PI) > 0.5 ? 5 : 0;
+        } else {
+            redSiren.intensity = 0;
+            blueSiren.intensity = 0;
+        }
+
+        renderer.render(scene, camera);
+    }
+    
+    animate();
+
+</script>
+</body>
+</html>
