@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGL Sandbox Editor</title>
+
+  <!-- 1. Tailwind CSS (Handles all the styling in your TSX) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- 2. React & ReactDOM (Loaded globally) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
+  <!-- 3. Babel (Translates TSX to standard JS in the browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Optional Lucide Icons script if your TSX uses them -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-900 text-white">
+  
+  <!-- This is where your React app will mount -->
+  <div id="root"></div>
+
+  <!-- 4. Your TSX Code Goes Here -->
+  <!-- Note: type="text/babel" and data-presets tell Babel to compile this block -->
+  <script type="text/babel" data-presets="react,typescript">
+    
+    // Because we loaded React globally via CDN, we pull hooks directly from the global React object.
+    const { useState, useEffect, useRef } = React;
+
+    // --- PASTE YOUR TSX CODE HERE ---
+    // Make sure to paste the exact component logic from your GitHub file.
+    // 1. Pull React hooks from the globally loaded React object
+const { useState, useEffect, useRef } = React;
+
+// 2. Mock Data for the Gallery (Later replaced by your MySQLi backend)
+const initialGames = [
+  { id: 1, title: 'Bouncing Cube', tags: ['WebGL', '3D', 'Three.js'], code: '<h1 style="color:black; text-align:center;">Bouncing Cube Loading...</h1>' },
+  { id: 2, title: 'Shader Vibe', tags: ['GLSL', 'VFX', 'ShaderToy'], code: '<style>body{background:linear-gradient(45deg, red, blue);}</style><h1 style="color:white; text-align:center;">Shader Vibe</h1>' }
+];
+
+// 3. The Main React Application
+function App() {
+  const [view, setView] = useState('gallery'); // Toggles between 'gallery' and 'editor'
+  const [games, setGames] = useState(initialGames);
+  const [currentCode, setCurrentCode] = useState('');
+  const iframeRef = useRef(null);
+
+  // Injects the current code into the iframe for a live preview
+  const runCode = () => {
+    if (iframeRef.current) {
+      const document = iframeRef.current.contentDocument;
+      document.open();
+      document.write(currentCode);
+      document.close();
+    }
+  };
+
+  // Auto-run the code when entering the editor view
+  useEffect(() => {
+    if (view === 'editor') runCode();
+  }, [view]);
+
+  // --- PAGE 1: GALLERY VIEW ---
+  if (view === 'gallery') {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-8">
+        <h1 className="text-4xl font-bold mb-8 text-blue-400">WebGL AI Sandbox Gallery</h1>
+        <button 
+          onClick={() => { setCurrentCode('<!-- Start coding here -->'); setView('editor'); }}
+          className="bg-green-600 hover:bg-green-500 px-4 py-2 rounded mb-6 font-bold"
+        >
+          + Create New Game
+        </button>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {games.map(game => (
+            <div key={game.id} className="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg">
+              <h2 className="text-2xl font-semibold mb-2">{game.title}</h2>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {game.tags.map(tag => (
+                  <span key={tag} className="text-xs bg-blue-900 text-blue-200 px-2 py-1 rounded">{tag}</span>
+                ))}
+              </div>
+              <button 
+                onClick={() => { setCurrentCode(game.code); setView('editor'); }}
+                className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded w-full font-bold"
+              >
+                Edit / Play
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // --- PAGE 2: EDITOR / SANDBOX VIEW ---
+  return (
+    <div className="flex flex-col h-screen bg-gray-900 text-white">
+      {/* Navbar */}
+      <div className="flex justify-between items-center p-4 bg-gray-800 border-b border-gray-700">
+        <h1 className="text-2xl font-bold text-blue-400">JSFiddle Sandbox</h1>
+        <div className="space-x-4">
+          <button onClick={runCode} className="bg-green-600 hover:bg-green-500 px-4 py-2 rounded font-bold">Run Code</button>
+          <button onClick={() => alert('Will save to MySQLi longblob later!')} className="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded font-bold">Save Game</button>
+          <button onClick={() => setView('gallery')} className="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded font-bold">Back to Gallery</button>
+        </div>
+      </div>
+      
+      {/* Split Screen: Code & Render */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left: Code Editor */}
+        <div className="w-1/2 border-r border-gray-700 flex flex-col">
+          <textarea 
+            className="flex-1 w-full p-4 bg-gray-950 text-green-400 font-mono text-sm resize-none focus:outline-none"
+            value={currentCode}
+            onChange={(e) => setCurrentCode(e.target.value)}
+            placeholder="<!-- Write HTML, CSS, and JS/WebGL here -->"
+          />
+        </div>
+        {/* Right: Live WebGL Preview */}
+        <div className="w-1/2 bg-white">
+          <iframe 
+            ref={iframeRef}
+            className="w-full h-full border-none"
+            title="WebGL Preview"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+  
+    
+    // --- END TSX CODE ---
+
+    // 5. Render the app to the screen
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+    
+  </script>
+</body>
+</html>
