@@ -1,0 +1,5 @@
+loop game code 
+run prompt on task1 read code
+run prompt on task2 write code
+run prompt on task3 review and test code
+run prompt decide commit from programmer and reviewer agent
