@@ -1,0 +1,2140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Street Dialogue — WebGL + Web Speech TTS</title>
+  <!-- Tailwind CSS for responsive glassmorphic HUD & controls -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Font: Inter for clean comic/cinematic UI -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- Three.js & OrbitControls via CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      margin: 0;
+      overflow: hidden;
+      background-color: #070912;
+      color: #f8fafc;
+      user-select: none;
+    }
+    #webgl-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    /* Custom subtle range slider */
+    input[type="range"] {
+      accent-color: #f59e0b;
+    }
+    @keyframes popIn {
+      0% { opacity: 0; transform: translateY(10px) scale(0.96); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .subtitle-pop {
+      animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    /* Reactive On-Screen Key & Action Button Highlight / Scale / Fade Pulse */
+    .key-btn {
+      transition: transform 0.12s cubic-bezier(0.22, 1, 0.36, 1),
+                  background-color 0.16s ease,
+                  border-color 0.16s ease,
+                  box-shadow 0.22s ease,
+                  opacity 0.18s ease;
+      opacity: 0.88;
+    }
+    .key-btn.is-active,
+    .key-btn:active {
+      transform: scale(1.13);
+      opacity: 1;
+      background-color: rgba(16, 185, 129, 0.92) !important;
+      color: #020617 !important;
+      border-color: #a7f3d0 !important;
+      box-shadow: 0 0 18px rgba(16, 185, 129, 0.75), inset 0 0 8px rgba(255, 255, 255, 0.5);
+    }
+    .key-btn.combat-btn.is-active,
+    .key-btn.combat-btn:active {
+      background-color: rgba(245, 158, 11, 0.95) !important;
+      border-color: #fde68a !important;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.85), inset 0 0 8px rgba(255, 255, 255, 0.55);
+    }
+
+    /* Circular Slanted Neon-Glitch Minimap Frame */
+    @keyframes neonGlitchJitter {
+      0%, 88%, 100% {
+        transform: translate(0, 0) skewX(0deg);
+        box-shadow:
+          0 0 18px rgba(34, 211, 238, 0.55),
+          0 0 34px rgba(232, 121, 249, 0.35),
+          inset 0 0 18px rgba(34, 211, 238, 0.45);
+      }
+      90% {
+        transform: translate(-2px, 1px) skewX(-3deg);
+        box-shadow:
+          -4px 0 16px rgba(232, 121, 249, 0.85),
+          4px 0 16px rgba(34, 211, 238, 0.85),
+          inset 0 0 22px rgba(232, 121, 249, 0.6);
+      }
+      92% {
+        transform: translate(2px, -1px) skewX(2deg);
+        box-shadow:
+          3px 0 18px rgba(34, 211, 238, 0.9),
+          -3px 0 18px rgba(244, 63, 94, 0.85);
+      }
+      94% {
+        transform: translate(-1px, 0) skewX(0deg);
+      }
+    }
+    @keyframes scanlineScroll {
+      0% { background-position: 0 0; }
+      100% { background-position: 0 36px; }
+    }
+    .minimap-circle-frame {
+      border-radius: 9999px;
+      animation: neonGlitchJitter 3.4s infinite;
+      border: 2.5px solid rgba(34, 211, 238, 0.85);
+    }
+    .minimap-glitch-overlay {
+      border-radius: 9999px;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          rgba(34, 211, 238, 0.11) 0px,
+          rgba(34, 211, 238, 0.11) 1px,
+          transparent 1px,
+          transparent 4px
+        ),
+        radial-gradient(circle at center, transparent 58%, rgba(232, 121, 249, 0.28) 92%, rgba(34, 211, 238, 0.48) 100%);
+      animation: scanlineScroll 1.2s linear infinite;
+      mix-blend-mode: screen;
+    }
+  </style>
+</head>
+<body class="antialiased">
+  <!-- Full-viewport 3D WebGL Canvas Container -->
+  <div id="webgl-container"></div>
+
+  <!-- Top-Right Circular Slanted Neon-Glitch Radar Camera HUD Frame -->
+  <div id="minimap-hud" class="fixed top-16 sm:top-20 right-3 sm:right-5 z-10 pointer-events-none flex flex-col items-center">
+    <div id="minimap-frame" class="minimap-circle-frame relative w-28 h-28 sm:w-36 sm:h-36 overflow-hidden bg-slate-950/30">
+      <div class="minimap-glitch-overlay absolute inset-0 pointer-events-none"></div>
+      <!-- Crosshair & Compass Blip -->
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-45">
+        <div class="w-full h-[1px] bg-cyan-400/50"></div>
+      </div>
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-45">
+        <div class="h-full w-[1px] bg-cyan-400/50"></div>
+      </div>
+      <span class="absolute top-1.5 left-1/2 -translate-x-1/2 text-[8px] font-black tracking-widest text-cyan-300 drop-shadow">
+        N • RADAR
+      </span>
+    </div>
+    <span class="mt-1 px-2 py-0.5 rounded-full bg-slate-950/85 border border-cyan-500/40 text-[9px] font-bold tracking-wider uppercase text-cyan-300 shadow">
+      Slanted Top-Down
+    </span>
+  </div>
+
+  <!-- Top-Left First-Person Viewmodel Framebuffer PIP Window (Below Header) -->
+  <div id="fpv-hud" class="fixed top-20 sm:top-24 left-3 sm:left-5 z-10 pointer-events-none flex flex-col items-start">
+    <div id="fpv-frame" class="relative w-36 h-24 sm:w-48 sm:h-32 rounded-2xl overflow-hidden border-2 border-emerald-400/80 shadow-[0_0_20px_rgba(16,185,129,0.35)] bg-slate-950/20">
+      <!-- Subtle Corner Reticle -->
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="w-2.5 h-2.5 rounded-full border border-emerald-300/70"></div>
+      </div>
+      <div class="absolute top-1.5 left-2 right-2 flex items-center justify-between text-[9px] font-extrabold uppercase tracking-wider text-emerald-300 drop-shadow">
+        <span>FPV • Viewmodel</span>
+        <span class="px-1.5 py-0.2 rounded bg-slate-950/80 border border-emerald-500/40 text-[8px]">CAM 2</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Header & Status Bar -->
+  <header class="fixed top-0 left-0 right-0 z-10 pointer-events-none p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+    <div class="pointer-events-auto bg-slate-950/85 backdrop-blur-md border border-slate-800/80 rounded-2xl px-4 py-2 shadow-xl">
+      <div class="flex items-center gap-2.5">
+        <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+        <h1 class="text-sm sm:text-base font-bold tracking-tight text-white">
+          Midnight Corner <span class="text-amber-400 font-semibold">• WebGL + TTS</span>
+        </h1>
+        <span id="player-anim-badge" class="ml-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+          IDLE
+        </span>
+      </div>
+      <p class="text-[11px] text-slate-400 mt-0.5">
+        <span class="text-emerald-300 font-semibold">WASD</span> Move • <span class="text-emerald-300 font-semibold">Shift</span> Run • <span class="text-emerald-300 font-semibold">Space/J</span> Jump • <span class="text-amber-300 font-semibold">F</span> Punch • <span class="text-amber-300 font-semibold">K</span> Kick
+      </p>
+    </div>
+
+    <!-- Speaker Legend, Camera Follow Toggle & TTS Engine Pill -->
+    <div class="pointer-events-auto flex flex-wrap items-center gap-2 bg-slate-950/85 backdrop-blur-md border border-slate-800/80 rounded-2xl px-3.5 py-2 shadow-xl text-xs">
+      <span class="inline-flex items-center gap-1.5 font-semibold text-amber-400">
+        <span class="w-2 h-2 rounded-full bg-amber-400"></span> Thug
+      </span>
+      <span class="text-slate-600">|</span>
+      <span class="inline-flex items-center gap-1.5 font-semibold text-sky-400">
+        <span class="w-2 h-2 rounded-full bg-sky-400"></span> Civilian
+      </span>
+      <span class="text-slate-600">|</span>
+      <span class="inline-flex items-center gap-1.5 font-semibold text-emerald-400">
+        <span class="w-2 h-2 rounded-full bg-emerald-400"></span> Citizen
+      </span>
+      <span class="text-slate-600">|</span>
+      <button id="btn-cam-follow" class="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold transition cursor-pointer" title="Toggle Camera Follow on Citizen">
+        Cam: Free
+      </button>
+      <span class="text-slate-600">|</span>
+      <span id="tts-badge" class="text-slate-300 font-medium">Web Speech Ready</span>
+    </div>
+  </header>
+
+  <!-- Reactive On-Screen W A S D Directional Pad (Bottom-Left above Dock) -->
+  <div id="mobile-dpad" class="fixed bottom-56 sm:bottom-52 left-3 sm:left-5 z-10 pointer-events-auto select-none">
+    <div class="bg-slate-950/80 backdrop-blur-md border border-slate-800/90 rounded-2xl p-2 shadow-xl grid grid-cols-3 gap-1.5 w-32 h-32">
+      <div></div>
+      <button id="btn-key-up" data-dir="up" class="key-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-slate-100 font-extrabold text-xs flex flex-col items-center justify-center border border-slate-700 cursor-pointer" aria-label="Walk Up (W)">
+        <span class="text-[11px] leading-none">▲</span>
+        <span class="text-[10px] text-emerald-300 mt-0.5">W</span>
+      </button>
+      <div></div>
+      <button id="btn-key-left" data-dir="left" class="key-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-slate-100 font-extrabold text-xs flex flex-col items-center justify-center border border-slate-700 cursor-pointer" aria-label="Walk Left (A)">
+        <span class="text-[11px] leading-none">◀</span>
+        <span class="text-[10px] text-emerald-300 mt-0.5">A</span>
+      </button>
+      <div class="rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-center text-[9px] font-black tracking-wider text-emerald-400">
+        MOVE
+      </div>
+      <button id="btn-key-right" data-dir="right" class="key-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-slate-100 font-extrabold text-xs flex flex-col items-center justify-center border border-slate-700 cursor-pointer" aria-label="Walk Right (D)">
+        <span class="text-[11px] leading-none">▶</span>
+        <span class="text-[10px] text-emerald-300 mt-0.5">D</span>
+      </button>
+      <div></div>
+      <button id="btn-key-down" data-dir="down" class="key-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-slate-100 font-extrabold text-xs flex flex-col items-center justify-center border border-slate-700 cursor-pointer" aria-label="Walk Down (S)">
+        <span class="text-[11px] leading-none">▼</span>
+        <span class="text-[10px] text-emerald-300 mt-0.5">S</span>
+      </button>
+      <div></div>
+    </div>
+  </div>
+
+  <!-- Reactive On-Screen Combat & Locomotion Action Buttons (Bottom-Right above Dock) -->
+  <div id="combat-pad" class="fixed bottom-56 sm:bottom-52 right-3 sm:right-5 z-10 pointer-events-auto select-none">
+    <div class="bg-slate-950/80 backdrop-blur-md border border-slate-800/90 rounded-2xl p-2 shadow-xl grid grid-cols-2 gap-1.5 w-36 sm:w-40">
+      <button id="btn-act-run" class="key-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-slate-100 font-extrabold text-[11px] py-2 px-2 flex flex-col items-center justify-center border border-slate-700 cursor-pointer">
+        <span>RUN</span>
+        <span class="text-[9px] text-emerald-300 font-mono">SHIFT</span>
+      </button>
+      <button id="btn-act-jump" class="key-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-slate-100 font-extrabold text-[11px] py-2 px-2 flex flex-col items-center justify-center border border-slate-700 cursor-pointer">
+        <span>JUMP</span>
+        <span class="text-[9px] text-emerald-300 font-mono">SPACE / J</span>
+      </button>
+      <button id="btn-act-punch" class="key-btn combat-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-amber-200 font-extrabold text-[11px] py-2 px-2 flex flex-col items-center justify-center border border-amber-500/40 cursor-pointer">
+        <span>PUNCH</span>
+        <span class="text-[9px] text-amber-400 font-mono">F / Z</span>
+      </button>
+      <button id="btn-act-kick" class="key-btn combat-btn rounded-xl bg-slate-800/95 hover:bg-slate-700 text-amber-200 font-extrabold text-[11px] py-2 px-2 flex flex-col items-center justify-center border border-amber-500/40 cursor-pointer">
+        <span>KICK</span>
+        <span class="text-[9px] text-amber-400 font-mono">K / X</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Center-Bottom Comic/Cinematic Subtitle Overlay -->
+  <div id="subtitle-wrapper" class="fixed bottom-56 sm:bottom-52 left-0 right-0 z-10 pointer-events-none px-4 flex justify-center">
+    <div id="subtitle-box" class="hidden max-w-lg w-full bg-slate-950/92 backdrop-blur-lg border-2 border-amber-400/80 rounded-2xl px-4 py-2.5 shadow-2xl subtitle-pop">
+      <div class="flex items-center justify-between mb-1">
+        <span id="subtitle-speaker" class="text-xs font-extrabold uppercase tracking-wider text-amber-400">
+          THUG
+        </span>
+        <span id="subtitle-step" class="text-[11px] font-semibold text-slate-400">
+          Line 1 / 5
+        </span>
+      </div>
+      <p id="subtitle-text" class="text-xs sm:text-sm font-bold text-white leading-snug">
+        “Hi.”
+      </p>
+    </div>
+  </div>
+
+  <!-- Bottom Interactive Playback & Voice Controls Dock -->
+  <footer class="fixed bottom-0 left-0 right-0 z-10 p-2.5 sm:p-3.5 pointer-events-none flex justify-center">
+    <div class="pointer-events-auto w-full max-w-5xl bg-slate-950/88 backdrop-blur-xl border border-slate-800/90 rounded-2xl p-2.5 sm:p-3 shadow-2xl flex flex-col gap-2">
+      
+      <!-- Row 1: Primary Transport Buttons, Dedicated Citizen Speak Buttons & Voice Controls -->
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <button id="btn-play" class="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold text-xs transition flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer">
+            <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span id="btn-play-label">Play Scene</span>
+          </button>
+
+          <!-- Dedicated Citizen Speech Button 1 -->
+          <button id="btn-citizen-speak" class="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/25 cursor-pointer">
+            <span>🎙️ “Police Protect Me!”</span>
+          </button>
+
+          <!-- Dedicated Citizen Speech Button 2 -->
+          <button id="btn-citizen-dev-speak" class="px-3 py-1.5 rounded-xl bg-teal-400 hover:bg-teal-300 active:scale-95 text-slate-950 font-extrabold text-xs transition flex items-center gap-1.5 shadow-lg shadow-teal-400/25 cursor-pointer">
+            <span>🛠️ “Dual Contour IK Dev!”</span>
+          </button>
+
+          <button id="btn-stop" class="px-2.5 py-1.5 rounded-xl bg-rose-950/80 hover:bg-rose-900 active:scale-95 text-rose-200 font-semibold text-xs transition flex items-center gap-1 border border-rose-800/70 cursor-pointer">
+            <svg class="w-3 h-3 fill-current" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+            Stop
+          </button>
+        </div>
+
+        <!-- Speed, Pitch Offset & Mute Toggle -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs text-slate-300">
+          <label class="flex items-center gap-1.5 bg-slate-900/90 px-2 py-1 rounded-xl border border-slate-800">
+            <span class="text-slate-400 font-medium">Speed</span>
+            <input id="ctrl-rate" type="range" min="0.7" max="1.4" step="0.05" value="1.0" class="w-12 sm:w-14 cursor-pointer" />
+            <span id="val-rate" class="w-7 text-right font-mono text-amber-400">1.0x</span>
+          </label>
+          <label class="flex items-center gap-1.5 bg-slate-900/90 px-2 py-1 rounded-xl border border-slate-800">
+            <span class="text-slate-400 font-medium">Pitch</span>
+            <input id="ctrl-pitch" type="range" min="-0.3" max="0.3" step="0.05" value="0" class="w-12 sm:w-14 cursor-pointer" />
+            <span id="val-pitch" class="w-8 text-right font-mono text-amber-400">+0.0</span>
+          </label>
+          <button id="btn-mute" title="Toggle Audio / Silent Timed Subtitle Mode" class="px-2.5 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold transition cursor-pointer flex items-center gap-1">
+            <span id="mute-icon">🔊</span>
+            <span id="mute-label">TTS On</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Row 2: Individual Line Trigger Pills -->
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+        <button data-line="0" class="line-trigger text-left px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/60 transition cursor-pointer group">
+          <div class="flex items-center justify-between text-[10px] font-bold text-amber-400 mb-0.5">
+            <span>1. THUG</span>
+            <span class="opacity-60 group-hover:opacity-100">▶</span>
+          </div>
+          <div class="text-[11px] text-slate-200 truncate">“Hi.”</div>
+        </button>
+
+        <button data-line="1" class="line-trigger text-left px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-sky-500/60 transition cursor-pointer group">
+          <div class="flex items-center justify-between text-[10px] font-bold text-sky-400 mb-0.5">
+            <span>2. CIVILIAN</span>
+            <span class="opacity-60 group-hover:opacity-100">▶</span>
+          </div>
+          <div class="text-[11px] text-slate-200 truncate">“You’re a crazy person.”</div>
+        </button>
+
+        <button data-line="2" class="line-trigger text-left px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/60 transition cursor-pointer group">
+          <div class="flex items-center justify-between text-[10px] font-bold text-amber-400 mb-0.5">
+            <span>3. THUG</span>
+            <span class="opacity-60 group-hover:opacity-100">▶</span>
+          </div>
+          <div class="text-[11px] text-slate-200 truncate">“I just want McDonald’s and bottle from u.”</div>
+        </button>
+
+        <button data-line="3" class="line-trigger text-left px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-emerald-800/70 hover:border-emerald-400 transition cursor-pointer group">
+          <div class="flex items-center justify-between text-[10px] font-bold text-emerald-400 mb-0.5">
+            <span>4. CITIZEN</span>
+            <span class="opacity-60 group-hover:opacity-100">▶</span>
+          </div>
+          <div class="text-[11px] text-slate-200 truncate">“You two are a thug and civilian, but I'ma citizen, the police PROTECT ME!!”</div>
+        </button>
+
+        <button data-line="4" class="line-trigger text-left px-2.5 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-teal-800/70 hover:border-teal-300 transition cursor-pointer group col-span-2 sm:col-span-1">
+          <div class="flex items-center justify-between text-[10px] font-bold text-teal-300 mb-0.5">
+            <span>5. CITIZEN DEV</span>
+            <span class="opacity-60 group-hover:opacity-100">▶</span>
+          </div>
+          <div class="text-[11px] text-slate-200 truncate">“I'm coding some dual contour terrian thats modifiedable...”</div>
+        </button>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    /**
+     * ============================================================================
+     * 1. DIALOGUE SCRIPT & STATE CONFIGURATION
+     * ============================================================================
+     */
+    const SCRIPT = [
+      {
+        id: 0,
+        speaker: 'thug',
+        displayName: 'Thug',
+        text: 'Hi.',
+        basePitch: 0.72,
+        baseRate: 0.88,
+        fallbackDurationMs: 1100
+      },
+      {
+        id: 1,
+        speaker: 'civilian',
+        displayName: 'Civilian',
+        text: 'You’re a crazy person.',
+        basePitch: 1.24,
+        baseRate: 1.12,
+        fallbackDurationMs: 1900
+      },
+      {
+        id: 2,
+        speaker: 'thug',
+        displayName: 'Thug',
+        text: 'I just want McDonald’s and bottle from u.',
+        basePitch: 0.74,
+        baseRate: 0.92,
+        fallbackDurationMs: 2800
+      },
+      {
+        id: 3,
+        speaker: 'citizen',
+        displayName: 'Citizen (Player)',
+        text: "You two are a thug and civilian, but I'ma citizen, the police PROTECT ME!!",
+        basePitch: 1.08,
+        baseRate: 1.05,
+        fallbackDurationMs: 4200
+      },
+      {
+        id: 4,
+        speaker: 'citizen',
+        displayName: 'Citizen (Player)',
+        text: "I'm coding some dual contour terrian thats modifiedable in a physics ragdoll crafting player physics parts game where you gore fight with ik procedual fist punches that implease react",
+        basePitch: 1.12,
+        baseRate: 1.08,
+        fallbackDurationMs: 7400
+      }
+    ];
+
+    const state = {
+      isPlaying: false,
+      playSequence: false,
+      currentLineIndex: -1,
+      activeSpeaker: null, // 'thug' | 'civilian' | 'citizen' | null
+      mouthPulse: 0,       // 0..1 audio-reactive jaw/head impulse
+      isMuted: false,
+      rateMultiplier: 1.0,
+      pitchOffset: 0.0,
+      thugVoice: null,
+      civilianVoice: null,
+      citizenVoice: null,
+      ttsAvailable: 'speechSynthesis' in window,
+      fallbackTimer: null,
+      nextLineTimer: null,
+      syllableInterval: null,
+      speechToken: 0,      // Guards against stale callbacks when rapidly switching lines
+      // Player-controlled Citizen movement, jump, run & combat state
+      keys: { up: false, down: false, left: false, right: false },
+      isRunning: false,
+      playerSpeed: 0,
+      walkPhase: 0,
+      verticalY: 0,
+      verticalVel: 0,
+      isGrounded: true,
+      landSquash: 0,
+      punchTimer: 0,
+      punchDuration: 0.34,
+      punchSide: 1, // alternates 1 (right) and -1 (left)
+      kickTimer: 0,
+      kickDuration: 0.44,
+      npcFlinch: { thug: 0, civilian: 0 },
+      cameraFollow: false,
+      lastAnimLabel: ''
+    };
+
+    /**
+     * ============================================================================
+     * 2. THREE.JS WEBGL SCENE + MULTI-CAMERA VIEWPORTS (MAIN + FPV + RADAR)
+     * ============================================================================
+     */
+    let scene, camera, fpvCamera, minimapCamera, renderer, controls, clock;
+    let thugRig, civilianRig, citizenRig, fpvViewmodel;
+    let speakerSpotlight, speakerRing, floatingBubbleSprite, impactRingMesh;
+    let minimapPlayerBlip, minimapThugBlip, minimapCivBlip;
+
+    function initWebGLScene() {
+      const container = document.getElementById('webgl-container');
+      clock = new THREE.Clock();
+
+      // Scene & Atmospheric Night Fog
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x070a14);
+      scene.fog = new THREE.FogExp2(0x070a14, 0.042);
+
+      // 1) Main Perspective Camera
+      camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        120
+      );
+      camera.position.set(0, 2.55, 7.6);
+
+      // 2) First-Person Viewmodel Camera (Mini Framebuffer PIP Window)
+      fpvCamera = new THREE.PerspectiveCamera(72, 1.5, 0.08, 80);
+      scene.add(fpvCamera);
+
+      // 3) Top-Right Circular Slanted Neon-Glitch Radar Camera
+      minimapCamera = new THREE.PerspectiveCamera(42, 1.0, 0.5, 90);
+      scene.add(minimapCamera);
+
+      // Renderer with shadows, smooth tone mapping & scissor support
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.15;
+      renderer.autoClear = false;
+      container.appendChild(renderer.domElement);
+
+      // OrbitControls for interactive main camera orbit & zoom
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 1.35, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 3.5;
+      controls.maxDistance = 16;
+      controls.maxPolarAngle = Math.PI * 0.49;
+      controls.update();
+
+      buildEnvironment();
+      buildLighting();
+
+      // Build stylized low-poly characters
+      thugRig = createCharacter({
+        role: 'thug',
+        primaryColor: 0x1e293b,
+        accentColor: 0xf59e0b,
+        pantsColor: 0x0f172a,
+        skinColor: 0xd99b78,
+        headStyle: 'cap',
+        scaleY: 1.04
+      });
+      thugRig.root.position.set(-1.35, 0, 0.15);
+      thugRig.root.rotation.y = Math.PI * 0.44;
+      scene.add(thugRig.root);
+
+      civilianRig = createCharacter({
+        role: 'civilian',
+        primaryColor: 0x0284c7,
+        accentColor: 0xe0f2fe,
+        pantsColor: 0x334155,
+        skinColor: 0xf1c29b,
+        headStyle: 'hair',
+        scaleY: 0.98
+      });
+      civilianRig.root.position.set(1.35, 0, -0.1);
+      civilianRig.root.rotation.y = -Math.PI * 0.44;
+      scene.add(civilianRig.root);
+
+      // Build Player-Controlled Citizen Character in foreground-center
+      citizenRig = createCharacter({
+        role: 'citizen',
+        primaryColor: 0x059669,
+        accentColor: 0xfef08a,
+        pantsColor: 0x1e293b,
+        skinColor: 0xeab68c,
+        headStyle: 'beanie',
+        scaleY: 1.0
+      });
+      citizenRig.root.position.set(0, 0, 2.25);
+      citizenRig.root.rotation.y = Math.PI;
+      scene.add(citizenRig.root);
+
+      // Build dedicated First-Person Viewmodel Arms/Fists attached to fpvCamera
+      buildFirstPersonViewmodel();
+
+      // Build glowing Radar Beacons above characters (visible in top-down radar)
+      buildRadarBeacons();
+
+      // Dynamic ground highlight ring, combat shockwave ring & floating 3D speech indicator
+      createSpeechIndicators();
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    /**
+     * Builds procedural First-Person Viewmodel emerald sleeves & fists attached
+     * directly to fpvCamera so the mini framebuffer shows true FPS hands/kicks.
+     */
+    function buildFirstPersonViewmodel() {
+      fpvViewmodel = new THREE.Group();
+      fpvCamera.add(fpvViewmodel);
+
+      const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x059669, roughness: 0.55, flatShading: true });
+      const cuffMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.4, flatShading: true });
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xeab68c, roughness: 0.5, flatShading: true });
+      const shoeMat = new THREE.MeshStandardMaterial({ color: 0xfef08a, roughness: 0.35, flatShading: true });
+      const pantMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.75, flatShading: true });
+
+      // Left First-Person Arm + Fist
+      const leftGroup = new THREE.Group();
+      leftGroup.position.set(-0.24, -0.22, -0.34);
+      fpvViewmodel.add(leftGroup);
+
+      const leftSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.28), sleeveMat);
+      leftSleeve.position.set(0, 0, 0.08);
+      leftGroup.add(leftSleeve);
+
+      const leftCuff = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.095, 0.03), cuffMat);
+      leftCuff.position.set(0, 0, -0.06);
+      leftGroup.add(leftCuff);
+
+      const leftFist = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.085, 0.09), skinMat);
+      leftFist.position.set(0, 0.01, -0.12);
+      leftGroup.add(leftFist);
+
+      // Right First-Person Arm + Fist
+      const rightGroup = new THREE.Group();
+      rightGroup.position.set(0.24, -0.22, -0.34);
+      fpvViewmodel.add(rightGroup);
+
+      const rightSleeve = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.28), sleeveMat);
+      rightSleeve.position.set(0, 0, 0.08);
+      rightGroup.add(rightSleeve);
+
+      const rightCuff = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.095, 0.03), cuffMat);
+      rightCuff.position.set(0, 0, -0.06);
+      rightGroup.add(rightCuff);
+
+      const rightFist = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.085, 0.09), skinMat);
+      rightFist.position.set(0, 0.01, -0.12);
+      rightGroup.add(rightFist);
+
+      // First-Person Kick Leg (swings up into lower-right view during Kick!)
+      const fpvKickLeg = new THREE.Group();
+      fpvKickLeg.position.set(0.1, -0.58, -0.22);
+      fpvViewmodel.add(fpvKickLeg);
+
+      const shin = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.34, 0.11), pantMat);
+      shin.position.set(0, 0.17, 0);
+      fpvKickLeg.add(shin);
+
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.2), shoeMat);
+      boot.position.set(0, 0.34, -0.04);
+      fpvKickLeg.add(boot);
+
+      fpvViewmodel.userData = { leftGroup, rightGroup, fpvKickLeg };
+    }
+
+    /**
+     * Adds subtle glowing neon rings at the feet of characters for clear tracking
+     * in the slanted top-down neon-glitch radar camera.
+     */
+    function buildRadarBeacons() {
+      const makeBlip = (hex) => {
+        const mesh = new THREE.Mesh(
+          new THREE.RingGeometry(0.32, 0.46, 24),
+          new THREE.MeshBasicMaterial({ color: hex, side: THREE.DoubleSide, transparent: true, opacity: 0.72 })
+        );
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.y = 0.172;
+        scene.add(mesh);
+        return mesh;
+      };
+      minimapPlayerBlip = makeBlip(0x22d3ee); // Cyan radar beacon for Player Citizen
+      minimapThugBlip = makeBlip(0xf59e0b);   // Amber radar beacon for Thug
+      minimapCivBlip = makeBlip(0xe879f9);    // Magenta radar beacon for Civilian
+    }
+
+    /**
+     * Builds the urban sidewalk, asphalt street, curb, crosswalk stripes,
+     * streetlight pole, and background building silhouettes with lit windows.
+     */
+    function buildEnvironment() {
+      const roadGeo = new THREE.PlaneGeometry(50, 50);
+      const roadMat = new THREE.MeshStandardMaterial({
+        color: 0x111521,
+        roughness: 0.85,
+        metalness: 0.12
+      });
+      const road = new THREE.Mesh(roadGeo, roadMat);
+      road.rotation.x = -Math.PI / 2;
+      road.receiveShadow = true;
+      scene.add(road);
+
+      const sidewalkGeo = new THREE.BoxGeometry(16, 0.16, 11);
+      const sidewalkMat = new THREE.MeshStandardMaterial({
+        color: 0x262d3d,
+        roughness: 0.9,
+        metalness: 0.05
+      });
+      const sidewalk = new THREE.Mesh(sidewalkGeo, sidewalkMat);
+      sidewalk.position.set(0, 0.08, -1.6);
+      sidewalk.receiveShadow = true;
+      scene.add(sidewalk);
+
+      const curbGeo = new THREE.BoxGeometry(16.05, 0.17, 0.25);
+      const curbMat = new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.8 });
+      const curb = new THREE.Mesh(curbGeo, curbMat);
+      curb.position.set(0, 0.085, 3.85);
+      curb.receiveShadow = true;
+      scene.add(curb);
+
+      const stripeMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.7 });
+      for (let i = -3; i <= 3; i++) {
+        const stripe = new THREE.Mesh(new THREE.PlaneGeometry(0.65, 2.2), stripeMat);
+        stripe.rotation.x = -Math.PI / 2;
+        stripe.position.set(i * 1.4, 0.01, 5.4);
+        stripe.receiveShadow = true;
+        scene.add(stripe);
+      }
+
+      const lampGroup = new THREE.Group();
+      lampGroup.position.set(0, 0.16, -2.5);
+
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.3 });
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 0.5, 8), poleMat);
+      base.position.y = 0.25;
+      base.castShadow = true;
+      lampGroup.add(base);
+
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 4.4, 8), poleMat);
+      pole.position.y = 2.4;
+      pole.castShadow = true;
+      lampGroup.add(pole);
+
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 1.35), poleMat);
+      arm.position.set(0, 4.55, 0.55);
+      lampGroup.add(arm);
+
+      const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffedd5 });
+      const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 12), bulbMat);
+      bulb.position.set(0, 4.42, 1.15);
+      lampGroup.add(bulb);
+
+      const hood = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.2, 8), poleMat);
+      hood.position.set(0, 4.55, 1.15);
+      lampGroup.add(hood);
+
+      scene.add(lampGroup);
+
+      const buildingConfigs = [
+        { x: -6.8, z: -7.5, w: 5.5, h: 11, d: 5, color: 0x0f172a },
+        { x: -1.2, z: -9.5, w: 6.2, h: 14, d: 5.5, color: 0x111827 },
+        { x: 5.2, z: -8.0, w: 6.0, h: 12, d: 5, color: 0x0d1323 },
+        { x: 10.5, z: -5.5, w: 4.8, h: 9.5, d: 5, color: 0x131b2e }
+      ];
+
+      const winWarm = new THREE.MeshBasicMaterial({ color: 0xfde68a });
+      const winCool = new THREE.MeshBasicMaterial({ color: 0x7dd3fc });
+
+      buildingConfigs.forEach((b, idx) => {
+        const bMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w, b.h, b.d),
+          new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.9 })
+        );
+        bMesh.position.set(b.x, b.h / 2, b.z);
+        scene.add(bMesh);
+
+        for (let row = 0; row < 4; row++) {
+          for (let col = -1; col <= 1; col++) {
+            if ((row + col + idx) % 2 === 0) {
+              const win = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.55, 0.75),
+                (row + idx) % 3 === 0 ? winWarm : winCool
+              );
+              win.position.set(
+                b.x + col * 1.35,
+                2.5 + row * 1.9,
+                b.z + b.d / 2 + 0.02
+              );
+              scene.add(win);
+            }
+          }
+        }
+      });
+
+      const signBoard = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 1.1, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x991b1b, emissive: 0x7f1d1d, emissiveIntensity: 0.6 })
+      );
+      signBoard.position.set(-4.3, 4.2, -4.95);
+      scene.add(signBoard);
+    }
+
+    function buildLighting() {
+      const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x0f172a, 0.55);
+      scene.add(hemiLight);
+
+      const streetLampLight = new THREE.PointLight(0xffb74d, 2.2, 16, 1.6);
+      streetLampLight.position.set(0, 4.3, -1.35);
+      streetLampLight.castShadow = true;
+      streetLampLight.shadow.mapSize.width = 1024;
+      streetLampLight.shadow.mapSize.height = 1024;
+      scene.add(streetLampLight);
+
+      const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.85);
+      rimLight.position.set(4, 5, -5);
+      scene.add(rimLight);
+
+      speakerSpotlight = new THREE.SpotLight(0xfbbf24, 0, 12, Math.PI / 6, 0.55, 1);
+      speakerSpotlight.position.set(0, 4.6, 1.5);
+      speakerSpotlight.target.position.set(0, 1.2, 0);
+      scene.add(speakerSpotlight);
+      scene.add(speakerSpotlight.target);
+    }
+
+    function createCharacter({ role, primaryColor, accentColor, pantsColor, skinColor, headStyle, scaleY }) {
+      const root = new THREE.Group();
+      const baseOffset = new THREE.Group();
+      baseOffset.position.y = 0.16;
+      baseOffset.scale.set(1, scaleY, 1);
+      root.add(baseOffset);
+
+      const matPrimary = new THREE.MeshStandardMaterial({ color: primaryColor, roughness: 0.65, flatShading: true });
+      const matAccent = new THREE.MeshStandardMaterial({ color: accentColor, roughness: 0.4, metalness: 0.3, flatShading: true });
+      const matPants = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.8, flatShading: true });
+      const matSkin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.55, flatShading: true });
+      const matDark = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
+
+      // Articulated Left & Right Hip Pivots (for walk, run, jump & kick)
+      const leftLegPivot = new THREE.Group();
+      leftLegPivot.position.set(-0.15, 0.78, 0);
+      baseOffset.add(leftLegPivot);
+
+      const legGeo = new THREE.BoxGeometry(0.22, 0.72, 0.24);
+      const shoeGeo = new THREE.BoxGeometry(0.24, 0.12, 0.34);
+
+      const leftLeg = new THREE.Mesh(legGeo, matPants);
+      leftLeg.position.set(0, -0.36, 0);
+      leftLeg.castShadow = true;
+      leftLegPivot.add(leftLeg);
+
+      const leftShoe = new THREE.Mesh(shoeGeo, matAccent);
+      leftShoe.position.set(0, -0.72, 0.04);
+      leftLegPivot.add(leftShoe);
+
+      const rightLegPivot = new THREE.Group();
+      rightLegPivot.position.set(0.15, 0.78, 0);
+      baseOffset.add(rightLegPivot);
+
+      const rightLeg = new THREE.Mesh(legGeo, matPants);
+      rightLeg.position.set(0, -0.36, 0);
+      rightLeg.castShadow = true;
+      rightLegPivot.add(rightLeg);
+
+      const rightShoe = new THREE.Mesh(shoeGeo, matAccent);
+      rightShoe.position.set(0, -0.72, 0.04);
+      rightLegPivot.add(rightShoe);
+
+      // Upper Body Pivot
+      const torsoPivot = new THREE.Group();
+      torsoPivot.position.set(0, 0.78, 0);
+      baseOffset.add(torsoPivot);
+
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.76, 0.36), matPrimary);
+      torso.position.y = 0.38;
+      torso.castShadow = true;
+      torsoPivot.add(torso);
+
+      if (role === 'thug') {
+        const chain = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.022, 6, 12), matAccent);
+        chain.position.set(0, 0.62, 0.19);
+        chain.rotation.x = 0.25;
+        torsoPivot.add(chain);
+      } else if (role === 'citizen') {
+        const badge = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.04), matAccent);
+        badge.position.set(0.16, 0.56, 0.19);
+        torsoPivot.add(badge);
+
+        const backpack = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.52, 0.22), matDark);
+        backpack.position.set(0, 0.42, -0.25);
+        backpack.castShadow = true;
+        torsoPivot.add(backpack);
+      } else {
+        const collar = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.16, 0.38), matAccent);
+        collar.position.set(0, 0.69, 0);
+        torsoPivot.add(collar);
+      }
+
+      // Left & Right Articulated Arms
+      const leftArmPivot = new THREE.Group();
+      leftArmPivot.position.set(-0.41, 0.68, 0);
+      torsoPivot.add(leftArmPivot);
+
+      const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.66, 0.18), matPrimary);
+      leftArm.position.y = -0.28;
+      leftArm.castShadow = true;
+      leftArmPivot.add(leftArm);
+
+      const leftHand = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), matSkin);
+      leftHand.position.y = -0.64;
+      leftArmPivot.add(leftHand);
+
+      const rightArmPivot = new THREE.Group();
+      rightArmPivot.position.set(0.41, 0.68, 0);
+      torsoPivot.add(rightArmPivot);
+
+      const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.66, 0.18), matPrimary);
+      rightArm.position.y = -0.28;
+      rightArm.castShadow = true;
+      rightArmPivot.add(rightArm);
+
+      const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), matSkin);
+      rightHand.position.y = -0.64;
+      rightArmPivot.add(rightHand);
+
+      // Head Pivot
+      const headPivot = new THREE.Group();
+      headPivot.position.set(0, 0.82, 0);
+      torsoPivot.add(headPivot);
+
+      const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.42), matSkin);
+      headMesh.position.y = 0.22;
+      headMesh.castShadow = true;
+      headPivot.add(headMesh);
+
+      const eyeGeo = new THREE.BoxGeometry(0.065, 0.065, 0.04);
+      const leftEye = new THREE.Mesh(eyeGeo, matDark);
+      leftEye.position.set(-0.1, 0.24, 0.21);
+      headPivot.add(leftEye);
+
+      const rightEye = new THREE.Mesh(eyeGeo, matDark);
+      rightEye.position.set(0.1, 0.24, 0.21);
+      headPivot.add(rightEye);
+
+      const browGeo = new THREE.BoxGeometry(0.11, 0.03, 0.04);
+      const leftBrow = new THREE.Mesh(browGeo, matDark);
+      leftBrow.position.set(-0.1, 0.30, 0.215);
+      leftBrow.rotation.z = role === 'thug' ? -0.18 : role === 'citizen' ? -0.1 : 0.18;
+      headPivot.add(leftBrow);
+
+      const rightBrow = new THREE.Mesh(browGeo, matDark);
+      rightBrow.position.set(0.1, 0.30, 0.215);
+      rightBrow.rotation.z = role === 'thug' ? 0.18 : role === 'citizen' ? 0.1 : -0.18;
+      headPivot.add(rightBrow);
+
+      // Articulated Lower Jaw / Mouth
+      const jawPivot = new THREE.Group();
+      jawPivot.position.set(0, 0.08, 0.02);
+      headPivot.add(jawPivot);
+
+      const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.11, 0.36), matSkin);
+      jawMesh.position.set(0, -0.02, 0);
+      jawPivot.add(jawMesh);
+
+      const mouthInterior = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.04, 0.05),
+        new THREE.MeshBasicMaterial({ color: 0x450a0a })
+      );
+      mouthInterior.position.set(0, 0.03, 0.17);
+      jawPivot.add(mouthInterior);
+
+      if (headStyle === 'cap') {
+        const capCrown = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.45), matPrimary);
+        capCrown.position.set(0, 0.42, 0);
+        headPivot.add(capCrown);
+
+        const capBrim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.24), matAccent);
+        capBrim.position.set(0, 0.36, 0.26);
+        headPivot.add(capBrim);
+      } else if (headStyle === 'beanie') {
+        const beanie = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.16, 0.45), matPrimary);
+        beanie.position.set(0, 0.43, 0);
+        headPivot.add(beanie);
+
+        const beanieCuff = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.07, 0.47), matAccent);
+        beanieCuff.position.set(0, 0.37, 0);
+        headPivot.add(beanieCuff);
+      } else {
+        const hairTop = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.46), matDark);
+        hairTop.position.set(0, 0.43, -0.01);
+        headPivot.add(hairTop);
+      }
+
+      return {
+        root,
+        baseOffset,
+        torsoPivot,
+        headPivot,
+        jawPivot,
+        leftArmPivot,
+        rightArmPivot,
+        leftLegPivot,
+        rightLegPivot,
+        baseScaleY: scaleY
+      };
+    }
+
+    function createSpeechIndicators() {
+      const ringGeo = new THREE.RingGeometry(0.55, 0.72, 32);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0
+      });
+      speakerRing = new THREE.Mesh(ringGeo, ringMat);
+      speakerRing.rotation.x = -Math.PI / 2;
+      speakerRing.position.set(0, 0.175, 0);
+      scene.add(speakerRing);
+
+      // Combat Impact Shockwave Ring
+      const impactGeo = new THREE.RingGeometry(0.18, 0.38, 24);
+      const impactMat = new THREE.MeshBasicMaterial({
+        color: 0xf59e0b,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0
+      });
+      impactRingMesh = new THREE.Mesh(impactGeo, impactMat);
+      impactRingMesh.position.set(0, 1.1, 0);
+      impactRingMesh.userData = { timer: 0 };
+      scene.add(impactRingMesh);
+
+      const badgeCanvas = document.createElement('canvas');
+      badgeCanvas.width = 256;
+      badgeCanvas.height = 128;
+      const ctx = badgeCanvas.getContext('2d');
+
+      const texture = new THREE.CanvasTexture(badgeCanvas);
+      const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0 });
+      floatingBubbleSprite = new THREE.Sprite(spriteMat);
+      floatingBubbleSprite.scale.set(1.25, 0.625, 1);
+      floatingBubbleSprite.userData = { canvas: badgeCanvas, ctx, texture };
+      scene.add(floatingBubbleSprite);
+    }
+
+    function updateFloatingBadge(speakerRole) {
+      if (!floatingBubbleSprite) return;
+      if (!speakerRole) {
+        floatingBubbleSprite.material.opacity = 0;
+        return;
+      }
+
+      const { canvas, ctx, texture } = floatingBubbleSprite.userData;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const fill =
+        speakerRole === 'thug'
+          ? '#f59e0b'
+          : speakerRole === 'citizen'
+          ? '#10b981'
+          : '#38bdf8';
+      const label =
+        speakerRole === 'thug'
+          ? 'THUG • SPEAKING'
+          : speakerRole === 'citizen'
+          ? 'CITIZEN • SPEAKING'
+          : 'CIVILIAN • SPEAKING';
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect(16, 20, 224, 68, 24);
+      ctx.fill();
+
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = fill;
+      ctx.stroke();
+
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(116, 88);
+      ctx.lineTo(140, 88);
+      ctx.lineTo(128, 108);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 20px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 128, 55);
+
+      texture.needsUpdate = true;
+      floatingBubbleSprite.material.opacity = 1;
+    }
+
+    /**
+     * ============================================================================
+     * 3. PLAYER MOVEMENT, JUMP, RUN, PUNCH & KICK COMBAT LOGIC
+     * ============================================================================
+     */
+    function triggerJump() {
+      if (!state.isGrounded) return;
+      state.isGrounded = false;
+      state.verticalVel = 6.2;
+      flashActionButton('btn-act-jump', 260);
+    }
+
+    function triggerPunch() {
+      if (state.punchTimer > 0.08) return;
+      state.punchTimer = state.punchDuration;
+      state.punchSide *= -1;
+      flashActionButton('btn-act-punch', 240);
+      checkMeleeHit('punch');
+    }
+
+    function triggerKick() {
+      if (state.kickTimer > 0.1) return;
+      state.kickTimer = state.kickDuration;
+      flashActionButton('btn-act-kick', 300);
+      checkMeleeHit('kick');
+    }
+
+    function checkMeleeHit(attackType) {
+      if (!citizenRig) return;
+      const forward = new THREE.Vector3(
+        Math.sin(citizenRig.root.rotation.y),
+        0,
+        Math.cos(citizenRig.root.rotation.y)
+      );
+      const strikePoint = citizenRig.root.position.clone().addScaledVector(forward, 0.95);
+
+      // Spawn glowing impact ring at fist/foot strike location
+      if (impactRingMesh) {
+        impactRingMesh.position.set(strikePoint.x, attackType === 'kick' ? 0.95 : 1.25, strikePoint.z);
+        impactRingMesh.lookAt(camera.position);
+        impactRingMesh.material.color.setHex(attackType === 'kick' ? 0x22d3ee : 0xf59e0b);
+        impactRingMesh.material.opacity = 0.95;
+        impactRingMesh.scale.set(0.5, 0.5, 0.5);
+        impactRingMesh.userData.timer = 0.32;
+      }
+
+      // Check proximity to Thug & Civilian for procedural hit flinch
+      const targets = [
+        { key: 'thug', rig: thugRig },
+        { key: 'civilian', rig: civilianRig }
+      ];
+      for (const t of targets) {
+        const dist = strikePoint.distanceTo(t.rig.root.position);
+        if (dist < 1.15) {
+          state.npcFlinch[t.key] = attackType === 'kick' ? 1.0 : 0.72;
+        }
+      }
+    }
+
+    function flashActionButton(id, ms = 220) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add('is-active');
+      clearTimeout(el._flashTimer);
+      el._flashTimer = setTimeout(() => {
+        el.classList.remove('is-active');
+      }, ms);
+    }
+
+    function syncMovementButtonHighlights() {
+      const map = [
+        ['btn-key-up', state.keys.up],
+        ['btn-key-down', state.keys.down],
+        ['btn-key-left', state.keys.left],
+        ['btn-key-right', state.keys.right],
+        ['btn-act-run', state.isRunning]
+      ];
+      for (const [id, active] of map) {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('is-active', Boolean(active));
+      }
+    }
+
+    function updatePlayerPhysicsAndMovement(dt) {
+      if (!citizenRig) return;
+
+      // 1) Gravity & Jump Vertical Physics
+      if (!state.isGrounded || state.verticalY > 0 || state.verticalVel !== 0) {
+        state.verticalY += state.verticalVel * dt;
+        state.verticalVel -= 16.5 * dt;
+        if (state.verticalY <= 0) {
+          state.verticalY = 0;
+          state.verticalVel = 0;
+          state.isGrounded = true;
+          state.landSquash = 1.0;
+        }
+      }
+      state.landSquash = Math.max(0, state.landSquash - dt * 5.5);
+      citizenRig.root.position.y = state.verticalY;
+
+      // Squash & stretch on landing
+      const squashOffset = Math.sin(state.landSquash * Math.PI) * 0.14;
+      citizenRig.baseOffset.scale.set(
+        1 + squashOffset * 0.6,
+        citizenRig.baseScaleY - squashOffset,
+        1 + squashOffset * 0.6
+      );
+
+      // 2) Decay Punch & Kick Timers
+      state.punchTimer = Math.max(0, state.punchTimer - dt);
+      state.kickTimer = Math.max(0, state.kickTimer - dt);
+      state.npcFlinch.thug = Math.max(0, state.npcFlinch.thug - dt * 2.8);
+      state.npcFlinch.civilian = Math.max(0, state.npcFlinch.civilian - dt * 2.8);
+
+      // 3) Planar Movement (Walk vs. Sprint/Run)
+      const camForward = new THREE.Vector3();
+      camera.getWorldDirection(camForward);
+      camForward.y = 0;
+      if (camForward.lengthSq() < 0.0001) {
+        camForward.set(0, 0, -1);
+      } else {
+        camForward.normalize();
+      }
+      const camRight = new THREE.Vector3().crossVectors(camForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+      const moveDir = new THREE.Vector3(0, 0, 0);
+      if (state.keys.up) moveDir.add(camForward);
+      if (state.keys.down) moveDir.sub(camForward);
+      if (state.keys.right) moveDir.add(camRight);
+      if (state.keys.left) moveDir.sub(camRight);
+
+      const isMovingInput = moveDir.lengthSq() > 0.001;
+      const targetMaxSpeed = state.isRunning ? 5.8 : 3.2;
+
+      if (isMovingInput) {
+        moveDir.normalize();
+        state.playerSpeed = THREE.MathUtils.lerp(state.playerSpeed, targetMaxSpeed, dt * 12);
+
+        const targetAngle = Math.atan2(moveDir.x, moveDir.z);
+        let diff = targetAngle - citizenRig.root.rotation.y;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        citizenRig.root.rotation.y += diff * Math.min(1, dt * 14);
+
+        const nextPos = citizenRig.root.position.clone().addScaledVector(moveDir, state.playerSpeed * dt);
+        nextPos.x = THREE.MathUtils.clamp(nextPos.x, -6.5, 6.5);
+        nextPos.z = THREE.MathUtils.clamp(nextPos.z, -1.8, 6.2);
+
+        const obstacles = [
+          { x: thugRig.root.position.x, z: thugRig.root.position.z, r: 0.72 },
+          { x: civilianRig.root.position.x, z: civilianRig.root.position.z, r: 0.72 },
+          { x: 0, z: -2.5, r: 0.55 }
+        ];
+        for (const obs of obstacles) {
+          const dx = nextPos.x - obs.x;
+          const dz = nextPos.z - obs.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < obs.r && dist > 0.0001) {
+            const push = (obs.r - dist) / dist;
+            nextPos.x += dx * push;
+            nextPos.z += dz * push;
+          }
+        }
+
+        const actualDelta = new THREE.Vector3(
+          nextPos.x - citizenRig.root.position.x,
+          0,
+          nextPos.z - citizenRig.root.position.z
+        );
+        citizenRig.root.position.x = nextPos.x;
+        citizenRig.root.position.z = nextPos.z;
+
+        if (state.cameraFollow) {
+          controls.target.add(actualDelta);
+          camera.position.add(actualDelta);
+        }
+
+        const cadence = state.isRunning ? 16.5 : 10.5;
+        state.walkPhase += dt * cadence;
+      } else {
+        state.playerSpeed = THREE.MathUtils.lerp(state.playerSpeed, 0, dt * 12);
+        if (state.playerSpeed < 0.03) state.playerSpeed = 0;
+      }
+
+      // 4) Update HUD Animation State Badge
+      const isCitizenSpeaking = state.activeSpeaker === 'citizen';
+      const animLabel =
+        state.kickTimer > 0
+          ? 'KICK'
+          : state.punchTimer > 0
+          ? 'PUNCH'
+          : !state.isGrounded
+          ? 'JUMP'
+          : isCitizenSpeaking
+          ? 'SPEAKING'
+          : state.playerSpeed > 3.9
+          ? 'RUNNING'
+          : state.playerSpeed > 0.25
+          ? 'WALKING'
+          : 'IDLE';
+
+      if (animLabel !== state.lastAnimLabel) {
+        state.lastAnimLabel = animLabel;
+        const badge = document.getElementById('player-anim-badge');
+        if (badge) {
+          badge.textContent = animLabel;
+          badge.className =
+            animLabel === 'PUNCH' || animLabel === 'KICK' || animLabel === 'SPEAKING'
+              ? 'ml-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-amber-500/25 text-amber-300 border border-amber-400/60'
+              : animLabel === 'RUNNING' || animLabel === 'JUMP' || animLabel === 'WALKING'
+              ? 'ml-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-sky-500/25 text-sky-300 border border-sky-400/60'
+              : 'ml-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+        }
+      }
+    }
+
+    /**
+     * ============================================================================
+     * 4. MULTI-CAMERA UPDATES & RENDER PIPELINE
+     * ============================================================================
+     */
+    function updateExtraCamerasAndViewmodel(elapsed) {
+      if (!citizenRig || !fpvCamera || !minimapCamera) return;
+
+      const pPos = citizenRig.root.position;
+      const pYaw = citizenRig.root.rotation.y;
+      const forward = new THREE.Vector3(Math.sin(pYaw), 0, Math.cos(pYaw));
+
+      // --- A) First-Person Viewmodel Camera (Citizen Eye-Level) ---
+      const walkBobY = state.playerSpeed > 0.2 && state.isGrounded
+        ? Math.abs(Math.sin(state.walkPhase)) * (state.isRunning ? 0.055 : 0.03)
+        : 0;
+      fpvCamera.position.set(
+        pPos.x + forward.x * 0.22,
+        pPos.y + 1.56 + walkBobY,
+        pPos.z + forward.z * 0.22
+      );
+      const lookTarget = fpvCamera.position.clone().addScaledVector(forward, 5.0);
+      lookTarget.y -= 0.28; // Slight downward pitch to see street & characters clearly
+      fpvCamera.lookAt(lookTarget);
+
+      // Animate First-Person Viewmodel Arms, Fists & Kick Boot
+      if (fpvViewmodel && fpvViewmodel.userData) {
+        const { leftGroup, rightGroup, fpvKickLeg } = fpvViewmodel.userData;
+        const moveRatio = THREE.MathUtils.clamp(state.playerSpeed / 5.8, 0, 1);
+        const swayX = Math.cos(state.walkPhase * 0.5) * 0.022 * moveRatio;
+        const swayY = Math.abs(Math.sin(state.walkPhase * 0.5)) * 0.025 * moveRatio;
+
+        // Punch interpolation (0 -> 1 -> 0)
+        const punchProgress = state.punchTimer > 0
+          ? Math.sin((1 - state.punchTimer / state.punchDuration) * Math.PI)
+          : 0;
+        const rightPunch = state.punchSide === 1 ? punchProgress : 0;
+        const leftPunch = state.punchSide === -1 ? punchProgress : 0;
+
+        leftGroup.position.set(
+          -0.23 + swayX + leftPunch * 0.14,
+          -0.21 - swayY + leftPunch * 0.07 - (!state.isGrounded ? 0.04 : 0),
+          -0.34 - leftPunch * 0.24
+        );
+        leftGroup.rotation.set(leftPunch * 0.22, -leftPunch * 0.25, 0);
+
+        rightGroup.position.set(
+          0.23 + swayX - rightPunch * 0.14,
+          -0.21 - swayY + rightPunch * 0.07 - (!state.isGrounded ? 0.04 : 0),
+          -0.34 - rightPunch * 0.24
+        );
+        rightGroup.rotation.set(rightPunch * 0.22, rightPunch * 0.25, 0);
+
+        // Kick leg swing in First-Person Viewmodel
+        const kickProgress = state.kickTimer > 0
+          ? Math.sin((1 - state.kickTimer / state.kickDuration) * Math.PI)
+          : 0;
+        fpvKickLeg.position.set(0.08, -0.58 + kickProgress * 0.42, -0.22 - kickProgress * 0.22);
+        fpvKickLeg.rotation.x = -kickProgress * 1.15;
+      }
+
+      // --- B) Top-Right Circular Slanted Neon-Glitch Radar Camera ---
+      const glitchPulse = Math.sin(elapsed * 29) > 0.96 ? (Math.random() - 0.5) * 0.14 : 0;
+      minimapCamera.position.set(
+        pPos.x + 2.4 + glitchPulse,
+        9.2,
+        pPos.z + 4.4
+      );
+      minimapCamera.lookAt(pPos.x, 0.4, pPos.z - 0.35);
+
+      // Update Radar Beacons
+      if (minimapPlayerBlip) minimapPlayerBlip.position.set(pPos.x, 0.172, pPos.z);
+      if (minimapThugBlip) minimapThugBlip.position.set(thugRig.root.position.x, 0.172, thugRig.root.position.z);
+      if (minimapCivBlip) minimapCivBlip.position.set(civilianRig.root.position.x, 0.172, civilianRig.root.position.z);
+    }
+
+    function renderAllCameras() {
+      const fullW = window.innerWidth;
+      const fullH = window.innerHeight;
+
+      // 1) Render Main Fullscreen Scene
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, fullW, fullH);
+      renderer.clear();
+      renderer.render(scene, camera);
+
+      // 2) Render First-Person Viewmodel PIP Window
+      renderer.setScissorTest(true);
+
+      const fpvEl = document.getElementById('fpv-frame');
+      if (fpvEl) {
+        const rect = fpvEl.getBoundingClientRect();
+        if (rect.width > 10 && rect.height > 10) {
+          const vpX = Math.max(0, Math.floor(rect.left));
+          const vpY = Math.max(0, Math.floor(fullH - rect.bottom));
+          const vpW = Math.floor(rect.width);
+          const vpH = Math.floor(rect.height);
+
+          fpvCamera.aspect = vpW / vpH;
+          fpvCamera.updateProjectionMatrix();
+
+          citizenRig.root.visible = false;
+          fpvViewmodel.visible = true;
+
+          renderer.setViewport(vpX, vpY, vpW, vpH);
+          renderer.setScissor(vpX, vpY, vpW, vpH);
+          renderer.clearDepth();
+          renderer.render(scene, fpvCamera);
+
+          citizenRig.root.visible = true;
+          fpvViewmodel.visible = false;
+        }
+      }
+
+      // 3) Render Top-Right Circular Slanted Neon-Glitch Radar Camera
+      const miniEl = document.getElementById('minimap-frame');
+      if (miniEl) {
+        const rect = miniEl.getBoundingClientRect();
+        if (rect.width > 10 && rect.height > 10) {
+          const vpX = Math.max(0, Math.floor(rect.left));
+          const vpY = Math.max(0, Math.floor(fullH - rect.bottom));
+          const vpW = Math.floor(rect.width);
+          const vpH = Math.floor(rect.height);
+
+          minimapCamera.aspect = vpW / vpH;
+          minimapCamera.updateProjectionMatrix();
+
+          renderer.setViewport(vpX, vpY, vpW, vpH);
+          renderer.setScissor(vpX, vpY, vpW, vpH);
+          renderer.clearDepth();
+          renderer.render(scene, minimapCamera);
+        }
+      }
+
+      // Restore full viewport & disable scissor test cleanly
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, fullW, fullH);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.getElapsedTime();
+
+      updatePlayerPhysicsAndMovement(dt);
+
+      // Update Impact Ring animation
+      if (impactRingMesh && impactRingMesh.userData.timer > 0) {
+        impactRingMesh.userData.timer = Math.max(0, impactRingMesh.userData.timer - dt);
+        const p = 1 - impactRingMesh.userData.timer / 0.32;
+        const s = 0.5 + p * 1.9;
+        impactRingMesh.scale.set(s, s, s);
+        impactRingMesh.material.opacity = (1 - p) * 0.9;
+      }
+
+      state.mouthPulse = Math.max(0, state.mouthPulse - dt * 5.2);
+
+      const isThugTalking = state.activeSpeaker === 'thug';
+      const isCivTalking = state.activeSpeaker === 'civilian';
+      const isCitizenTalking = state.activeSpeaker === 'citizen';
+
+      // Animate Thug Rig
+      animateCharacterRig(thugRig, {
+        elapsed,
+        phaseOffset: 0,
+        isSpeaking: isThugTalking,
+        isListening: isCivTalking || isCitizenTalking,
+        mouthAmount: isThugTalking ? state.mouthPulse : 0,
+        gestureStyle: 'thug',
+        walkSpeedRatio: 0,
+        walkPhase: 0,
+        isRunning: false,
+        isAirborne: false,
+        punchProgress: 0,
+        punchSide: 1,
+        kickProgress: 0,
+        flinchAmount: state.npcFlinch.thug
+      });
+
+      // Animate Civilian Rig
+      animateCharacterRig(civilianRig, {
+        elapsed,
+        phaseOffset: 1.7,
+        isSpeaking: isCivTalking,
+        isListening: isThugTalking || isCitizenTalking,
+        mouthAmount: isCivTalking ? state.mouthPulse : 0,
+        gestureStyle: 'civilian',
+        walkSpeedRatio: 0,
+        walkPhase: 0,
+        isRunning: false,
+        isAirborne: false,
+        punchProgress: 0,
+        punchSide: 1,
+        kickProgress: 0,
+        flinchAmount: state.npcFlinch.civilian
+      });
+
+      // Animate Player-Controlled Citizen Rig
+      const walkRatio = THREE.MathUtils.clamp(state.playerSpeed / 5.8, 0, 1);
+      const punchProgress = state.punchTimer > 0
+        ? Math.sin((1 - state.punchTimer / state.punchDuration) * Math.PI)
+        : 0;
+      const kickProgress = state.kickTimer > 0
+        ? Math.sin((1 - state.kickTimer / state.kickDuration) * Math.PI)
+        : 0;
+
+      animateCharacterRig(citizenRig, {
+        elapsed,
+        phaseOffset: 3.1,
+        isSpeaking: isCitizenTalking,
+        isListening: isThugTalking || isCivTalking,
+        mouthAmount: isCitizenTalking ? state.mouthPulse : 0,
+        gestureStyle: 'citizen',
+        walkSpeedRatio: walkRatio,
+        walkPhase: state.walkPhase,
+        isRunning: state.isRunning && state.playerSpeed > 3.5,
+        isAirborne: !state.isGrounded,
+        punchProgress,
+        punchSide: state.punchSide,
+        kickProgress,
+        flinchAmount: 0
+      });
+
+      // Update Spotlight, Ground Ring & Floating 3D Speech Indicator
+      if (state.activeSpeaker) {
+        const targetRig = isThugTalking
+          ? thugRig
+          : isCitizenTalking
+          ? citizenRig
+          : civilianRig;
+        const targetPos = targetRig.root.position;
+        const accentHex = isThugTalking
+          ? 0xf59e0b
+          : isCitizenTalking
+          ? 0x10b981
+          : 0x38bdf8;
+
+        speakerSpotlight.intensity = THREE.MathUtils.lerp(speakerSpotlight.intensity, 3.2, dt * 8);
+        speakerSpotlight.color.setHex(accentHex);
+        speakerSpotlight.target.position.lerp(
+          new THREE.Vector3(targetPos.x, 1.35 + targetPos.y, targetPos.z),
+          dt * 10
+        );
+
+        speakerRing.position.x = THREE.MathUtils.lerp(speakerRing.position.x, targetPos.x, dt * 10);
+        speakerRing.position.z = THREE.MathUtils.lerp(speakerRing.position.z, targetPos.z, dt * 10);
+        speakerRing.material.color.setHex(accentHex);
+        speakerRing.material.opacity = 0.65 + Math.sin(elapsed * 8) * 0.2;
+        const ringScale = 1 + Math.sin(elapsed * 6) * 0.06;
+        speakerRing.scale.set(ringScale, ringScale, 1);
+
+        floatingBubbleSprite.position.set(
+          targetPos.x,
+          targetPos.y + 2.45 + Math.sin(elapsed * 4) * 0.05,
+          targetPos.z
+        );
+      } else {
+        speakerSpotlight.intensity = THREE.MathUtils.lerp(speakerSpotlight.intensity, 0, dt * 6);
+        speakerRing.material.opacity = THREE.MathUtils.lerp(speakerRing.material.opacity, 0, dt * 8);
+      }
+
+      controls.update();
+      updateExtraCamerasAndViewmodel(elapsed);
+      renderAllCameras();
+    }
+
+    function animateCharacterRig(
+      rig,
+      {
+        elapsed,
+        phaseOffset,
+        isSpeaking,
+        isListening,
+        mouthAmount,
+        gestureStyle,
+        walkSpeedRatio,
+        walkPhase,
+        isRunning,
+        isAirborne,
+        punchProgress,
+        punchSide,
+        kickProgress,
+        flinchAmount
+      }
+    ) {
+      const t = elapsed + phaseOffset;
+      const isWalking = walkSpeedRatio > 0.03;
+
+      // Reset torso yaw before applying combat twists
+      rig.torsoPivot.rotation.y = 0;
+
+      // 1) Legs: Kick > Airborne Jump > Walk/Run Stride > Idle
+      if (rig.leftLegPivot && rig.rightLegPivot) {
+        if (kickProgress > 0.01) {
+          rig.rightLegPivot.rotation.x = -kickProgress * 1.48;
+          rig.rightLegPivot.rotation.z = -kickProgress * 0.22;
+          rig.leftLegPivot.rotation.x = kickProgress * 0.22;
+          rig.leftLegPivot.rotation.z = 0;
+        } else if (isAirborne) {
+          rig.leftLegPivot.rotation.x = -0.45;
+          rig.rightLegPivot.rotation.x = 0.35;
+        } else if (isWalking) {
+          const strideAmp = isRunning ? 0.92 : 0.68;
+          const legSwing = Math.sin(walkPhase) * strideAmp * Math.min(1, walkSpeedRatio * 1.6);
+          rig.leftLegPivot.rotation.x = legSwing;
+          rig.rightLegPivot.rotation.x = -legSwing;
+          rig.leftLegPivot.rotation.z = 0;
+          rig.rightLegPivot.rotation.z = 0;
+        } else {
+          rig.leftLegPivot.rotation.x = THREE.MathUtils.lerp(rig.leftLegPivot.rotation.x, 0, 0.2);
+          rig.rightLegPivot.rotation.x = THREE.MathUtils.lerp(rig.rightLegPivot.rotation.x, 0, 0.2);
+          rig.leftLegPivot.rotation.z = 0;
+          rig.rightLegPivot.rotation.z = 0;
+        }
+      }
+
+      // 2) Torso Breathing / Walk & Sprint Bounce
+      const idleBreathe = Math.sin(t * 2.4) * 0.015;
+      const walkBounce = isWalking && !isAirborne
+        ? Math.abs(Math.sin(walkPhase)) * (isRunning ? 0.08 : 0.05)
+        : 0;
+      rig.torsoPivot.position.y = 0.78 + idleBreathe * (1 - walkSpeedRatio) + walkBounce;
+      rig.torsoPivot.rotation.z = isWalking
+        ? Math.sin(walkPhase) * (isRunning ? 0.07 : 0.04)
+        : Math.sin(t * 1.2) * 0.025;
+
+      // 3) Upper Body & Arm Poses (Priority: Flinch -> Kick -> Punch -> Speaking -> Jump -> Walk/Run -> Idle)
+      if (flinchAmount > 0.01) {
+        rig.torsoPivot.rotation.x = -flinchAmount * 0.42;
+        rig.headPivot.rotation.x = -flinchAmount * 0.35;
+        rig.leftArmPivot.rotation.x = -flinchAmount * 0.9;
+        rig.leftArmPivot.rotation.z = flinchAmount * 0.45;
+        rig.rightArmPivot.rotation.x = -flinchAmount * 0.9;
+        rig.rightArmPivot.rotation.z = -flinchAmount * 0.45;
+      } else if (kickProgress > 0.01) {
+        rig.torsoPivot.rotation.x = -kickProgress * 0.26;
+        rig.torsoPivot.rotation.y = -kickProgress * 0.28;
+        rig.headPivot.rotation.x = kickProgress * 0.14;
+        rig.leftArmPivot.rotation.x = -kickProgress * 0.55;
+        rig.leftArmPivot.rotation.z = 0.48 * kickProgress;
+        rig.rightArmPivot.rotation.x = kickProgress * 0.45;
+        rig.rightArmPivot.rotation.z = -0.48 * kickProgress;
+      } else if (punchProgress > 0.01) {
+        rig.torsoPivot.rotation.x = punchProgress * 0.18;
+        rig.torsoPivot.rotation.y = punchSide * punchProgress * 0.44;
+        rig.headPivot.rotation.y = -punchSide * punchProgress * 0.25;
+
+        if (punchSide === 1) {
+          rig.rightArmPivot.rotation.x = -1.55 * punchProgress;
+          rig.rightArmPivot.rotation.z = -0.12 * punchProgress;
+          rig.leftArmPivot.rotation.x = -0.85 * punchProgress;
+          rig.leftArmPivot.rotation.z = 0.22 * punchProgress;
+        } else {
+          rig.leftArmPivot.rotation.x = -1.55 * punchProgress;
+          rig.leftArmPivot.rotation.z = 0.12 * punchProgress;
+          rig.rightArmPivot.rotation.x = -0.85 * punchProgress;
+          rig.rightArmPivot.rotation.z = -0.22 * punchProgress;
+        }
+      } else if (isSpeaking) {
+        const talkBounce = Math.abs(Math.sin(elapsed * 14)) * 0.035 * (0.4 + mouthAmount);
+        rig.torsoPivot.position.y += talkBounce;
+        rig.torsoPivot.rotation.x = (isRunning ? 0.22 : isWalking ? 0.12 : 0.08) + Math.sin(elapsed * 9) * 0.04;
+
+        rig.headPivot.rotation.x = Math.sin(elapsed * 11) * 0.09;
+        rig.headPivot.rotation.y = Math.sin(elapsed * 5.5) * 0.07;
+
+        const jawDrop = (0.18 + Math.abs(Math.sin(elapsed * 18)) * 0.32) * Math.max(0.35, mouthAmount);
+        rig.jawPivot.rotation.x = jawDrop;
+        rig.jawPivot.position.y = 0.08 - jawDrop * 0.06;
+
+        if (gestureStyle === 'thug') {
+          rig.rightArmPivot.rotation.x = -0.65 + Math.sin(elapsed * 8) * 0.25;
+          rig.rightArmPivot.rotation.z = -0.22;
+          rig.leftArmPivot.rotation.x = -0.25 + Math.cos(elapsed * 6) * 0.15;
+          rig.leftArmPivot.rotation.z = 0.15;
+        } else if (gestureStyle === 'citizen') {
+          rig.rightArmPivot.rotation.x = -1.25 + Math.sin(elapsed * 10) * 0.24;
+          rig.rightArmPivot.rotation.z = -0.25;
+          rig.leftArmPivot.rotation.x = -0.85 + Math.cos(elapsed * 9) * 0.2;
+          rig.leftArmPivot.rotation.z = 0.32;
+        } else {
+          rig.leftArmPivot.rotation.x = -1.05 + Math.sin(elapsed * 11) * 0.22;
+          rig.leftArmPivot.rotation.z = 0.35;
+          rig.rightArmPivot.rotation.x = -0.85 + Math.cos(elapsed * 10) * 0.2;
+          rig.rightArmPivot.rotation.z = -0.35;
+        }
+      } else if (isAirborne) {
+        rig.torsoPivot.rotation.x = 0.12;
+        rig.leftArmPivot.rotation.x = -0.95;
+        rig.leftArmPivot.rotation.z = 0.35;
+        rig.rightArmPivot.rotation.x = -0.95;
+        rig.rightArmPivot.rotation.z = -0.35;
+      } else if (isWalking) {
+        const armAmp = isRunning ? 0.95 : 0.58;
+        const armSwing = Math.sin(walkPhase) * armAmp * Math.min(1, walkSpeedRatio * 1.6);
+        rig.torsoPivot.rotation.x = isRunning ? 0.24 : 0.1;
+        rig.headPivot.rotation.x = isRunning ? -0.14 : -0.04;
+        rig.headPivot.rotation.y = Math.sin(t * 1.4) * 0.04;
+        rig.jawPivot.rotation.x = 0;
+        rig.jawPivot.position.y = 0.08;
+
+        rig.leftArmPivot.rotation.x = -armSwing;
+        rig.leftArmPivot.rotation.z = 0.12;
+        rig.rightArmPivot.rotation.x = armSwing;
+        rig.rightArmPivot.rotation.z = -0.12;
+      } else if (isListening) {
+        rig.torsoPivot.rotation.x = gestureStyle === 'civilian' ? -0.07 : 0.02;
+        rig.headPivot.rotation.x = Math.sin(t * 2.0) * 0.03;
+        rig.headPivot.rotation.y = Math.sin(t * 1.5) * 0.04;
+        rig.jawPivot.rotation.x = 0;
+        rig.jawPivot.position.y = 0.08;
+
+        rig.leftArmPivot.rotation.x = Math.sin(t * 2.1) * 0.05;
+        rig.leftArmPivot.rotation.z = 0.08;
+        rig.rightArmPivot.rotation.x = -Math.sin(t * 2.1) * 0.05;
+        rig.rightArmPivot.rotation.z = -0.08;
+      } else {
+        rig.torsoPivot.rotation.x = 0;
+        rig.headPivot.rotation.x = Math.sin(t * 1.8) * 0.03;
+        rig.headPivot.rotation.y = Math.sin(t * 1.1) * 0.06;
+        rig.jawPivot.rotation.x = 0;
+        rig.jawPivot.position.y = 0.08;
+
+        rig.leftArmPivot.rotation.x = Math.sin(t * 2.0) * 0.05;
+        rig.leftArmPivot.rotation.z = 0.07;
+        rig.rightArmPivot.rotation.x = -Math.sin(t * 2.0) * 0.05;
+        rig.rightArmPivot.rotation.z = -0.07;
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    /**
+     * ============================================================================
+     * 5. WEB SPEECH API (TTS) & TIMED SUBTITLE ENGINE (REPAIRED & COMPLETE)
+     * ============================================================================
+     */
+    function initVoices() {
+      if (!state.ttsAvailable) {
+        updateTtsBadge('Silent Fallback Mode', false);
+        return;
+      }
+
+      const populate = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (!voices || voices.length === 0) return;
+
+        // Filter English voices first, fallback to full voice list
+        const englishVoices = voices.filter((v) => /^en/i.test(v.lang));
+        const pool = englishVoices.length > 0 ? englishVoices : voices;
+
+        const thugCandidate =
+          pool.find((v) => /david|daniel|mark|alex|fred|male|guy|google uk english male/i.test(v.name)) ||
+          pool[0];
+
+        const civCandidate =
+          pool.find(
+            (v) =>
+              v !== thugCandidate &&
+              /samantha|victoria|karen|zira|aria|jenny|female|google us english|google uk english female/i.test(v.name)
+          ) ||
+          pool.find((v) => v !== thugCandidate) ||
+          pool[0];
+
+        const citizenCandidate =
+          pool.find((v) => v !== thugCandidate && v !== civCandidate) ||
+          pool[pool.length - 1] ||
+          pool[0];
+
+        state.thugVoice = thugCandidate;
+        state.civilianVoice = civCandidate;
+        state.citizenVoice = citizenCandidate;
+
+        updateTtsBadge(`${voices.length} Voices Ready`, true);
+      };
+
+      populate();
+      if (typeof window.speechSynthesis.onvoiceschanged !== 'undefined') {
+        window.speechSynthesis.onvoiceschanged = populate;
+      }
+    }
+
+    function updateTtsBadge(label, ok) {
+      const badge = document.getElementById('tts-badge');
+      const dot = document.getElementById('status-dot');
+      if (badge) {
+        badge.textContent = label;
+        badge.className = ok ? 'text-emerald-300 font-semibold' : 'text-amber-300 font-medium';
+      }
+      if (dot) {
+        dot.className = ok
+          ? 'w-2.5 h-2.5 rounded-full bg-emerald-400'
+          : 'w-2.5 h-2.5 rounded-full bg-amber-400';
+      }
+    }
+
+    function clearDialogueTimers() {
+      if (state.fallbackTimer) {
+        clearTimeout(state.fallbackTimer);
+        state.fallbackTimer = null;
+      }
+      if (state.nextLineTimer) {
+        clearTimeout(state.nextLineTimer);
+        state.nextLineTimer = null;
+      }
+      if (state.syllableInterval) {
+        clearInterval(state.syllableInterval);
+        state.syllableInterval = null;
+      }
+    }
+
+    function showSubtitle(lineObj, index) {
+      const box = document.getElementById('subtitle-box');
+      const speakerEl = document.getElementById('subtitle-speaker');
+      const stepEl = document.getElementById('subtitle-step');
+      const textEl = document.getElementById('subtitle-text');
+      if (!box || !speakerEl || !stepEl || !textEl) return;
+
+      const borderClass =
+        lineObj.speaker === 'thug'
+          ? 'border-amber-400/85'
+          : lineObj.speaker === 'citizen'
+          ? 'border-emerald-400/85'
+          : 'border-sky-400/85';
+      const titleColor =
+        lineObj.speaker === 'thug'
+          ? 'text-amber-400'
+          : lineObj.speaker === 'citizen'
+          ? 'text-emerald-400'
+          : 'text-sky-400';
+
+      box.className = `max-w-lg w-full bg-slate-950/92 backdrop-blur-lg border-2 ${borderClass} rounded-2xl px-4 py-2.5 shadow-2xl subtitle-pop`;
+      speakerEl.className = `text-xs font-extrabold uppercase tracking-wider ${titleColor}`;
+      speakerEl.textContent = lineObj.displayName;
+      stepEl.textContent = `Line ${index + 1} / ${SCRIPT.length}`;
+      textEl.textContent = `“${lineObj.text}”`;
+    }
+
+    function hideSubtitle() {
+      const box = document.getElementById('subtitle-box');
+      if (box) box.classList.add('hidden');
+    }
+
+    function startMouthCadence() {
+      if (state.syllableInterval) clearInterval(state.syllableInterval);
+      state.mouthPulse = 1.0;
+      state.syllableInterval = setInterval(() => {
+        state.mouthPulse = 0.55 + Math.random() * 0.45;
+      }, 145);
+    }
+
+    function stopDialogue() {
+      state.speechToken += 1;
+      state.isPlaying = false;
+      state.playSequence = false;
+      state.currentLineIndex = -1;
+      state.activeSpeaker = null;
+      state.mouthPulse = 0;
+
+      clearDialogueTimers();
+
+      if (state.ttsAvailable) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (err) {
+          // Ignore SpeechSynthesis cancellation errors in restricted contexts
+        }
+      }
+
+      updateFloatingBadge(null);
+      hideSubtitle();
+      highlightLineButton(-1);
+      document.getElementById('btn-play-label').textContent = 'Play Scene';
+    }
+
+    function playFullDialogue() {
+      stopDialogue();
+      state.playSequence = true;
+      document.getElementById('btn-play-label').textContent = 'Playing...';
+      speakLine(0, true);
+    }
+
+    function speakLine(index, continueSequence = false) {
+      const lineObj = SCRIPT[index];
+      if (!lineObj) {
+        stopDialogue();
+        return;
+      }
+
+      // Cancel any prior utterance & timers cleanly before starting new line
+      state.speechToken += 1;
+      const token = state.speechToken;
+      clearDialogueTimers();
+      if (state.ttsAvailable) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (err) {
+          // Ignore SpeechSynthesis cancel errors
+        }
+      }
+
+      state.isPlaying = true;
+      state.playSequence = continueSequence;
+      state.currentLineIndex = index;
+      state.activeSpeaker = lineObj.speaker;
+
+      showSubtitle(lineObj, index);
+      updateFloatingBadge(lineObj.speaker);
+      highlightLineButton(index);
+      startMouthCadence();
+
+      const scaledDurationMs = Math.max(
+        900,
+        Math.round(lineObj.fallbackDurationMs / Math.max(0.5, state.rateMultiplier))
+      );
+
+      const handleLineComplete = () => {
+        if (token !== state.speechToken) return;
+        clearDialogueTimers();
+        state.activeSpeaker = null;
+        state.mouthPulse = 0;
+        updateFloatingBadge(null);
+
+        if (continueSequence && index + 1 < SCRIPT.length) {
+          state.nextLineTimer = setTimeout(() => {
+            if (token === state.speechToken) {
+              speakLine(index + 1, true);
+            }
+          }, 420);
+        } else {
+          state.isPlaying = false;
+          state.playSequence = false;
+          state.currentLineIndex = -1;
+          highlightLineButton(-1);
+          document.getElementById('btn-play-label').textContent = 'Play Scene';
+          state.nextLineTimer = setTimeout(() => {
+            if (!state.isPlaying) hideSubtitle();
+          }, 1200);
+        }
+      };
+
+      // Silent / Fallback Timed Mode when muted or Web Speech API is unavailable
+      if (state.isMuted || !state.ttsAvailable) {
+        state.fallbackTimer = setTimeout(handleLineComplete, scaledDurationMs);
+        return;
+      }
+
+      try {
+        const utterance = new SpeechSynthesisUtterance(lineObj.text);
+        const chosenVoice =
+          lineObj.speaker === 'thug'
+            ? state.thugVoice
+            : lineObj.speaker === 'citizen'
+            ? state.citizenVoice
+            : state.civilianVoice;
+
+        if (chosenVoice) utterance.voice = chosenVoice;
+        utterance.rate = THREE.MathUtils.clamp(lineObj.baseRate * state.rateMultiplier, 0.5, 2.0);
+        utterance.pitch = THREE.MathUtils.clamp(lineObj.basePitch + state.pitchOffset, 0.1, 2.0);
+
+        utterance.onboundary = () => {
+          if (token === state.speechToken) {
+            state.mouthPulse = 1.0;
+          }
+        };
+
+        utterance.onend = handleLineComplete;
+        utterance.onerror = handleLineComplete;
+
+        // Safety watchdog timer in case a browser speech engine hangs on onend
+        state.fallbackTimer = setTimeout(handleLineComplete, scaledDurationMs + 2600);
+
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
+        state.fallbackTimer = setTimeout(handleLineComplete, scaledDurationMs);
+      }
+    }
+
+    function highlightLineButton(activeIndex) {
+      document.querySelectorAll('.line-trigger').forEach((btn) => {
+        const idx = Number(btn.dataset.line);
+        const ringClass =
+          idx === 1
+            ? 'ring-sky-400'
+            : idx === 3
+            ? 'ring-emerald-400'
+            : idx === 4
+            ? 'ring-teal-300'
+            : 'ring-amber-400';
+        if (idx === activeIndex) {
+          btn.classList.add('ring-2', ringClass, 'bg-slate-800');
+        } else {
+          btn.classList.remove(
+            'ring-2',
+            'ring-sky-400',
+            'ring-emerald-400',
+            'ring-teal-300',
+            'ring-amber-400',
+            'bg-slate-800'
+          );
+        }
+      });
+    }
+
+    function bindUIEvents() {
+      document.getElementById('btn-play').addEventListener('click', () => {
+        playFullDialogue();
+      });
+
+      document.getElementById('btn-citizen-speak').addEventListener('click', () => {
+        document.getElementById('btn-play-label').textContent = 'Play Scene';
+        speakLine(3, false);
+      });
+
+      document.getElementById('btn-citizen-dev-speak').addEventListener('click', () => {
+        document.getElementById('btn-play-label').textContent = 'Play Scene';
+        speakLine(4, false);
+      });
+
+      document.getElementById('btn-stop').addEventListener('click', () => {
+        stopDialogue();
+      });
+
+      // Camera Follow Toggle
+      const camFollowBtn = document.getElementById('btn-cam-follow');
+      camFollowBtn.addEventListener('click', () => {
+        state.cameraFollow = !state.cameraFollow;
+        camFollowBtn.textContent = state.cameraFollow ? 'Cam: Follow' : 'Cam: Free';
+        camFollowBtn.classList.toggle('border-emerald-500', state.cameraFollow);
+        camFollowBtn.classList.toggle('text-emerald-300', state.cameraFollow);
+        if (state.cameraFollow && citizenRig) {
+          controls.target.set(citizenRig.root.position.x, 1.35, citizenRig.root.position.z);
+        }
+      });
+
+      // Individual line triggers
+      document.querySelectorAll('.line-trigger').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const lineIdx = Number(btn.dataset.line);
+          document.getElementById('btn-play-label').textContent = 'Play Scene';
+          speakLine(lineIdx, false);
+        });
+      });
+
+      // Keyboard controls: WASD/Arrows (Move), Shift (Run), Space/J (Jump), F/Z (Punch), K/X (Kick)
+      window.addEventListener('keydown', (e) => {
+        if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') state.keys.up = true;
+        if (code === 'KeyS' || code === 'ArrowDown') state.keys.down = true;
+        if (code === 'KeyA' || code === 'ArrowLeft') state.keys.left = true;
+        if (code === 'KeyD' || code === 'ArrowRight') state.keys.right = true;
+        if (code === 'ShiftLeft' || code === 'ShiftRight') state.isRunning = true;
+
+        if (code === 'Space' || code === 'KeyJ') {
+          e.preventDefault();
+          triggerJump();
+        }
+        if (code === 'KeyF' || code === 'KeyZ') {
+          e.preventDefault();
+          triggerPunch();
+        }
+        if (code === 'KeyK' || code === 'KeyX') {
+          e.preventDefault();
+          triggerKick();
+        }
+        syncMovementButtonHighlights();
+      });
+
+      window.addEventListener('keyup', (e) => {
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') state.keys.up = false;
+        if (code === 'KeyS' || code === 'ArrowDown') state.keys.down = false;
+        if (code === 'KeyA' || code === 'ArrowLeft') state.keys.left = false;
+        if (code === 'KeyD' || code === 'ArrowRight') state.keys.right = false;
+        if (code === 'ShiftLeft' || code === 'ShiftRight') state.isRunning = false;
+        syncMovementButtonHighlights();
+      });
+
+      // On-screen W A S D directional buttons (Mouse + Touch pointer events)
+      document.querySelectorAll('#mobile-dpad .key-btn').forEach((btn) => {
+        const dir = btn.dataset.dir;
+        const setDir = (val) => {
+          state.keys[dir] = val;
+          syncMovementButtonHighlights();
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          setDir(true);
+        });
+        btn.addEventListener('pointerup', () => setDir(false));
+        btn.addEventListener('pointerleave', () => setDir(false));
+        btn.addEventListener('pointercancel', () => setDir(false));
+      });
+
+      // On-screen RUN (hold or click), JUMP, PUNCH & KICK buttons
+      const runBtn = document.getElementById('btn-act-run');
+      runBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        state.isRunning = true;
+        syncMovementButtonHighlights();
+      });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((evt) => {
+        runBtn.addEventListener(evt, () => {
+          state.isRunning = false;
+          syncMovementButtonHighlights();
+        });
+      });
+
+      document.getElementById('btn-act-jump').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        triggerJump();
+      });
+      document.getElementById('btn-act-punch').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        triggerPunch();
+      });
+      document.getElementById('btn-act-kick').addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        triggerKick();
+      });
+
+      // Speed slider
+      const rateInput = document.getElementById('ctrl-rate');
+      const rateVal = document.getElementById('val-rate');
+      rateInput.addEventListener('input', (e) => {
+        state.rateMultiplier = parseFloat(e.target.value);
+        rateVal.textContent = `${state.rateMultiplier.toFixed(1)}x`;
+      });
+
+      // Pitch offset slider
+      const pitchInput = document.getElementById('ctrl-pitch');
+      const pitchVal = document.getElementById('val-pitch');
+      pitchInput.addEventListener('input', (e) => {
+        state.pitchOffset = parseFloat(e.target.value);
+        const sign = state.pitchOffset >= 0 ? '+' : '';
+        pitchVal.textContent = `${sign}${state.pitchOffset.toFixed(1)}`;
+      });
+
+      // Mute / Silent subtitle mode toggle
+      const muteBtn = document.getElementById('btn-mute');
+      muteBtn.addEventListener('click', () => {
+        state.isMuted = !state.isMuted;
+        document.getElementById('mute-icon').textContent = state.isMuted ? '🔇' : '🔊';
+        document.getElementById('mute-label').textContent = state.isMuted ? 'Silent' : 'TTS On';
+        updateTtsBadge(
+          state.isMuted ? 'Silent Timed Mode' : state.ttsAvailable ? 'Web Speech Ready' : 'Fallback Mode',
+          !state.isMuted && state.ttsAvailable
+        );
+      });
+    }
+
+    // Initialize everything on window load
+    window.addEventListener('load', () => {
+      initWebGLScene();
+      initVoices();
+      bindUIEvents();
+      animate();
+    });
+  </script>
+</body>
+</html>

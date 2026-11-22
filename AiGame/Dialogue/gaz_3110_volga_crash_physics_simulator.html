@@ -1,0 +1,2251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GAZ-3110 Volga | Soft-Body & Modular Crash Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0b0d10;
+            font-family: 'Inter', sans-serif;
+            color: #f3f4f6;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .glass-panel {
+            background: rgba(15, 18, 24, 0.78);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+        }
+        .btn-control {
+            transition: all 0.15s ease;
+        }
+        .btn-control:active {
+            transform: scale(0.95);
+        }
+        @keyframes pulse-warn {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+        .animate-warn {
+            animation: pulse-warn 0.9s infinite;
+        }
+        /* Touch controls for mobile/tablet */
+        .touch-btn {
+            background: rgba(20, 24, 32, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            backdrop-filter: blur(6px);
+            touch-action: none;
+        }
+        .touch-btn:active, .touch-btn.active {
+            background: rgba(163, 28, 56, 0.75);
+            border-color: rgba(255, 255, 255, 0.45);
+        }
+    </style>
+</head>
+<body>
+<div id="game-container">
+    <!-- Top Left: Title & Controls Bar -->
+    <div class="absolute top-3 left-3 z-20 flex flex-col gap-2 max-w-[340px]">
+        <div class="glass-panel rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-3">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-[#8c1d35] ring-2 ring-red-400/40"></span>
+                    <h1 class="text-sm font-extrabold tracking-wide uppercase text-white">GAZ-3110 <span class="text-rose-400 font-semibold">Volga</span></h1>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-0.5">Nizhny Novgorod Proving Ground</p>
+            </div>
+            <div class="flex items-center gap-1.5">
+                <button id="btn-audio" title="Toggle Engine & Crash Sound" class="btn-control glass-panel hover:bg-white/10 text-gray-200 rounded-lg p-2 text-xs font-semibold">
+                    🔊
+                </button>
+                <button id="btn-camera" title="Switch Camera (C)" class="btn-control glass-panel hover:bg-white/10 text-gray-200 rounded-lg px-2.5 py-2 text-xs font-semibold">
+                    CAM [C]
+                </button>
+                <button id="btn-reset" title="Repair & Reset Vehicle (R)" class="btn-control bg-rose-700 hover:bg-rose-600 text-white rounded-lg px-2.5 py-2 text-xs font-bold shadow-lg shadow-rose-950/50">
+                    REPAIR [R]
+                </button>
+            </div>
+        </div>
+
+        <!-- Active Damage / Status Alerts -->
+        <div id="alerts-container" class="flex flex-col gap-1.5 pointer-events-none"></div>
+    </div>
+
+    <!-- Top Right: Modular Part Integrity Schematic -->
+    <div class="absolute top-3 right-3 z-20 glass-panel rounded-xl p-3 w-[195px] sm:w-[215px]">
+        <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Diagnostics</span>
+            <span id="overall-health-text" class="mono text-xs font-bold text-emerald-400">100%</span>
+        </div>
+
+        <!-- SVG Top-Down GAZ-3110 Wireframe Schematic -->
+        <div class="relative w-full flex justify-center my-1">
+            <svg id="car-schematic" viewBox="0 0 140 240" class="w-[115px] h-[195px] sm:w-[125px] sm:h-[210px] drop-shadow">
+                <!-- Chassis Core -->
+                <rect id="diag-chassis" x="38" y="34" width="64" height="172" rx="10" fill="#10b981" fill-opacity="0.22" stroke="#10b981" stroke-width="2"/>
+                
+                <!-- Engine Block -->
+                <rect id="diag-engine" x="50" y="42" width="40" height="34" rx="5" fill="#10b981" fill-opacity="0.65" stroke="#ffffff" stroke-width="1"/>
+                <text x="70" y="62" text-anchor="middle" fill="#fff" font-size="8" font-family="JetBrains Mono" font-weight="bold">ZMZ-406</text>
+
+                <!-- Fuel Tank (Rear) -->
+                <rect id="diag-fuel" x="52" y="176" width="36" height="18" rx="4" fill="#10b981" fill-opacity="0.65" stroke="#ffffff" stroke-width="1"/>
+                <text x="70" y="188" text-anchor="middle" fill="#fff" font-size="7" font-family="JetBrains Mono">FUEL</text>
+
+                <!-- Front Bumper -->
+                <path id="diag-bumperF" d="M 34 22 Q 70 12 106 22 L 103 31 Q 70 23 37 31 Z" fill="#10b981" stroke="#0f172a" stroke-width="1"/>
+                <!-- Rear Bumper -->
+                <path id="diag-bumperR" d="M 37 209 Q 70 215 103 209 L 106 218 Q 70 226 34 218 Z" fill="#10b981" stroke="#0f172a" stroke-width="1"/>
+
+                <!-- Hood -->
+                <rect id="diag-hood" x="43" y="34" width="54" height="48" rx="4" fill="#10b981" fill-opacity="0.35" stroke="#10b981" stroke-width="1.5"/>
+                
+                <!-- Windshield -->
+                <polygon id="diag-windshield" points="44,85 96,85 92,102 48,102" fill="#38bdf8" fill-opacity="0.45" stroke="#bae6fd" stroke-width="1"/>
+
+                <!-- Trunk -->
+                <rect id="diag-trunk" x="44" y="164" width="52" height="38" rx="4" fill="#10b981" fill-opacity="0.35" stroke="#10b981" stroke-width="1.5"/>
+
+                <!-- Doors (FL, FR, RL, RR) -->
+                <rect id="diag-doorFL" x="31" y="86" width="7" height="38" rx="2" fill="#10b981"/>
+                <rect id="diag-doorFR" x="102" y="86" width="7" height="38" rx="2" fill="#10b981"/>
+                <rect id="diag-doorRL" x="31" y="127" width="7" height="36" rx="2" fill="#10b981"/>
+                <rect id="diag-doorRR" x="102" y="127" width="7" height="36" rx="2" fill="#10b981"/>
+
+                <!-- Wheels (FL, FR, RL, RR) -->
+                <rect id="diag-wheelFL" x="21" y="46" width="11" height="26" rx="3" fill="#10b981" stroke="#111827" stroke-width="1.5"/>
+                <rect id="diag-wheelFR" x="108" y="46" width="11" height="26" rx="3" fill="#10b981" stroke="#111827" stroke-width="1.5"/>
+                <rect id="diag-wheelRL" x="21" y="166" width="11" height="26" rx="3" fill="#10b981" stroke="#111827" stroke-width="1.5"/>
+                <rect id="diag-wheelRR" x="108" y="166" width="11" height="26" rx="3" fill="#10b981" stroke="#111827" stroke-width="1.5"/>
+            </svg>
+        </div>
+
+        <!-- Subsystem Bars -->
+        <div class="space-y-1.5 text-[10px] mono">
+            <div>
+                <div class="flex justify-between text-gray-300 mb-0.5">
+                    <span>ENGINE</span>
+                    <span id="val-engine">100%</span>
+                </div>
+                <div class="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div id="bar-engine" class="h-full bg-emerald-500 transition-all duration-150" style="width: 100%"></div>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between text-gray-300 mb-0.5">
+                    <span>FUEL / CHASSIS</span>
+                    <span id="val-fuel">100%</span>
+                </div>
+                <div class="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div id="bar-fuel" class="h-full bg-emerald-500 transition-all duration-150" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Right: Speedometer, Gear & RPM Cluster -->
+    <div class="hidden sm:flex absolute bottom-4 right-4 z-20 glass-panel rounded-2xl px-5 py-3.5 items-center gap-5">
+        <div>
+            <div class="text-[10px] uppercase tracking-widest text-gray-400 font-semibold">Velocity</div>
+            <div class="flex items-baseline gap-1.5">
+                <span id="hud-speed" class="mono text-4xl font-extrabold text-white tracking-tight">0</span>
+                <span class="text-xs font-bold text-gray-400">KM/H</span>
+            </div>
+            <!-- RPM Bar -->
+            <div class="w-36 h-2 bg-gray-800 rounded-full overflow-hidden mt-2">
+                <div id="hud-rpm-bar" class="h-full bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-75" style="width: 12%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] mono text-gray-400 mt-1">
+                <span id="hud-rpm">850 RPM</span>
+                <span id="hud-cam-label">CHASE CAM</span>
+            </div>
+        </div>
+
+        <div class="h-14 w-[1px] bg-white/10"></div>
+
+        <div class="flex flex-col items-center justify-center">
+            <span class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-1">Gear</span>
+            <div id="hud-gear" class="mono w-11 h-11 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center text-2xl font-extrabold text-rose-400">
+                N
+            </div>
+        </div>
+    </div>
+
+    <!-- Compact Mobile Speedo (Top Center on small screens) -->
+    <div class="flex sm:hidden absolute top-3 left-1/2 -translate-x-1/2 z-20 glass-panel rounded-xl px-3 py-1.5 items-center gap-2.5 pointer-events-none">
+        <span id="hud-speed-mobile" class="mono text-lg font-extrabold text-white">0</span>
+        <span class="text-[10px] text-gray-400 font-bold">KM/H</span>
+        <span id="hud-gear-mobile" class="mono text-xs font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300">N</span>
+    </div>
+
+    <!-- Bottom Left: Desktop Controls Hint -->
+    <div class="hidden md:flex absolute bottom-4 left-4 z-20 glass-panel rounded-xl px-4 py-2.5 items-center gap-4 text-xs text-gray-300">
+        <div><kbd class="px-1.5 py-0.5 bg-white/10 rounded mono text-[11px]">W A S D</kbd> / <kbd class="px-1.5 py-0.5 bg-white/10 rounded mono text-[11px]">Arrows</kbd> Drive</div>
+        <div><kbd class="px-1.5 py-0.5 bg-white/10 rounded mono text-[11px]">SPACE</kbd> Handbrake</div>
+        <div><kbd class="px-1.5 py-0.5 bg-white/10 rounded mono text-[11px]">L</kbd> Lights</div>
+        <div><kbd class="px-1.5 py-0.5 bg-white/10 rounded mono text-[11px]">C</kbd> Camera</div>
+        <div><kbd class="px-1.5 py-0.5 bg-white/10 rounded mono text-[11px]">R</kbd> Repair</div>
+    </div>
+
+    <!-- Mobile / Touch Controls -->
+    <div class="flex md:hidden absolute bottom-4 inset-x-4 z-20 justify-between items-end pointer-events-none">
+        <!-- Steering -->
+        <div class="flex gap-2.5 pointer-events-auto">
+            <button id="touch-left" class="touch-btn w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold text-white">◀</button>
+            <button id="touch-right" class="touch-btn w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold text-white">▶</button>
+        </div>
+        <!-- Pedals -->
+        <div class="flex gap-2.5 pointer-events-auto">
+            <button id="touch-brake" class="touch-btn w-14 h-14 rounded-2xl flex items-center justify-center text-xs font-extrabold text-amber-300">BRK</button>
+            <button id="touch-gas" class="touch-btn w-16 h-16 rounded-2xl flex items-center justify-center text-xs font-extrabold text-emerald-300">GAS</button>
+        </div>
+    </div>
+
+    <!-- Center Banner for Catastrophic Failure / Mechanical Breakdown -->
+    <div id="status-modal" class="hidden absolute inset-x-0 top-1/4 z-30 flex justify-center pointer-events-none px-4">
+        <div id="status-modal-card" class="glass-panel rounded-2xl px-6 py-4 max-w-md w-full text-center border-2 border-rose-500/60 pointer-events-auto">
+            <div id="status-modal-badge" class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-widest bg-rose-600 text-white mb-1.5">
+                CRITICAL FAILURE
+            </div>
+            <h2 id="status-modal-title" class="text-xl font-extrabold text-white">VEHICLE EXPLODED</h2>
+            <p id="status-modal-desc" class="text-xs text-gray-300 mt-1">Fuel tank ruptured under catastrophic structural overload.</p>
+            <button id="btn-modal-reset" class="mt-3.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg transition">
+                TOW & RESTORE GAZ-3110 [R]
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+/**
+ * ============================================================================
+ * GAZ-3110 VOLGA 3D DRIVING & SOFT-BODY MODULAR CRASH PHYSICS ENGINE
+ * ============================================================================
+ */
+
+// --- GLOBAL STATE & CONFIGURATION ---
+const CONFIG = {
+    worldSize: 420,
+    gravity: 24.0,
+    carMass: 1450, // kg (authentic GAZ-3110 curb weight ~1400-1480kg)
+    maxEngineForce: 15500,
+    maxReverseForce: 8500,
+    brakeForce: 22000,
+    handbrakeForce: 16000,
+    maxSpeed: 48.0, // ~173 km/h in world m/s
+    steerMax: 0.56,
+    wheelBase: 2.80,
+    trackWidth: 1.56
+};
+
+let scene, camera, renderer, clock;
+let carGroup, chassisGroup;
+let arenaColliders = [];
+let dynamicDebris = [];
+let particles = [];
+let skidMarks = [];
+let lastSkidPos = [null, null];
+
+// Camera control state
+let cameraMode = 0; // 0: Chase, 1: Hood/Driver, 2: Free Orbit
+const cameraModes = ['CHASE CAM', 'HOOD CAM', 'ORBIT CAM'];
+let camOrbit = { yaw: 0.45, pitch: 0.28, dist: 7.2, isDragging: false, lastX: 0, lastY: 0 };
+let cameraShake = 0;
+
+// Input state
+const keys = {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    handbrake: false
+};
+
+// Audio Engine (Web Audio API procedural synthesis)
+class SoundEngine {
+    constructor() {
+        this.ctx = null;
+        this.enabled = true;
+        this.initialized = false;
+        this.engineOsc1 = null;
+        this.engineOsc2 = null;
+        this.engineGain = null;
+        this.screechGain = null;
+        this.fireGain = null;
+    }
+
+    init() {
+        if (this.initialized) return;
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioCtx();
+
+            // ZMZ-406 2.3L 16V 4-cylinder engine synth
+            this.engineOsc1 = this.ctx.createOscillator();
+            this.engineOsc2 = this.ctx.createOscillator();
+            const engineFilter = this.ctx.createBiquadFilter();
+            this.engineGain = this.ctx.createGain();
+
+            this.engineOsc1.type = 'sawtooth';
+            this.engineOsc2.type = 'triangle';
+            this.engineOsc1.frequency.value = 42;
+            this.engineOsc2.frequency.value = 84;
+
+            engineFilter.type = 'lowpass';
+            engineFilter.frequency.value = 260;
+
+            this.engineGain.gain.value = 0.0;
+
+            this.engineOsc1.connect(engineFilter);
+            this.engineOsc2.connect(engineFilter);
+            engineFilter.connect(this.engineGain);
+            this.engineGain.connect(this.ctx.destination);
+
+            this.engineOsc1.start();
+            this.engineOsc2.start();
+
+            // White noise buffer for tire screech & fire crackle
+            const bufferSize = this.ctx.sampleRate * 2;
+            const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+
+            // Tire screech node
+            const screechSource = this.ctx.createBufferSource();
+            screechSource.buffer = noiseBuffer;
+            screechSource.loop = true;
+            const screechFilter = this.ctx.createBiquadFilter();
+            screechFilter.type = 'bandpass';
+            screechFilter.frequency.value = 1150;
+            screechFilter.Q.value = 6.0;
+            this.screechGain = this.ctx.createGain();
+            this.screechGain.gain.value = 0.0;
+
+            screechSource.connect(screechFilter);
+            screechFilter.connect(this.screechGain);
+            this.screechGain.connect(this.ctx.destination);
+            screechSource.start();
+
+            this.initialized = true;
+        } catch (e) {
+            console.warn('Web Audio unavailable:', e);
+        }
+    }
+
+    update(rpm, isRunning, slipRatio) {
+        if (!this.initialized || !this.enabled) {
+            if (this.engineGain) this.engineGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+            if (this.screechGain) this.screechGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
+            return;
+        }
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+
+        const now = this.ctx.currentTime;
+        if (isRunning) {
+            const baseFreq = 26 + (rpm / 6000) * 115;
+            this.engineOsc1.frequency.setTargetAtTime(baseFreq, now, 0.04);
+            this.engineOsc2.frequency.setTargetAtTime(baseFreq * 1.98, now, 0.04);
+            const vol = 0.055 + (rpm / 6000) * 0.065;
+            this.engineGain.gain.setTargetAtTime(vol, now, 0.06);
+        } else {
+            this.engineGain.gain.setTargetAtTime(0, now, 0.12);
+        }
+
+        const screechVol = Math.min(0.11, Math.max(0, (slipRatio - 0.28) * 0.22));
+        this.screechGain.gain.setTargetAtTime(screechVol, now, 0.05);
+    }
+
+    playCrash(intensity, hasGlass = false) {
+        if (!this.initialized || !this.enabled) return;
+        const now = this.ctx.currentTime;
+        const clamped = Math.min(1.0, intensity / 28);
+
+        // Metallic thud + crunch
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(110 + Math.random() * 50, now);
+        osc.frequency.exponentialRampToValueAtTime(24, now + 0.25 + clamped * 0.2);
+
+        gain.gain.setValueAtTime(0.25 * clamped, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3 + clamped * 0.25);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.55);
+
+        // High-frequency metallic scrape / glass tinkle
+        const bufferSize = Math.floor(this.ctx.sampleRate * (hasGlass ? 0.45 : 0.28));
+        const buf = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.35));
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buf;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = hasGlass ? 'highpass' : 'bandpass';
+        filter.frequency.value = hasGlass ? 2600 : 850;
+
+        const nGain = this.ctx.createGain();
+        nGain.gain.setValueAtTime(0.28 * clamped, now);
+        nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+        noise.connect(filter);
+        filter.connect(nGain);
+        nGain.connect(this.ctx.destination);
+        noise.start(now);
+    }
+
+    playExplosion() {
+        if (!this.initialized || !this.enabled) return;
+        const now = this.ctx.currentTime;
+
+        // Deep sub-bass detonation
+        const sub = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(95, now);
+        sub.frequency.exponentialRampToValueAtTime(16, now + 1.4);
+        subGain.gain.setValueAtTime(0.65, now);
+        subGain.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+        sub.connect(subGain);
+        subGain.connect(this.ctx.destination);
+        sub.start(now);
+        sub.stop(now + 1.55);
+
+        // Roaring blast noise
+        const len = Math.floor(this.ctx.sampleRate * 1.8);
+        const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) {
+            d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.42));
+        }
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(900, now);
+        lp.frequency.exponentialRampToValueAtTime(120, now + 1.7);
+
+        const g = this.ctx.createGain();
+        g.gain.setValueAtTime(0.55, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+
+        src.connect(lp);
+        lp.connect(g);
+        g.connect(this.ctx.destination);
+        src.start(now);
+    }
+
+    playSputter() {
+        if (!this.initialized || !this.enabled) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(48, now);
+        osc.frequency.linearRampToValueAtTime(18, now + 0.35);
+        gain.gain.setValueAtTime(0.14, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.4);
+    }
+}
+
+const soundEngine = new SoundEngine();
+
+// --- VEHICLE PHYSICS & DAMAGE STATE ---
+const carState = {
+    pos: new THREE.Vector3(0, 0.65, 25),
+    vel: new THREE.Vector3(0, 0, 0),
+    heading: Math.PI, // Facing -Z down the test track
+    angularVel: 0,
+    steerAngle: 0,
+    rpm: 850,
+    gear: 1, // -1 = R, 0 = N, 1..5
+    pitch: 0,
+    roll: 0,
+    pitchVel: 0,
+    rollVel: 0,
+    verticalVel: 0,
+    grounded: true,
+    headlightsOn: true,
+    smokeTimer: 0,
+    fireTimer: 0,
+
+    // Failure States: 'OPERATIONAL', 'BROKEN_DOWN', 'EXPLODED'
+    status: 'OPERATIONAL',
+
+    // Subsystem Health (0 - 100)
+    parts: {
+        engine: 100,
+        fuel: 100,
+        chassis: 100,
+        bumperF: 100,
+        bumperR: 100,
+        hood: 100,
+        trunk: 100,
+        doorFL: 100,
+        doorFR: 100,
+        doorRL: 100,
+        doorRR: 100,
+        windshield: 100,
+        headlightL: 100,
+        headlightR: 100,
+        wheelFL: 100,
+        wheelFR: 100,
+        wheelRL: 100,
+        wheelRR: 100
+    },
+
+    // Attachment & Hinge states
+    attached: {
+        bumperF: true,
+        bumperR: true,
+        hood: true,
+        trunk: true,
+        doorFL: true,
+        doorFR: true,
+        doorRL: true,
+        doorRR: true,
+        wheelFL: true,
+        wheelFR: true,
+        wheelRL: true,
+        wheelRR: true
+    },
+
+    // Hinge open angles (radians)
+    hinges: {
+        hood: 0,
+        trunk: 0,
+        doorFL: 0,
+        doorFR: 0,
+        doorRL: 0,
+        doorRR: 0
+    }
+};
+
+// References to 3D meshes & original vertex arrays for soft-body deformation
+const carMeshes = {
+    deformable: [], // { mesh, origPos }
+    parts: {},
+    wheels: [],
+    headlightMeshes: [],
+    taillightMeshes: [],
+    spotlights: [],
+    materials: {}
+};
+
+// --- PROCEDURAL TEXTURES ---
+function createGrilleTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+
+    // Dark grille recess
+    ctx.fillStyle = '#111317';
+    ctx.fillRect(0, 0, 256, 128);
+
+    // Vertical slats (iconic GAZ-3110 split grille)
+    ctx.fillStyle = '#2d323b';
+    for (let x = 10; x < 246; x += 11) {
+        if (x > 112 && x < 144) continue; // Center divider
+        ctx.fillRect(x, 8, 5, 112);
+    }
+
+    // Center vertical bar
+    ctx.fillStyle = '#d1d5db';
+    ctx.fillRect(116, 4, 24, 120);
+
+    // Red GAZ Deer Emblem shield in center
+    ctx.fillStyle = '#991b1b';
+    ctx.beginPath();
+    ctx.moveTo(120, 32);
+    ctx.lineTo(136, 32);
+    ctx.lineTo(134, 86);
+    ctx.lineTo(128, 96);
+    ctx.lineTo(122, 86);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#f3f4f6';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Stylized silver deer silhouette
+    ctx.fillStyle = '#f9fafb';
+    ctx.fillRect(125, 52, 6, 16);
+    ctx.fillRect(127, 42, 4, 12);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    return tex;
+}
+
+function createLicensePlateTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(3, 3, 250, 58);
+
+    // Divider line for RUS region
+    ctx.beginPath();
+    ctx.moveTo(192, 3);
+    ctx.lineTo(192, 61);
+    ctx.stroke();
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 34px JetBrains Mono, monospace';
+    ctx.fillText('A 3110 HH', 14, 44);
+
+    ctx.font = 'bold 22px JetBrains Mono, monospace';
+    ctx.fillText('52', 206, 34);
+    ctx.font = 'bold 11px Inter, sans-serif';
+    ctx.fillText('RUS', 205, 51);
+
+    return new THREE.CanvasTexture(canvas);
+}
+
+function createCrackedGlassTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 256, 256);
+
+    ctx.strokeStyle = 'rgba(235, 248, 255, 0.85)';
+    ctx.lineWidth = 1.5;
+
+    const origins = [[85, 110], [175, 130]];
+    origins.forEach(([ox, oy]) => {
+        for (let r = 12; r < 95; r += 18) {
+            ctx.beginPath();
+            for (let a = 0; a <= Math.PI * 2; a += 0.45) {
+                const rad = r + (Math.random() - 0.5) * 8;
+                const x = ox + Math.cos(a) * rad;
+                const y = oy + Math.sin(a) * rad;
+                if (a === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+        }
+        for (let i = 0; i < 14; i++) {
+            const angle = (i / 14) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(ox, oy);
+            ctx.lineTo(ox + Math.cos(angle) * 115, oy + Math.sin(angle) * 115);
+            ctx.stroke();
+        }
+    });
+
+    return new THREE.CanvasTexture(canvas);
+}
+
+function createConcreteTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#383c42';
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Asphalt / concrete aggregate noise
+    for (let i = 0; i < 9000; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const v = 45 + Math.floor(Math.random() * 32);
+        ctx.fillStyle = `rgb(${v},${v + 2},${v + 5})`;
+        ctx.fillRect(x, y, 2, 2);
+    }
+
+    // Concrete slab expansion joints
+    ctx.strokeStyle = '#25282c';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(2, 2, 252, 252);
+    ctx.strokeRect(256, 2, 254, 252);
+    ctx.strokeRect(2, 256, 252, 254);
+    ctx.strokeRect(256, 256, 254, 254);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(36, 36);
+    return tex;
+}
+
+// Helper to register a mesh for real-time soft-body vertex deformation
+function registerDeformable(mesh) {
+    const posAttr = mesh.geometry.attributes.position;
+    const origPos = new Float32Array(posAttr.array.length);
+    origPos.set(posAttr.array);
+    carMeshes.deformable.push({ mesh, origPos });
+    return mesh;
+}
+
+// --- BUILD DETAILED 3D GAZ-3110 VOLGA ---
+function buildGAZ3110() {
+    if (carGroup) scene.remove(carGroup);
+    carMeshes.deformable = [];
+    carMeshes.parts = {};
+    carMeshes.wheels = [];
+    carMeshes.headlightMeshes = [];
+    carMeshes.taillightMeshes = [];
+    carMeshes.spotlights = [];
+
+    carGroup = new THREE.Group();
+    chassisGroup = new THREE.Group();
+    carGroup.add(chassisGroup);
+
+    // Authentic GAZ-3110 Cherry / Burgundy Metallic Paint ("Спелая вишня")
+    const cherryPaintMat = new THREE.MeshStandardMaterial({
+        color: 0x6e1428,
+        metalness: 0.45,
+        roughness: 0.28
+    });
+    const darkTrimMat = new THREE.MeshStandardMaterial({
+        color: 0x181a1f,
+        metalness: 0.15,
+        roughness: 0.72
+    });
+    const chromeMat = new THREE.MeshStandardMaterial({
+        color: 0xe5e7eb,
+        metalness: 0.92,
+        roughness: 0.14
+    });
+    const glassMat = new THREE.MeshPhysicalMaterial({
+        color: 0x99c2d6,
+        metalness: 0.1,
+        roughness: 0.08,
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide
+    });
+    const interiorMat = new THREE.MeshStandardMaterial({
+        color: 0x262930,
+        roughness: 0.85
+    });
+
+    carMeshes.materials = {
+        paint: cherryPaintMat,
+        trim: darkTrimMat,
+        chrome: chromeMat,
+        glass: glassMat,
+        crackedTex: createCrackedGlassTexture()
+    };
+
+    // 1. MAIN CHASSIS / UNIBODY CORE (High subdivision for realistic vertex crumpling)
+    const lowerBodyGeo = new THREE.BoxGeometry(1.80, 0.56, 4.65, 10, 4, 18);
+    const lowerBody = registerDeformable(new THREE.Mesh(lowerBodyGeo, cherryPaintMat));
+    lowerBody.position.set(0, 0.62, 0);
+    lowerBody.castShadow = true;
+    lowerBody.receiveShadow = true;
+    chassisGroup.add(lowerBody);
+
+    // Side protective black & chrome rubbing strips (characteristic of GAZ-3110)
+    const sideStripGeo = new THREE.BoxGeometry(1.84, 0.06, 3.65, 2, 1, 10);
+    const sideStrip = registerDeformable(new THREE.Mesh(sideStripGeo, darkTrimMat));
+    sideStrip.position.set(0, 0.56, 0.05);
+    chassisGroup.add(sideStrip);
+
+    // Cabin Greenhouse (Roof & Pillars)
+    const cabinGeo = new THREE.BoxGeometry(1.56, 0.54, 2.05, 8, 4, 10);
+    // Taper top vertices of cabin for authentic sedan greenhouse silhouette
+    const cabPos = cabinGeo.attributes.position;
+    for (let i = 0; i < cabPos.count; i++) {
+        const y = cabPos.getY(i);
+        const z = cabPos.getZ(i);
+        if (y > 0) {
+            cabPos.setX(i, cabPos.getX(i) * 0.88);
+            if (z < -0.5) cabPos.setZ(i, z + 0.28); // Sloped windshield A-pillar
+            if (z > 0.5) cabPos.setZ(i, z - 0.24);  // Sloped rear C-pillar
+        }
+    }
+    cabinGeo.computeVertexNormals();
+    const cabinMesh = registerDeformable(new THREE.Mesh(cabinGeo, cherryPaintMat));
+    cabinMesh.position.set(0, 1.16, 0.12);
+    cabinMesh.castShadow = true;
+    chassisGroup.add(cabinMesh);
+
+    // Interior Seats & Dashboard
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.26, 0.42), interiorMat);
+    dash.position.set(0, 0.96, -0.62);
+    chassisGroup.add(dash);
+
+    const seatF = new THREE.Mesh(new THREE.BoxGeometry(1.40, 0.45, 0.55), interiorMat);
+    seatF.position.set(0, 0.82, -0.05);
+    chassisGroup.add(seatF);
+
+    const seatR = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.45, 0.55), interiorMat);
+    seatR.position.set(0, 0.82, 0.65);
+    chassisGroup.add(seatR);
+
+    // Engine Block under Hood (visible when hood pops open or flies off!)
+    const engineGroup = new THREE.Group();
+    engineGroup.position.set(0, 0.72, -1.55);
+    const engineBlock = new THREE.Mesh(
+        new THREE.BoxGeometry(0.62, 0.44, 0.78),
+        new THREE.MeshStandardMaterial({ color: 0x6b7280, metalness: 0.7, roughness: 0.4 })
+    );
+    const valveCover = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.12, 0.68),
+        new THREE.MeshStandardMaterial({ color: 0x1f2937, metalness: 0.5, roughness: 0.3 })
+    );
+    valveCover.position.y = 0.26;
+    const radiator = new THREE.Mesh(
+        new THREE.BoxGeometry(0.84, 0.42, 0.10),
+        new THREE.MeshStandardMaterial({ color: 0x111827, metalness: 0.6, roughness: 0.5 })
+    );
+    radiator.position.set(0, 0.02, -0.58);
+    engineGroup.add(engineBlock, valveCover, radiator);
+    chassisGroup.add(engineGroup);
+    carMeshes.parts.engine = engineGroup;
+
+    // 2. FRONT FASCIA: CHROME SPLIT GRILLE, HEADLIGHTS & TURN SIGNALS
+    const grilleTex = createGrilleTexture();
+    const grilleFrame = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.28, 0.08), chromeMat);
+    grilleFrame.position.set(0, 0.72, -2.33);
+    chassisGroup.add(grilleFrame);
+
+    const grilleInsert = new THREE.Mesh(
+        new THREE.BoxGeometry(0.84, 0.22, 0.09),
+        new THREE.MeshStandardMaterial({ map: grilleTex, roughness: 0.4 })
+    );
+    grilleInsert.position.set(0, 0.72, -2.335);
+    chassisGroup.add(grilleInsert);
+
+    // Rectangular Headlights + Amber/Clear Corner Turn Signals
+    [-0.64, 0.64].forEach((xPos, idx) => {
+        const hlGroup = new THREE.Group();
+        hlGroup.position.set(xPos, 0.72, -2.32);
+
+        const hlMat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            emissive: 0xfff4d2,
+            emissiveIntensity: 1.4,
+            roughness: 0.1
+        });
+        const hlLens = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.21, 0.07), hlMat);
+        hlGroup.add(hlLens);
+
+        // Corner signal lamp
+        const turnMat = new THREE.MeshStandardMaterial({
+            color: 0xfde68a,
+            emissive: 0xf59e0b,
+            emissiveIntensity: 0.4,
+            roughness: 0.2
+        });
+        const turnLens = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.20, 0.09), turnMat);
+        turnLens.position.set(xPos < 0 ? -0.21 : 0.21, 0, 0.02);
+        hlGroup.add(turnLens);
+
+        chassisGroup.add(hlGroup);
+        carMeshes.headlightMeshes.push({ group: hlGroup, mat: hlMat, turnMat });
+
+        // Real Three.js SpotLight for night/tunnel illumination
+        const spot = new THREE.SpotLight(0xfff5dc, 2.2, 48, Math.PI / 5, 0.45, 1.2);
+        spot.position.set(xPos, 0.75, -2.35);
+        spot.target.position.set(xPos * 1.2, 0.2, -18);
+        chassisGroup.add(spot);
+        chassisGroup.add(spot.target);
+        carMeshes.spotlights.push(spot);
+    });
+
+    // Rear Taillight Clusters (Red/Amber GAZ-3110 wide horizontal units)
+    [-0.66, 0.66].forEach((xPos) => {
+        const tlMat = new THREE.MeshStandardMaterial({
+            color: 0xdc2626,
+            emissive: 0x991b1b,
+            emissiveIntensity: 0.8,
+            roughness: 0.2
+        });
+        const tlMesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.19, 0.07), tlMat);
+        tlMesh.position.set(xPos, 0.74, 2.33);
+        chassisGroup.add(tlMesh);
+        carMeshes.taillightMeshes.push({ mesh: tlMesh, mat: tlMat });
+    });
+
+    // 3. DETACHABLE FRONT BUMPER (Black molded + Chrome top strip + License Plate)
+    const bumperFGroup = new THREE.Group();
+    bumperFGroup.position.set(0, 0.44, -2.42);
+
+    const bFrontMain = registerDeformable(new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.24, 0.34, 8, 2, 3), darkTrimMat));
+    bFrontMain.castShadow = true;
+    const bFrontChrome = registerDeformable(new THREE.Mesh(new THREE.BoxGeometry(1.90, 0.055, 0.36, 8, 1, 3), chromeMat));
+    bFrontChrome.position.y = 0.09;
+    const bFrontLowerLip = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.11, 0.28), cherryPaintMat);
+    bFrontLowerLip.position.set(0, -0.13, 0.03);
+
+    const plateTex = createLicensePlateTexture();
+    const plateMat = new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.35 });
+    const plateFront = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 0.02), plateMat);
+    plateFront.position.set(0, 0.0, -0.175);
+
+    bumperFGroup.add(bFrontMain, bFrontChrome, bFrontLowerLip, plateFront);
+    chassisGroup.add(bumperFGroup);
+    carMeshes.parts.bumperF = bumperFGroup;
+
+    // 4. DETACHABLE REAR BUMPER
+    const bumperRGroup = new THREE.Group();
+    bumperRGroup.position.set(0, 0.46, 2.42);
+
+    const bRearMain = registerDeformable(new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.24, 0.32, 8, 2, 3), darkTrimMat));
+    bRearMain.castShadow = true;
+    const bRearChrome = registerDeformable(new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.055, 0.34, 8, 1, 3), chromeMat));
+    bRearChrome.position.y = 0.09;
+    const plateRear = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 0.02), plateMat);
+    plateRear.position.set(0, 0.02, 0.165);
+
+    bumperRGroup.add(bRearMain, bRearChrome, plateRear);
+    chassisGroup.add(bumperRGroup);
+    carMeshes.parts.bumperR = bumperRGroup;
+
+    // 5. HINGED & DETACHABLE HOOD (Pivot at rear near windshield Z = -0.88)
+    const hoodPivot = new THREE.Group();
+    hoodPivot.position.set(0, 0.91, -0.88);
+    const hoodGeo = new THREE.BoxGeometry(1.66, 0.07, 1.44, 8, 2, 8);
+    const hoodMesh = registerDeformable(new THREE.Mesh(hoodGeo, cherryPaintMat));
+    hoodMesh.position.set(0, 0, -0.72);
+    hoodMesh.castShadow = true;
+    hoodPivot.add(hoodMesh);
+    chassisGroup.add(hoodPivot);
+    carMeshes.parts.hood = hoodPivot;
+
+    // 6. HINGED & DETACHABLE TRUNK LID (Pivot at rear window base Z = 1.18)
+    const trunkPivot = new THREE.Group();
+    trunkPivot.position.set(0, 0.91, 1.18);
+    const trunkGeo = new THREE.BoxGeometry(1.62, 0.07, 1.12, 6, 2, 6);
+    const trunkMesh = registerDeformable(new THREE.Mesh(trunkGeo, cherryPaintMat));
+    trunkMesh.position.set(0, 0, 0.56);
+    trunkMesh.castShadow = true;
+    trunkPivot.add(trunkMesh);
+    chassisGroup.add(trunkPivot);
+    carMeshes.parts.trunk = trunkPivot;
+
+    // 7. WINDSHIELD (Can crack & shatter)
+    const windshieldGeo = new THREE.PlaneGeometry(1.42, 0.56, 4, 4);
+    const windshieldMesh = new THREE.Mesh(windshieldGeo, glassMat.clone());
+    windshieldMesh.position.set(0, 1.15, -0.77);
+    windshieldMesh.rotation.x = -0.52;
+    chassisGroup.add(windshieldMesh);
+    carMeshes.parts.windshield = windshieldMesh;
+
+    // 8. FOUR HINGED & DETACHABLE DOORS (FL, FR, RL, RR)
+    const doorConfigs = [
+        { key: 'doorFL', x: -0.91, zPivot: -0.72, zOffset: 0.46, len: 0.92, side: -1, hasMirror: true },
+        { key: 'doorFR', x:  0.91, zPivot: -0.72, zOffset: 0.46, len: 0.92, side:  1, hasMirror: true },
+        { key: 'doorRL', x: -0.91, zPivot:  0.22, zOffset: 0.44, len: 0.88, side: -1, hasMirror: false },
+        { key: 'doorRR', x:  0.91, zPivot:  0.22, zOffset: 0.44, len: 0.88, side:  1, hasMirror: false }
+    ];
+
+    doorConfigs.forEach(cfg => {
+        const pivot = new THREE.Group();
+        pivot.position.set(cfg.x, 0.64, cfg.zPivot);
+
+        // Lower steel door panel
+        const panelGeo = new THREE.BoxGeometry(0.08, 0.52, cfg.len, 2, 3, 5);
+        const panelMesh = registerDeformable(new THREE.Mesh(panelGeo, cherryPaintMat));
+        panelMesh.position.set(0, 0, cfg.zOffset);
+        panelMesh.castShadow = true;
+        pivot.add(panelMesh);
+
+        // Chrome/Black Door Handle
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.13), chromeMat);
+        handle.position.set(cfg.side * 0.045, 0.16, cfg.zOffset + 0.25);
+        pivot.add(handle);
+
+        // Upper Window Frame + Glass
+        const winFrame = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.44, cfg.len * 0.94), glassMat);
+        winFrame.position.set(cfg.side * -0.05, 0.46, cfg.zOffset);
+        winFrame.rotation.z = cfg.side * 0.18;
+        pivot.add(winFrame);
+
+        // Black Side Mirror on Front Doors
+        if (cfg.hasMirror) {
+            const mirrorArm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.06), darkTrimMat);
+            mirrorArm.position.set(cfg.side * 0.08, 0.28, 0.12);
+            const mirrorHousing = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.11, 0.09), darkTrimMat);
+            mirrorHousing.position.set(cfg.side * 0.15, 0.30, 0.12);
+            pivot.add(mirrorArm, mirrorHousing);
+        }
+
+        chassisGroup.add(pivot);
+        carMeshes.parts[cfg.key] = pivot;
+    });
+
+    // 9. FOUR 6-SPOKE SILVER ALLOY WHEELS (Matching GAZ-3110 reference photo)
+    const wheelPositions = [
+        { key: 'wheelFL', x: -0.82, y: 0.36, z: -1.42, front: true, side: -1 },
+        { key: 'wheelFR', x:  0.82, y: 0.36, z: -1.42, front: true, side:  1 },
+        { key: 'wheelRL', x: -0.82, y: 0.36, z:  1.38, front: false, side: -1 },
+        { key: 'wheelRR', x:  0.82, y: 0.36, z:  1.38, front: false, side:  1 }
+    ];
+
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x16181d, roughness: 0.82 });
+    const alloyMat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.85, roughness: 0.22 });
+
+    wheelPositions.forEach(wp => {
+        const steerPivot = new THREE.Group();
+        steerPivot.position.set(wp.x, wp.y, wp.z);
+
+        const spinGroup = new THREE.Group();
+
+        // Rubber Tire
+        const tireGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.23, 24);
+        tireGeo.rotateZ(Math.PI / 2);
+        const tireMesh = new THREE.Mesh(tireGeo, tireMat);
+        tireMesh.castShadow = true;
+        spinGroup.add(tireMesh);
+
+        // Silver Alloy Rim Dish
+        const rimGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.24, 18);
+        rimGeo.rotateZ(Math.PI / 2);
+        const rimMesh = new THREE.Mesh(rimGeo, alloyMat);
+        spinGroup.add(rimMesh);
+
+        // 6 Iconic Volga Alloy Spokes
+        for (let s = 0; s < 6; s++) {
+            const angle = (s / 6) * Math.PI * 2;
+            const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.245, 0.045, 0.38), alloyMat);
+            spoke.rotation.x = angle;
+            spinGroup.add(spoke);
+        }
+
+        // Center Hubcap
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.255, 12), chromeMat);
+        hub.rotation.z = Math.PI / 2;
+        spinGroup.add(hub);
+
+        steerPivot.add(spinGroup);
+        carGroup.add(steerPivot);
+
+        carMeshes.wheels.push({
+            key: wp.key,
+            steerPivot,
+            spinGroup,
+            basePos: new THREE.Vector3(wp.x, wp.y, wp.z),
+            front: wp.front,
+            side: wp.side
+        });
+        carMeshes.parts[wp.key] = steerPivot;
+    });
+
+    scene.add(carGroup);
+}
+
+// --- BUILD SOVIET / INDUSTRIAL PROVING GROUND ARENA ---
+function buildProvingGround() {
+    const concreteTex = createConcreteTexture();
+    const groundMat = new THREE.MeshStandardMaterial({
+        map: concreteTex,
+        roughness: 0.88,
+        metalness: 0.05
+    });
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.worldSize, CONFIG.worldSize), groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Painted Proving Ground Track Markings (White & Hazard Yellow/Black)
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xd1d5db });
+    for (let z = -170; z <= 170; z += 24) {
+        const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 10), lineMat);
+        dash.rotation.x = -Math.PI / 2;
+        dash.position.set(0, 0.015, z);
+        scene.add(dash);
+    }
+
+    // Perimeter Concrete Walls
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x646b73, roughness: 0.9 });
+    const hazardMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.6 });
+    const steelMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.7, roughness: 0.35 });
+
+    const half = CONFIG.worldSize / 2;
+    const perimWalls = [
+        { x: 0, z: -half, w: CONFIG.worldSize, d: 4, h: 4 },
+        { x: 0, z:  half, w: CONFIG.worldSize, d: 4, h: 4 },
+        { x: -half, z: 0, w: 4, d: CONFIG.worldSize, h: 4 },
+        { x:  half, z: 0, w: 4, d: CONFIG.worldSize, h: 4 }
+    ];
+    perimWalls.forEach(pw => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(pw.w, pw.h, pw.d), wallMat);
+        m.position.set(pw.x, pw.h / 2, pw.z);
+        m.receiveShadow = true;
+        scene.add(m);
+        arenaColliders.push({ minX: pw.x - pw.w / 2, maxX: pw.x + pw.w / 2, minZ: pw.z - pw.d / 2, maxZ: pw.z + pw.d / 2, h: pw.h });
+    });
+
+    // Helper to add solid obstacle blocks & pillars
+    function addObstacle(x, z, w, h, d, mat, isRamp = false, rampAngle = 0) {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+        mesh.position.set(x, h / 2, z);
+        if (isRamp) {
+            mesh.rotation.x = rampAngle;
+            mesh.position.y = h * 0.25;
+        }
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+
+        arenaColliders.push({
+            minX: x - w / 2,
+            maxX: x + w / 2,
+            minZ: z - d / 2,
+            maxZ: z + d / 2,
+            h: h,
+            isRamp,
+            rampAngle,
+            centerZ: z,
+            depth: d
+        });
+    }
+
+    // 1. High-Speed Head-On Crash Barrier Block at End of Straightaway (Z = -115)
+    addObstacle(0, -115, 16, 3.2, 4.5, hazardMat);
+    const stripes = new THREE.Mesh(new THREE.BoxGeometry(16.1, 1.2, 4.6), steelMat);
+    stripes.position.set(0, 1.6, -115);
+    scene.add(stripes);
+
+    // 2. Offset Slalom Concrete Pillars (Great for corner / door / wheel shear impacts!)
+    const pillarCoords = [
+        [-14, -45], [14, -45],
+        [-22, -75], [22, -75],
+        [-38, 10],  [38, 10],
+        [-55, -35], [55, -35],
+        [-45, 65],  [45, 65]
+    ];
+    pillarCoords.forEach(([px, pz]) => {
+        addObstacle(px, pz, 2.6, 4.5, 2.6, hazardMat);
+    });
+
+    // 3. Heavy Steel Bollards Row (for localized front/bumper deformation)
+    for (let i = -3; i <= 3; i++) {
+        addObstacle(i * 4.2 + 48, -85, 0.85, 1.6, 0.85, steelMat);
+    }
+
+    // 4. Jump Ramps for Airborne Crashes
+    addObstacle(-36, -15, 8.5, 2.2, 14, wallMat, true, -0.22);
+    addObstacle(36, 45, 8.5, 2.4, 15, wallMat, true, 0.24);
+
+    // 5. Industrial Warehouse Hangars (Visual landmark buildings)
+    const hangarMat = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.75 });
+    addObstacle(-95, -60, 28, 12, 55, hangarMat);
+    addObstacle(95, 30, 28, 12, 55, hangarMat);
+
+    // 6. Green Glowing Repair / Pit Bay Pad near Spawn (X = 18, Z = 25)
+    const padGeo = new THREE.RingGeometry(3.2, 3.8, 32);
+    padGeo.rotateX(-Math.PI / 2);
+    const padMat = new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide });
+    const padMesh = new THREE.Mesh(padGeo, padMat);
+    padMesh.position.set(18, 0.03, 25);
+    scene.add(padMesh);
+}
+
+// --- SOFT-BODY VERTEX DEFORMATION & PART DETACHMENT ---
+function deformCarAtLocalPoint(localImpactPos, impulseVecLocal, radius = 1.15) {
+    const strength = Math.min(0.42, impulseVecLocal.length() * 0.016);
+    if (strength < 0.015) return;
+
+    carMeshes.deformable.forEach(item => {
+        const mesh = item.mesh;
+        // Skip detached parts
+        if (mesh.parent && mesh.parent.userData && mesh.parent.userData.detached) return;
+
+        const posAttr = mesh.geometry.attributes.position;
+        const orig = item.origPos;
+
+        for (let i = 0; i < posAttr.count; i++) {
+            const idx = i * 3;
+            const vx = orig[idx];
+            const vy = orig[idx + 1];
+            const vz = orig[idx + 2];
+
+            // Transform vertex to chassis local space
+            const worldLocal = new THREE.Vector3(vx, vy, vz);
+            if (mesh.parent !== chassisGroup) {
+                worldLocal.add(mesh.parent.position);
+            }
+            worldLocal.add(mesh.position);
+
+            const dist = worldLocal.distanceTo(localImpactPos);
+            if (dist < radius) {
+                const falloff = Math.pow(1 - dist / radius, 2);
+                const jitterX = (Math.random() - 0.5) * 0.06 * falloff;
+                const jitterY = (Math.random() - 0.4) * 0.07 * falloff;
+                const jitterZ = (Math.random() - 0.5) * 0.06 * falloff;
+
+                posAttr.setXYZ(
+                    i,
+                    posAttr.getX(i) + (impulseVecLocal.x * 0.012 * falloff) + jitterX,
+                    posAttr.getY(i) + (Math.abs(impulseVecLocal.z) * 0.004 * falloff) + jitterY,
+                    posAttr.getZ(i) + (impulseVecLocal.z * 0.012 * falloff) + jitterZ
+                );
+            }
+        }
+        posAttr.needsUpdate = true;
+        mesh.geometry.computeVertexNormals();
+    });
+}
+
+function detachPart(partKey, launchVel) {
+    if (!carState.attached[partKey]) return;
+    const meshObj = carMeshes.parts[partKey];
+    if (!meshObj) return;
+
+    carState.attached[partKey] = false;
+    meshObj.userData.detached = true;
+
+    // Convert from car local space to world space cleanly
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    meshObj.getWorldPosition(worldPos);
+    meshObj.getWorldQuaternion(worldQuat);
+
+    if (meshObj.parent) meshObj.parent.remove(meshObj);
+    meshObj.position.copy(worldPos);
+    meshObj.quaternion.copy(worldQuat);
+    scene.add(meshObj);
+
+    const vel = launchVel.clone().add(new THREE.Vector3(
+        (Math.random() - 0.5) * 8,
+        3.5 + Math.random() * 5.5,
+        (Math.random() - 0.5) * 8
+    ));
+
+    dynamicDebris.push({
+        mesh: meshObj,
+        vel,
+        angVel: new THREE.Vector3(
+            (Math.random() - 0.5) * 11,
+            (Math.random() - 0.5) * 11,
+            (Math.random() - 0.5) * 11
+        ),
+        life: 25
+    });
+}
+
+function shatterWindshield() {
+    if (carState.parts.windshield <= 0) return;
+    carState.parts.windshield = 0;
+    const ws = carMeshes.parts.windshield;
+    if (!ws) return;
+
+    const worldPos = new THREE.Vector3();
+    ws.getWorldPosition(worldPos);
+    ws.visible = false;
+
+    // Spawn 32 sparkling glass shards
+    const shardMat = new THREE.MeshBasicMaterial({
+        color: 0xdbeafe,
+        transparent: true,
+        opacity: 0.75,
+        side: THREE.DoubleSide
+    });
+    const shardGeo = new THREE.PlaneGeometry(0.14, 0.14);
+
+    for (let i = 0; i < 32; i++) {
+        const shard = new THREE.Mesh(shardGeo, shardMat);
+        shard.position.copy(worldPos).add(new THREE.Vector3(
+            (Math.random() - 0.5) * 1.2,
+            (Math.random() - 0.5) * 0.4,
+            (Math.random() - 0.5) * 0.4
+        ));
+        scene.add(shard);
+        dynamicDebris.push({
+            mesh: shard,
+            vel: carState.vel.clone().multiplyScalar(0.6).add(new THREE.Vector3(
+                (Math.random() - 0.5) * 9,
+                2 + Math.random() * 5,
+                (Math.random() - 0.5) * 9
+            )),
+            angVel: new THREE.Vector3(Math.random() * 14, Math.random() * 14, Math.random() * 14),
+            life: 4.5
+        });
+    }
+}
+
+// --- PARTICLE EFFECTS (SMOKE, STEAM, FIRE, EXPLOSION) ---
+function spawnParticle(pos, vel, colorHex, size, life, growRate = 1.6) {
+    const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.85
+    });
+    const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(size, 0), mat);
+    mesh.position.copy(pos);
+    scene.add(mesh);
+
+    particles.push({
+        mesh,
+        vel,
+        life,
+        maxLife: life,
+        growRate
+    });
+}
+
+// --- CATASTROPHIC EXPLOSION & MECHANICAL BREAKDOWN TRIGGERS ---
+function triggerMechanicalBreakdown() {
+    if (carState.status !== 'OPERATIONAL') return;
+    carState.status = 'BROKEN_DOWN';
+    carState.parts.engine = 0;
+    soundEngine.playSputter();
+
+    showStatusModal(
+        'MECHANICAL BREAKDOWN',
+        'ZMZ-406 ENGINE SEIZED',
+        'Severe front-end impact destroyed the radiator & engine block. Vehicle is immobilized and coasting to a stop.',
+        'amber'
+    );
+}
+
+function triggerCatastrophicExplosion() {
+    if (carState.status === 'EXPLODED') return;
+    carState.status = 'EXPLODED';
+    carState.parts.fuel = 0;
+    carState.parts.chassis = 0;
+    carState.parts.engine = 0;
+
+    soundEngine.playExplosion();
+    cameraShake = 1.35;
+
+    // Char and blacken the chassis paint
+    carMeshes.materials.paint.color.setHex(0x18181b);
+    carMeshes.materials.paint.metalness = 0.1;
+    carMeshes.materials.paint.roughness = 0.95;
+
+    // Turn off all lights
+    carState.headlightsOn = false;
+    carMeshes.spotlights.forEach(s => s.intensity = 0);
+
+    // Launch remaining attached doors, hood, trunk, bumpers, and 2 wheels into the air!
+    const blastParts = ['hood', 'trunk', 'bumperF', 'bumperR', 'doorFL', 'doorFR', 'doorRL', 'doorRR', 'wheelFL', 'wheelRR'];
+    blastParts.forEach(pKey => {
+        if (carState.attached[pKey]) {
+            detachPart(pKey, new THREE.Vector3(
+                (Math.random() - 0.5) * 16,
+                8 + Math.random() * 9,
+                (Math.random() - 0.5) * 16
+            ));
+        }
+    });
+    shatterWindshield();
+
+    // Launch car upward slightly from blast impulse
+    carState.verticalVel = 6.5;
+    carState.rollVel += (Math.random() - 0.5) * 4.5;
+    carState.pitchVel += (Math.random() - 0.5) * 4.5;
+
+    // Massive Fireball + Thick Black Smoke Plume
+    for (let i = 0; i < 48; i++) {
+        const isFire = i < 28;
+        spawnParticle(
+            carState.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.8, 0.7, (Math.random() - 0.5) * 2.5)),
+            new THREE.Vector3((Math.random() - 0.5) * 14, 4 + Math.random() * 14, (Math.random() - 0.5) * 14),
+            isFire ? (Math.random() > 0.4 ? 0xf97316 : 0xfacc15) : 0x1f2937,
+            isFire ? 0.55 : 0.75,
+            isFire ? 1.1 : 2.6,
+            2.4
+        );
+    }
+
+    showStatusModal(
+        'CRITICAL DETONATION',
+        'GAZ-3110 EXPLODED',
+        'Fuel tank & structural integrity reached 0%. Catastrophic fire & blast destroyed the vehicle.',
+        'rose'
+    );
+}
+
+// --- LOCALIZED COLLISION & DAMAGE SOLVER ---
+function applyCollisionImpact(contactWorld, normalWorld, impactSpeed) {
+    if (impactSpeed < 2.2) return;
+
+    // Transform contact point into car's local space (Z- is front, Z+ is rear, X- is left, X+ is right)
+    const invQuat = carGroup.quaternion.clone().invert();
+    const localContact = contactWorld.clone().sub(carState.pos).applyQuaternion(invQuat);
+    const localNormal = normalWorld.clone().applyQuaternion(invQuat);
+
+    // Impact energy scaling
+    const damageFactor = Math.pow(impactSpeed, 1.38) * 1.35;
+    cameraShake = Math.min(0.85, impactSpeed * 0.035);
+
+    // Deform mesh vertices near impact
+    deformCarAtLocalPoint(localContact, localNormal.multiplyScalar(impactSpeed));
+
+    let glassBroken = false;
+
+    // 1. FRONT IMPACT (localContact.z < -1.1)
+    if (localContact.z < -1.1) {
+        carState.parts.bumperF = Math.max(0, carState.parts.bumperF - damageFactor * 1.6);
+        carState.parts.engine = Math.max(0, carState.parts.engine - damageFactor * 0.95);
+        carState.parts.hood = Math.max(0, carState.parts.hood - damageFactor * 1.1);
+        carState.parts.chassis = Math.max(0, carState.parts.chassis - damageFactor * 0.55);
+
+        // Pop hood open on moderate hit, rip off on heavy hit
+        if (carState.parts.hood < 72 && carState.attached.hood) {
+            carState.hinges.hood = Math.min(0.55, carState.hinges.hood + impactSpeed * 0.025);
+        }
+        if (carState.parts.hood <= 0) detachPart('hood', carState.vel);
+        if (carState.parts.bumperF <= 0) detachPart('bumperF', carState.vel);
+
+        // Headlights break on localized corner hit
+        if (localContact.x < -0.25 && carState.parts.headlightL > 0) {
+            carState.parts.headlightL = Math.max(0, carState.parts.headlightL - damageFactor * 2.2);
+            if (carState.parts.headlightL === 0) {
+                carMeshes.headlightMeshes[0].mat.emissiveIntensity = 0;
+                carMeshes.spotlights[0].intensity = 0;
+                glassBroken = true;
+            }
+        }
+        if (localContact.x > 0.25 && carState.parts.headlightR > 0) {
+            carState.parts.headlightR = Math.max(0, carState.parts.headlightR - damageFactor * 2.2);
+            if (carState.parts.headlightR === 0) {
+                carMeshes.headlightMeshes[1].mat.emissiveIntensity = 0;
+                carMeshes.spotlights[1].intensity = 0;
+                glassBroken = true;
+            }
+        }
+    }
+
+    // 2. REAR IMPACT (localContact.z > 1.1) -> Damages Trunk & Rear Fuel Tank!
+    if (localContact.z > 1.1) {
+        carState.parts.bumperR = Math.max(0, carState.parts.bumperR - damageFactor * 1.6);
+        carState.parts.trunk = Math.max(0, carState.parts.trunk - damageFactor * 1.2);
+        carState.parts.fuel = Math.max(0, carState.parts.fuel - damageFactor * 1.15);
+        carState.parts.chassis = Math.max(0, carState.parts.chassis - damageFactor * 0.6);
+
+        if (carState.parts.trunk < 70 && carState.attached.trunk) {
+            carState.hinges.trunk = Math.max(-0.65, carState.hinges.trunk - impactSpeed * 0.03);
+        }
+        if (carState.parts.trunk <= 0) detachPart('trunk', carState.vel);
+        if (carState.parts.bumperR <= 0) detachPart('bumperR', carState.vel);
+    }
+
+    // 3. LEFT / RIGHT SIDE & CORNER IMPACTS (Doors & Wheels)
+    if (Math.abs(localContact.x) > 0.65) {
+        const isLeft = localContact.x < 0;
+        const isFrontHalf = localContact.z < 0.2;
+
+        carState.parts.chassis = Math.max(0, carState.parts.chassis - damageFactor * 0.65);
+        carState.parts.fuel = Math.max(0, carState.parts.fuel - damageFactor * 0.55);
+
+        if (isLeft) {
+            if (isFrontHalf) {
+                carState.parts.doorFL = Math.max(0, carState.parts.doorFL - damageFactor * 1.35);
+                if (carState.parts.doorFL < 65) carState.hinges.doorFL = Math.min(0.85, carState.hinges.doorFL + 0.28);
+                if (carState.parts.doorFL <= 0) detachPart('doorFL', carState.vel);
+                if (localContact.z < -0.9) {
+                    carState.parts.wheelFL = Math.max(0, carState.parts.wheelFL - damageFactor * 1.2);
+                    if (carState.parts.wheelFL <= 0) detachPart('wheelFL', carState.vel);
+                }
+            } else {
+                carState.parts.doorRL = Math.max(0, carState.parts.doorRL - damageFactor * 1.35);
+                if (carState.parts.doorRL < 65) carState.hinges.doorRL = Math.min(0.85, carState.hinges.doorRL + 0.28);
+                if (carState.parts.doorRL <= 0) detachPart('doorRL', carState.vel);
+                if (localContact.z > 0.9) {
+                    carState.parts.wheelRL = Math.max(0, carState.parts.wheelRL - damageFactor * 1.2);
+                    if (carState.parts.wheelRL <= 0) detachPart('wheelRL', carState.vel);
+                }
+            }
+        } else {
+            if (isFrontHalf) {
+                carState.parts.doorFR = Math.max(0, carState.parts.doorFR - damageFactor * 1.35);
+                if (carState.parts.doorFR < 65) carState.hinges.doorFR = Math.max(-0.85, carState.hinges.doorFR - 0.28);
+                if (carState.parts.doorFR <= 0) detachPart('doorFR', carState.vel);
+                if (localContact.z < -0.9) {
+                    carState.parts.wheelFR = Math.max(0, carState.parts.wheelFR - damageFactor * 1.2);
+                    if (carState.parts.wheelFR <= 0) detachPart('wheelFR', carState.vel);
+                }
+            } else {
+                carState.parts.doorRR = Math.max(0, carState.parts.doorRR - damageFactor * 1.35);
+                if (carState.parts.doorRR < 65) carState.hinges.doorRR = Math.max(-0.85, carState.hinges.doorRR - 0.28);
+                if (carState.parts.doorRR <= 0) detachPart('doorRR', carState.vel);
+                if (localContact.z > 0.9) {
+                    carState.parts.wheelRR = Math.max(0, carState.parts.wheelRR - damageFactor * 1.2);
+                    if (carState.parts.wheelRR <= 0) detachPart('wheelRR', carState.vel);
+                }
+            }
+        }
+    }
+
+    // 4. WINDSHIELD CRACKING & SHATTERING
+    if (impactSpeed > 9.5 && carState.parts.windshield > 0) {
+        carState.parts.windshield = Math.max(0, carState.parts.windshield - damageFactor * 1.4);
+        const ws = carMeshes.parts.windshield;
+        if (carState.parts.windshield > 0 && carState.parts.windshield < 65 && ws) {
+            ws.material.map = carMeshes.materials.crackedTex;
+            ws.material.opacity = 0.78;
+            ws.material.needsUpdate = true;
+            glassBroken = true;
+        } else if (carState.parts.windshield <= 0) {
+            shatterWindshield();
+            glassBroken = true;
+        }
+    }
+
+    soundEngine.playCrash(impactSpeed, glassBroken);
+
+    // 5. EVALUATE FAILURE OUTCOMES:
+    // - Extreme high-speed impact (> 32 m/s ~ 115+ km/h) or Fuel/Chassis hitting 0 -> EXPLOSION!
+    // - Engine hitting 0 while Fuel/Chassis survives -> MECHANICAL BREAKDOWN (stalls & smokes)!
+    if (impactSpeed > 33 || carState.parts.fuel <= 0 || carState.parts.chassis <= 0) {
+        triggerCatastrophicExplosion();
+    } else if (carState.parts.engine <= 0 && carState.status === 'OPERATIONAL') {
+        triggerMechanicalBreakdown();
+    }
+}
+
+// --- VEHICLE PHYSICS & COLLISION STEP ---
+function updatePhysics(dt) {
+    // Repair Zone Check (Green ring at X=18, Z=25)
+    const distToRepair = Math.hypot(carState.pos.x - 18, carState.pos.z - 25);
+    if (distToRepair < 3.6 && carState.vel.length() < 1.2 && getOverallHealth() < 100) {
+        resetCar(true);
+    }
+
+    // Forward & Right unit vectors in XZ plane
+    const forward = new THREE.Vector3(-Math.sin(carState.heading), 0, -Math.cos(carState.heading));
+    const right = new THREE.Vector3(Math.cos(carState.heading), 0, -Math.sin(carState.heading));
+
+    const forwardSpeed = carState.vel.dot(forward);
+    const lateralSpeed = carState.vel.dot(right);
+
+    // Count intact wheels
+    const intactWheels = ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR'].filter(k => carState.attached[k]).length;
+    const isOperational = carState.status === 'OPERATIONAL' && intactWheels >= 2;
+
+    // Steering input (affected by front wheel damage/alignment)
+    const steerInput = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
+    const speedSteerFactor = Math.max(0.38, 1.0 - Math.abs(forwardSpeed) / 68);
+    const targetSteer = steerInput * CONFIG.steerMax * speedSteerFactor;
+
+    // Bent axle pulls steering slightly if front wheel is damaged
+    const alignmentPull = ((carState.parts.wheelFL - carState.parts.wheelFR) / 100) * 0.08;
+    carState.steerAngle += (targetSteer + alignmentPull - carState.steerAngle) * Math.min(1, dt * 9.5);
+
+    // Throttle, Braking & Gear Simulation
+    let driveForce = 0;
+    let brakeForce = 0;
+
+    if (isOperational) {
+        // Engine health degrades peak power
+        const powerMultiplier = 0.35 + 0.65 * (carState.parts.engine / 100);
+
+        if (keys.forward) {
+            if (forwardSpeed < -1.0) {
+                brakeForce = CONFIG.brakeForce;
+            } else {
+                driveForce = CONFIG.maxEngineForce * powerMultiplier;
+                if (carState.gear < 1) carState.gear = 1;
+            }
+        } else if (keys.backward) {
+            if (forwardSpeed > 1.0) {
+                brakeForce = CONFIG.brakeForce;
+            } else {
+                driveForce = -CONFIG.maxReverseForce * powerMultiplier;
+                carState.gear = -1;
+            }
+        }
+    }
+
+    if (keys.handbrake) {
+        brakeForce = Math.max(brakeForce, CONFIG.handbrakeForce);
+    }
+
+    // Simulate 5-speed manual gearbox RPM
+    const speedKmh = Math.abs(forwardSpeed) * 3.6;
+    if (!isOperational) {
+        carState.rpm = Math.max(0, carState.rpm - dt * 1800);
+        carState.gear = 0;
+    } else if (carState.gear === -1) {
+        carState.rpm = 950 + Math.min(4800, speedKmh * 95);
+    } else if (speedKmh < 2 && !keys.forward) {
+        carState.gear = 0;
+        carState.rpm = 850 + (Math.random() - 0.5) * 30;
+    } else {
+        const gearThresholds = [0, 38, 72, 110, 145, 200];
+        let g = 1;
+        while (g < 5 && speedKmh > gearThresholds[g]) g++;
+        carState.gear = g;
+        const gearMin = gearThresholds[g - 1];
+        const gearMax = gearThresholds[g];
+        const ratio = Math.min(1, Math.max(0, (speedKmh - gearMin) / (gearMax - gearMin)));
+        carState.rpm = 1400 + ratio * 4400 + (keys.forward ? 350 : 0);
+    }
+
+    // Apply longitudinal forces when grounded
+    if (carState.grounded) {
+        const netLongForce = driveForce - Math.sign(forwardSpeed) * brakeForce;
+        const longAccel = (netLongForce / CONFIG.carMass) * (intactWheels / 4);
+        carState.vel.addScaledVector(forward, longAccel * dt);
+
+        // Aerodynamic drag + rolling resistance (higher drag if missing wheels!)
+        const missingWheelDrag = (4 - intactWheels) * 0.45;
+        const drag = 0.014 + missingWheelDrag * 0.04;
+        carState.vel.multiplyScalar(Math.max(0, 1 - drag * dt * 12));
+
+        // Lateral tire grip (lower grip when handbraking -> smooth Volga drifting!)
+        const grip = keys.handbrake ? 2.6 : 7.8;
+        const latCorrection = Math.min(1, grip * dt);
+        carState.vel.addScaledVector(right, -lateralSpeed * latCorrection);
+
+        // Yaw / Turning angular velocity
+        if (Math.abs(forwardSpeed) > 0.35) {
+            const turnDir = forwardSpeed >= 0 ? 1 : -1;
+            const driftBoost = keys.handbrake ? 1.38 : 1.0;
+            const targetAngVel = (forwardSpeed / CONFIG.wheelBase) * Math.tan(carState.steerAngle) * turnDir * driftBoost;
+            carState.angularVel += (targetAngVel - carState.angularVel) * Math.min(1, dt * 10);
+        } else {
+            carState.angularVel *= 0.85;
+        }
+        carState.heading += carState.angularVel * dt;
+
+        // Suspension Pitch & Roll dynamics
+        const targetPitch = -longAccel * 0.0045;
+        const targetRoll = -lateralSpeed * carState.angularVel * 0.008;
+        carState.pitch += (targetPitch - carState.pitch) * Math.min(1, dt * 8);
+        carState.roll += (targetRoll - carState.roll) * Math.min(1, dt * 8);
+    }
+
+    // Integrate Position
+    carState.pos.addScaledVector(carState.vel, dt);
+
+    // Ramp & Ground Elevation Check
+    let groundHeight = 0.0;
+    for (const col of arenaColliders) {
+        if (col.isRamp &&
+            carState.pos.x > col.minX && carState.pos.x < col.maxX &&
+            carState.pos.z > col.minZ && carState.pos.z < col.maxZ) {
+            const localZ = (carState.pos.z - col.centerZ) / (col.depth / 2); // -1 to 1
+            const slopeProgress = col.rampAngle < 0 ? (1 - localZ) * 0.5 : (1 + localZ) * 0.5;
+            groundHeight = Math.max(groundHeight, slopeProgress * col.h * 0.9);
+            if (forwardSpeed > 12) {
+                carState.verticalVel = Math.max(carState.verticalVel, Math.abs(forwardSpeed) * 0.24);
+            }
+        }
+    }
+
+    // Vertical Gravity & Suspension Floor
+    const rideHeight = intactWheels >= 2 ? 0.0 : -0.18; // Sags onto brake discs if wheels ripped off
+    const targetY = groundHeight + rideHeight;
+    if (carState.pos.y > targetY || carState.verticalVel > 0) {
+        carState.grounded = false;
+        carState.verticalVel -= CONFIG.gravity * dt;
+        carState.pos.y += carState.verticalVel * dt;
+        if (carState.pos.y <= targetY) {
+            if (carState.verticalVel < -7.5) {
+                applyCollisionImpact(carState.pos.clone(), new THREE.Vector3(0, 1, 0), Math.abs(carState.verticalVel));
+            }
+            carState.pos.y = targetY;
+            carState.verticalVel = 0;
+            carState.grounded = true;
+        }
+    } else {
+        carState.pos.y = targetY;
+        carState.grounded = true;
+    }
+
+    // Solid Obstacle & Perimeter AABB vs Car OBB-approximated Sphere/Box Collision
+    const carHalfW = 0.92;
+    const carHalfL = 2.32;
+    const cosH = Math.abs(Math.cos(carState.heading));
+    const sinH = Math.abs(Math.sin(carState.heading));
+    const extX = carHalfW * cosH + carHalfL * sinH;
+    const extZ = carHalfW * sinH + carHalfL * cosH;
+
+    for (const col of arenaColliders) {
+        if (col.isRamp) continue;
+        if (carState.pos.y > col.h) continue;
+
+        const overlapX1 = (carState.pos.x + extX) - col.minX;
+        const overlapX2 = col.maxX - (carState.pos.x - extX);
+        const overlapZ1 = (carState.pos.z + extZ) - col.minZ;
+        const overlapZ2 = col.maxZ - (carState.pos.z - extZ);
+
+        if (overlapX1 > 0 && overlapX2 > 0 && overlapZ1 > 0 && overlapZ2 > 0) {
+            const minOverlapX = Math.min(overlapX1, overlapX2);
+            const minOverlapZ = Math.min(overlapZ1, overlapZ2);
+
+            const normal = new THREE.Vector3();
+            let penetration = 0;
+
+            if (minOverlapX < minOverlapZ) {
+                penetration = minOverlapX;
+                normal.set(overlapX1 < overlapX2 ? -1 : 1, 0, 0);
+            } else {
+                penetration = minOverlapZ;
+                normal.set(0, 0, overlapZ1 < overlapZ2 ? -1 : 1);
+            }
+
+            // Separate car from obstacle
+            carState.pos.addScaledVector(normal, penetration + 0.02);
+
+            // Relative impact velocity along collision normal
+            const vn = carState.vel.dot(normal);
+            if (vn < 0) {
+                const impactSpeed = Math.abs(vn);
+                const contactPt = carState.pos.clone().addScaledVector(normal, -1.2);
+                applyCollisionImpact(contactPt, normal, impactSpeed);
+
+                // Inelastic metallic collision response (restitution ~ 0.25)
+                const restitution = 0.24;
+                carState.vel.addScaledVector(normal, -(1 + restitution) * vn);
+                carState.vel.multiplyScalar(0.84); // Friction energy loss on scrape
+            }
+        }
+    }
+
+    // Update 3D Car Transform & Hinges
+    carGroup.position.copy(carState.pos);
+    carGroup.rotation.set(0, carState.heading, 0);
+    chassisGroup.rotation.set(carState.pitch, 0, carState.roll);
+
+    // Fluttering damaged hood / doors at speed
+    const speedFlutter = Math.sin(performance.now() * 0.025) * Math.min(0.08, Math.abs(forwardSpeed) * 0.002);
+    if (carState.attached.hood && carMeshes.parts.hood) {
+        carMeshes.parts.hood.rotation.x = carState.hinges.hood + (carState.hinges.hood > 0.05 ? speedFlutter : 0);
+    }
+    if (carState.attached.trunk && carMeshes.parts.trunk) {
+        carMeshes.parts.trunk.rotation.x = carState.hinges.trunk;
+    }
+    ['doorFL', 'doorFR', 'doorRL', 'doorRR'].forEach(dKey => {
+        if (carState.attached[dKey] && carMeshes.parts[dKey]) {
+            carMeshes.parts[dKey].rotation.y = carState.hinges[dKey] + (Math.abs(carState.hinges[dKey]) > 0.05 ? speedFlutter : 0);
+        }
+    });
+
+    // Spin & Steer Attached Wheels
+    carMeshes.wheels.forEach(w => {
+        if (!carState.attached[w.key]) return;
+        if (w.front) {
+            w.steerPivot.rotation.y = carState.steerAngle;
+            // Bent camber if wheel is heavily damaged
+            const dmgCamber = (1 - carState.parts[w.key] / 100) * 0.28 * w.side;
+            w.steerPivot.rotation.z = dmgCamber;
+        }
+        w.spinGroup.rotation.x -= (forwardSpeed / 0.35) * dt;
+    });
+
+    // Tire Slip, Skid Marks & Audio
+    const slipRatio = carState.grounded ? Math.min(1.0, (Math.abs(lateralSpeed) / 9.5) + (keys.handbrake && Math.abs(forwardSpeed) > 4 ? 0.5 : 0)) : 0;
+    soundEngine.update(carState.rpm, isOperational, slipRatio);
+
+    if (slipRatio > 0.32 && carState.grounded) {
+        ['wheelRL', 'wheelRR'].forEach((wk, idx) => {
+            if (!carState.attached[wk]) return;
+            const wObj = carMeshes.wheels.find(w => w.key === wk);
+            const wPos = new THREE.Vector3();
+            wObj.steerPivot.getWorldPosition(wPos);
+            wPos.y = 0.02;
+
+            if (lastSkidPos[idx] && lastSkidPos[idx].distanceTo(wPos) < 2.5) {
+                const segLen = lastSkidPos[idx].distanceTo(wPos);
+                if (segLen > 0.15) {
+                    const skidGeo = new THREE.PlaneGeometry(0.22, segLen);
+                    const skidMat = new THREE.MeshBasicMaterial({ color: 0x090a0d, transparent: true, opacity: 0.45 });
+                    const skid = new THREE.Mesh(skidGeo, skidMat);
+                    skid.position.copy(lastSkidPos[idx]).lerp(wPos, 0.5);
+                    skid.rotation.x = -Math.PI / 2;
+                    skid.rotation.z = Math.atan2(wPos.x - lastSkidPos[idx].x, wPos.z - lastSkidPos[idx].z);
+                    scene.add(skid);
+                    skidMarks.push(skid);
+                    if (skidMarks.length > 260) {
+                        const oldest = skidMarks.shift();
+                        scene.remove(oldest);
+                    }
+                }
+            }
+            lastSkidPos[idx] = wPos.clone();
+        });
+    } else {
+        lastSkidPos = [null, null];
+    }
+
+    // Smoke, Steam & Fire Particles from Damaged Engine / Exploded Hull
+    if (carState.parts.engine < 55 || carState.status === 'BROKEN_DOWN') {
+        carState.smokeTimer += dt;
+        const rate = carState.status === 'BROKEN_DOWN' ? 0.04 : 0.09;
+        if (carState.smokeTimer >= rate) {
+            carState.smokeTimer = 0;
+            const hoodWorld = new THREE.Vector3(0, 0.95, -1.55).applyMatrix4(carGroup.matrixWorld);
+            const isOverheatingSteam = carState.parts.engine > 0 && carState.parts.engine < 35;
+            spawnParticle(
+                hoodWorld,
+                new THREE.Vector3((Math.random() - 0.5) * 1.4, 2.2 + Math.random() * 1.5, (Math.random() - 0.5) * 1.4),
+                isOverheatingSteam ? 0xe5e7eb : 0x374151,
+                0.24,
+                1.35,
+                1.9
+            );
+        }
+    }
+
+    if (carState.status === 'EXPLODED' || carState.parts.fuel < 22) {
+        carState.fireTimer += dt;
+        if (carState.fireTimer >= 0.045) {
+            carState.fireTimer = 0;
+            const fireOrigin = carState.status === 'EXPLODED'
+                ? carState.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.4, 0.65, (Math.random() - 0.5) * 2.2))
+                : new THREE.Vector3(0, 0.55, 1.85).applyMatrix4(carGroup.matrixWorld);
+
+            spawnParticle(
+                fireOrigin,
+                new THREE.Vector3((Math.random() - 0.5) * 2.2, 3.2 + Math.random() * 2.5, (Math.random() - 0.5) * 2.2),
+                Math.random() > 0.35 ? 0xf97316 : 0xfacc15,
+                0.32,
+                0.75,
+                1.4
+            );
+        }
+    }
+}
+
+// --- UPDATE DETACHED DEBRIS & PARTICLES ---
+function updateDebrisAndParticles(dt) {
+    for (let i = dynamicDebris.length - 1; i >= 0; i--) {
+        const d = dynamicDebris[i];
+        d.life -= dt;
+        if (d.life <= 0) {
+            scene.remove(d.mesh);
+            dynamicDebris.splice(i, 1);
+            continue;
+        }
+        d.vel.y -= CONFIG.gravity * dt;
+        d.mesh.position.addScaledVector(d.vel, dt);
+        d.mesh.rotation.x += d.angVel.x * dt;
+        d.mesh.rotation.y += d.angVel.y * dt;
+        d.mesh.rotation.z += d.angVel.z * dt;
+
+        if (d.mesh.position.y < 0.12) {
+            d.mesh.position.y = 0.12;
+            d.vel.y = Math.abs(d.vel.y) * 0.32;
+            d.vel.x *= 0.78;
+            d.vel.z *= 0.78;
+            d.angVel.multiplyScalar(0.75);
+        }
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= dt;
+        if (p.life <= 0) {
+            scene.remove(p.mesh);
+            particles.splice(i, 1);
+            continue;
+        }
+        p.mesh.position.addScaledVector(p.vel, dt);
+        const s = 1 + p.growRate * dt;
+        p.mesh.scale.multiplyScalar(s);
+        p.mesh.material.opacity = (p.life / p.maxLife) * 0.8;
+    }
+}
+
+// --- CAMERA SYSTEM ---
+function updateCamera(dt) {
+    const forward = new THREE.Vector3(-Math.sin(carState.heading), 0, -Math.cos(carState.heading));
+    const speed = carState.vel.length();
+
+    // Dynamic speed FOV
+    const targetFov = 58 + Math.min(18, speed * 0.38);
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 6);
+    camera.updateProjectionMatrix();
+
+    if (cameraMode === 0) {
+        // Chase Camera
+        const desiredPos = carState.pos.clone()
+            .addScaledVector(forward, -6.4)
+            .add(new THREE.Vector3(0, 2.35, 0));
+        camera.position.lerp(desiredPos, Math.min(1, dt * 8.5));
+        const lookTarget = carState.pos.clone()
+            .addScaledVector(forward, 4.5)
+            .add(new THREE.Vector3(0, 0.95, 0));
+        camera.lookAt(lookTarget);
+    } else if (cameraMode === 1) {
+        // Hood / Driver Perspective
+        const hoodCamPos = new THREE.Vector3(0, 1.32, -0.35).applyMatrix4(carGroup.matrixWorld);
+        camera.position.copy(hoodCamPos);
+        const lookAhead = carState.pos.clone()
+            .addScaledVector(forward, 18)
+            .add(new THREE.Vector3(0, 1.05, 0));
+        camera.lookAt(lookAhead);
+    } else {
+        // Free Orbit Inspection Camera
+        const cx = carState.pos.x + Math.sin(camOrbit.yaw) * Math.cos(camOrbit.pitch) * camOrbit.dist;
+        const cy = Math.max(0.4, carState.pos.y + Math.sin(camOrbit.pitch) * camOrbit.dist + 0.8);
+        const cz = carState.pos.z + Math.cos(camOrbit.yaw) * Math.cos(camOrbit.pitch) * camOrbit.dist;
+        camera.position.lerp(new THREE.Vector3(cx, cy, cz), Math.min(1, dt * 12));
+        camera.lookAt(carState.pos.clone().add(new THREE.Vector3(0, 0.85, 0)));
+    }
+
+    // Impact Camera Shake
+    if (cameraShake > 0.005) {
+        camera.position.x += (Math.random() - 0.5) * cameraShake;
+        camera.position.y += (Math.random() - 0.5) * cameraShake;
+        camera.position.z += (Math.random() - 0.5) * cameraShake;
+        cameraShake *= Math.pow(0.04, dt);
+    }
+}
+
+// --- HUD & TELEMETRY UPDATES ---
+function getHealthColor(pct) {
+    if (pct <= 0) return '#374151'; // Destroyed / Detached
+    if (pct < 35) return '#ef4444'; // Critical Red
+    if (pct < 70) return '#f59e0b'; // Damaged Amber
+    return '#10b981';               // Healthy Emerald
+}
+
+function getOverallHealth() {
+    const p = carState.parts;
+    const avg = (p.engine * 2 + p.fuel * 2 + p.chassis * 2 + p.bumperF + p.bumperR + p.hood + p.trunk + p.doorFL + p.doorFR + p.doorRL + p.doorRR) / 14;
+    return Math.max(0, Math.round(avg));
+}
+
+function updateHUD() {
+    const speedKmh = Math.round(carState.vel.length() * 3.6);
+    document.getElementById('hud-speed').textContent = speedKmh;
+    document.getElementById('hud-speed-mobile').textContent = speedKmh;
+
+    const gearLabel = carState.gear === -1 ? 'R' : (carState.gear === 0 ? 'N' : carState.gear);
+    document.getElementById('hud-gear').textContent = gearLabel;
+    document.getElementById('hud-gear-mobile').textContent = gearLabel;
+
+    const rpmVal = Math.round(carState.rpm);
+    document.getElementById('hud-rpm').textContent = `${rpmVal} RPM`;
+    document.getElementById('hud-rpm-bar').style.width = `${Math.min(100, (rpmVal / 6200) * 100)}%`;
+
+    // Overall Health
+    const overall = getOverallHealth();
+    const overallEl = document.getElementById('overall-health-text');
+    overallEl.textContent = `${overall}%`;
+    overallEl.style.color = getHealthColor(overall);
+
+    // Subsystem Bars
+    const engPct = Math.round(carState.parts.engine);
+    const fuelPct = Math.round(Math.min(carState.parts.fuel, carState.parts.chassis));
+    document.getElementById('val-engine').textContent = `${engPct}%`;
+    document.getElementById('bar-engine').style.width = `${engPct}%`;
+    document.getElementById('bar-engine').style.backgroundColor = getHealthColor(engPct);
+
+    document.getElementById('val-fuel').textContent = `${fuelPct}%`;
+    document.getElementById('bar-fuel').style.width = `${fuelPct}%`;
+    document.getElementById('bar-fuel').style.backgroundColor = getHealthColor(fuelPct);
+
+    // SVG Schematic Parts Coloring
+    const svgMap = {
+        'diag-chassis': carState.parts.chassis,
+        'diag-engine': carState.parts.engine,
+        'diag-fuel': carState.parts.fuel,
+        'diag-bumperF': carState.parts.bumperF,
+        'diag-bumperR': carState.parts.bumperR,
+        'diag-hood': carState.parts.hood,
+        'diag-trunk': carState.parts.trunk,
+        'diag-doorFL': carState.parts.doorFL,
+        'diag-doorFR': carState.parts.doorFR,
+        'diag-doorRL': carState.parts.doorRL,
+        'diag-doorRR': carState.parts.doorRR,
+        'diag-wheelFL': carState.parts.wheelFL,
+        'diag-wheelFR': carState.parts.wheelFR,
+        'diag-wheelRL': carState.parts.wheelRL,
+        'diag-wheelRR': carState.parts.wheelRR
+    };
+
+    for (const [id, val] of Object.entries(svgMap)) {
+        const el = document.getElementById(id);
+        if (el) {
+            const col = getHealthColor(val);
+            el.setAttribute('fill', col);
+            if (id === 'diag-chassis' || id === 'diag-hood' || id === 'diag-trunk') {
+                el.setAttribute('stroke', col);
+            }
+        }
+    }
+
+    // Active Warning Badges
+    const alerts = [];
+    if (carState.status === 'EXPLODED') {
+        alerts.push({ text: 'VEHICLE DESTROYED - EXPLOSION', cls: 'bg-rose-600/90 border-rose-400' });
+    } else if (carState.status === 'BROKEN_DOWN') {
+        alerts.push({ text: 'ENGINE STALLED - BREAKDOWN', cls: 'bg-amber-600/90 border-amber-300' });
+    } else {
+        if (carState.parts.engine < 45) alerts.push({ text: 'RADIATOR / ENGINE OVERHEATING', cls: 'bg-amber-600/85 border-amber-400' });
+        if (carState.parts.fuel < 35) alerts.push({ text: 'CRITICAL FUEL TANK LEAK', cls: 'bg-rose-600/85 border-rose-400' });
+        if (!carState.attached.wheelFL || !carState.attached.wheelFR || !carState.attached.wheelRL || !carState.attached.wheelRR) {
+            alerts.push({ text: 'WHEEL / SUSPENSION SHEARED', cls: 'bg-rose-700/85 border-rose-400' });
+        } else if (carState.parts.wheelFL < 65 || carState.parts.wheelFR < 65) {
+            alerts.push({ text: 'FRONT AXLE ALIGNMENT BENT', cls: 'bg-amber-700/85 border-amber-400' });
+        }
+    }
+
+    const alertsBox = document.getElementById('alerts-container');
+    alertsBox.innerHTML = alerts.map(a => `
+        <div class="animate-warn px-3 py-1.5 rounded-lg border text-[11px] font-bold tracking-wide text-white shadow-lg ${a.cls}">
+            ⚠ ${a.text}
+        </div>
+    `).join('');
+}
+
+function showStatusModal(badge, title, desc, theme) {
+    const modal = document.getElementById('status-modal');
+    const card = document.getElementById('status-modal-card');
+    const badgeEl = document.getElementById('status-modal-badge');
+    const titleEl = document.getElementById('status-modal-title');
+    const descEl = document.getElementById('status-modal-desc');
+
+    badgeEl.textContent = badge;
+    titleEl.textContent = title;
+    descEl.textContent = desc;
+
+    if (theme === 'amber') {
+        card.className = 'glass-panel rounded-2xl px-6 py-4 max-w-md w-full text-center border-2 border-amber-500/70 pointer-events-auto';
+        badgeEl.className = 'inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-widest bg-amber-600 text-white mb-1.5';
+    } else {
+        card.className = 'glass-panel rounded-2xl px-6 py-4 max-w-md w-full text-center border-2 border-rose-500/70 pointer-events-auto';
+        badgeEl.className = 'inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-widest bg-rose-600 text-white mb-1.5';
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function hideStatusModal() {
+    document.getElementById('status-modal').classList.add('hidden');
+}
+
+// --- FULL VEHICLE RESTORATION & RESET ---
+function resetCar(keepPosition = false) {
+    hideStatusModal();
+
+    // Clear detached debris
+    dynamicDebris.forEach(d => scene.remove(d.mesh));
+    dynamicDebris = [];
+
+    if (!keepPosition) {
+        carState.pos.set(0, 0.0, 25);
+        carState.heading = Math.PI;
+    }
+    carState.vel.set(0, 0, 0);
+    carState.angularVel = 0;
+    carState.steerAngle = 0;
+    carState.rpm = 850;
+    carState.gear = 0;
+    carState.pitch = 0;
+    carState.roll = 0;
+    carState.verticalVel = 0;
+    carState.grounded = true;
+    carState.headlightsOn = true;
+    carState.status = 'OPERATIONAL';
+
+    for (const k in carState.parts) carState.parts[k] = 100;
+    for (const k in carState.attached) carState.attached[k] = true;
+    for (const k in carState.hinges) carState.hinges[k] = 0;
+
+    buildGAZ3110();
+}
+
+function toggleHeadlights() {
+    if (carState.status === 'EXPLODED') return;
+    carState.headlightsOn = !carState.headlightsOn;
+    carMeshes.headlightMeshes.forEach((hl, idx) => {
+        const partKey = idx === 0 ? 'headlightL' : 'headlightR';
+        const intact = carState.parts[partKey] > 0;
+        hl.mat.emissiveIntensity = (carState.headlightsOn && intact) ? 1.4 : 0;
+        carMeshes.spotlights[idx].intensity = (carState.headlightsOn && intact) ? 2.2 : 0;
+    });
+}
+
+function cycleCamera() {
+    cameraMode = (cameraMode + 1) % cameraModes.length;
+    document.getElementById('hud-cam-label').textContent = cameraModes[cameraMode];
+}
+
+// --- INITIALIZATION & MAIN LOOP ---
+function init() {
+    const container = document.getElementById('game-container');
+    clock = new THREE.Clock();
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x8fa3b8);
+    scene.fog = new THREE.FogExp2(0x8fa3b8, 0.0042);
+
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.15, 650);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.insertBefore(renderer.domElement, container.firstChild);
+
+    // Three-point & Hemisphere Atmospheric Lighting
+    const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x3f3f46, 0.85);
+    scene.add(hemiLight);
+
+    const sunLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+    sunLight.position.set(65, 110, 45);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 10;
+    sunLight.shadow.camera.far = 320;
+    const d = 135;
+    sunLight.shadow.camera.left = -d;
+    sunLight.shadow.camera.right = d;
+    sunLight.shadow.camera.top = d;
+    sunLight.shadow.camera.bottom = -d;
+    scene.add(sunLight);
+
+    buildProvingGround();
+    buildGAZ3110();
+    setupEvents();
+}
+
+function setupEvents() {
+    // Keyboard controls
+    window.addEventListener('keydown', (e) => {
+        soundEngine.init();
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') keys.forward = true;
+        if (code === 'KeyS' || code === 'ArrowDown') keys.backward = true;
+        if (code === 'KeyA' || code === 'ArrowLeft') keys.left = true;
+        if (code === 'KeyD' || code === 'ArrowRight') keys.right = true;
+        if (code === 'Space') { e.preventDefault(); keys.handbrake = true; }
+        if (code === 'KeyR') resetCar(false);
+        if (code === 'KeyC') cycleCamera();
+        if (code === 'KeyL') toggleHeadlights();
+    });
+
+    window.addEventListener('keyup', (e) => {
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') keys.forward = false;
+        if (code === 'KeyS' || code === 'ArrowDown') keys.backward = false;
+        if (code === 'KeyA' || code === 'ArrowLeft') keys.left = false;
+        if (code === 'KeyD' || code === 'ArrowRight') keys.right = false;
+        if (code === 'Space') keys.handbrake = false;
+    });
+
+    // Mouse Orbit Dragging (for Orbit Cam inspection)
+    renderer.domElement.addEventListener('mousedown', (e) => {
+        soundEngine.init();
+        camOrbit.isDragging = true;
+        camOrbit.lastX = e.clientX;
+        camOrbit.lastY = e.clientY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!camOrbit.isDragging) return;
+        const dx = e.clientX - camOrbit.lastX;
+        const dy = e.clientY - camOrbit.lastY;
+        camOrbit.lastX = e.clientX;
+        camOrbit.lastY = e.clientY;
+        camOrbit.yaw -= dx * 0.008;
+        camOrbit.pitch = Math.max(0.08, Math.min(1.25, camOrbit.pitch + dy * 0.008));
+    });
+
+    window.addEventListener('mouseup', () => {
+        camOrbit.isDragging = false;
+    });
+
+    renderer.domElement.addEventListener('wheel', (e) => {
+        camOrbit.dist = Math.max(3.8, Math.min(16, camOrbit.dist + e.deltaY * 0.005));
+    }, { passive: true });
+
+    // UI Buttons
+    document.getElementById('btn-reset').addEventListener('click', () => { soundEngine.init(); resetCar(false); });
+    document.getElementById('btn-modal-reset').addEventListener('click', () => { soundEngine.init(); resetCar(false); });
+    document.getElementById('btn-camera').addEventListener('click', () => { soundEngine.init(); cycleCamera(); });
+    document.getElementById('btn-audio').addEventListener('click', (e) => {
+        soundEngine.init();
+        soundEngine.enabled = !soundEngine.enabled;
+        e.currentTarget.textContent = soundEngine.enabled ? '🔊' : '🔇';
+    });
+
+    // Touch Controls Binding
+    const bindTouch = (id, keyProp) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            soundEngine.init();
+            keys[keyProp] = true;
+            el.classList.add('active');
+        }, { passive: false });
+        el.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            keys[keyProp] = false;
+            el.classList.remove('active');
+        }, { passive: false });
+    };
+    bindTouch('touch-left', 'left');
+    bindTouch('touch-right', 'right');
+    bindTouch('touch-gas', 'forward');
+    bindTouch('touch-brake', 'backward');
+
+    // Window Resize
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    const dt = Math.min(0.05, clock.getDelta());
+
+    updatePhysics(dt);
+    updateDebrisAndParticles(dt);
+    updateCamera(dt);
+    updateHUD();
+
+    renderer.render(scene, camera);
+}
+
+window.onload = function () {
+    init();
+    animate();
+};
+</script>
+</body>
+</html>

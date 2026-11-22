@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GTA-Style Open World Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0b0b0e;
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Prevent browser scrolling on touch */
+        }
+        
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Radar specific styling */
+        #radarContainer {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            background-color: rgba(10, 10, 15, 0.8);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8), inset 0 0 20px rgba(0,0,0,0.5);
+            z-index: 10;
+            overflow: hidden;
+            backdrop-filter: blur(4px);
+        }
+
+        #radarCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* UI Overlays */
+        .glass-panel {
+            background: rgba(20, 20, 25, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Virtual Joystick */
+        #joystickZone {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            width: 150px;
+            height: 150px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            z-index: 10;
+            display: none; /* Shown via JS on touch devices */
+        }
+        #joystickKnob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        @media (max-width: 768px) {
+            #radarContainer { width: 140px; height: 140px; bottom: 16px; left: 16px; }
+            #joystickZone { display: block; } /* Show joystick on smaller screens */
+            .hide-mobile { display: none; }
+        }
+    </style>
+</head>
+<body class="text-white select-none">
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Top Left Information Panel -->
+    <div class="absolute top-4 left-4 z-10 glass-panel rounded-xl p-4 w-72 pointer-events-none transition-all duration-300">
+        <h1 class="text-2xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">CITY PROTOTYPE</h1>
+        <div class="mt-2 text-xs uppercase tracking-widest text-gray-400 flex justify-between">
+            <span>Grid Size</span>
+            <span class="text-white">10km x 10km</span>
+        </div>
+        <div class="mt-1 text-xs uppercase tracking-widest text-gray-400 flex justify-between">
+            <span>Active Entities</span>
+            <span class="text-white" id="ui-entities">0</span>
+        </div>
+        <div class="mt-4 pt-3 border-t border-gray-700/50">
+            <p class="text-xs text-gray-400 uppercase tracking-widest mb-1">Current Territory</p>
+            <p id="ui-zone" class="text-lg font-bold" style="color: #fff;">Unclaimed Badlands</p>
+        </div>
+    </div>
+
+    <!-- Top Right Legend Panel -->
+    <div class="absolute top-4 right-4 z-10 glass-panel rounded-xl p-4 w-64 pointer-events-none hide-mobile">
+        <h2 class="text-xs uppercase tracking-widest text-gray-400 mb-3">Faction Control</h2>
+        <div id="ui-legend" class="flex flex-col gap-2">
+            <!-- Populated by JS -->
+        </div>
+        <div class="mt-4 pt-3 border-t border-gray-700/50 text-xs text-gray-400">
+            <p>Controls: WASD / Arrows</p>
+            <p class="mt-1 text-gray-500">NPCs cluster & fight near borders.</p>
+        </div>
+    </div>
+
+    <!-- Bottom Left Radar -->
+    <div id="radarContainer">
+        <canvas id="radarCanvas"></canvas>
+        <!-- Player center blip overlay (fixed) -->
+        <div class="absolute top-1/2 left-1/2 w-0 h-0 -ml-1.5 -mt-2.5 z-20" 
+             style="border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid #00ffff;">
+        </div>
+    </div>
+
+    <!-- Bottom Right Touch Joystick -->
+    <div id="joystickZone">
+        <div id="joystickKnob"></div>
+    </div>
+
+<script>
+/**
+ * ARCHITECTURE & SYSTEM DESIGN
+ * - Map Size: 6000x6000px virtual space (represents 10x10km).
+ * - Generator: Creates roads, parses blocks, places 2.5D buildings.
+ * - Territories: Offscreen canvas generating a blended heat map of 6 gang zones.
+ * - Entity System: NPCs wander along procedural waypoints, detect enemies via distance checks, and engage.
+ * - Camera & Radar: Follows player, culling off-screen objects for high framerates. Radar applies inverse rotation for authentic GTA feel.
+ */
+
+// --- CONFIGURATION ---
+const MAP_SIZE = 6000;
+const BLOCK_SIZE = 300; 
+const MAIN_ROAD_INTERVAL = 1500;
+const MAX_NPCS = 350;
+
+// Gang Definitions
+const GANGS = [
+    { id: 0, name: 'Crimson Cartel',   color: '#ff2a2a', bg: 'rgba(255, 42, 42, 0.25)', cx: 1200, cy: 1200 },
+    { id: 1, name: 'Azure Syndicate',  color: '#2a75ff', bg: 'rgba(42, 117, 255, 0.25)', cx: 4800, cy: 1200 },
+    { id: 2, name: 'Verdant Vipers',   color: '#2aff2a', bg: 'rgba(42, 255, 42, 0.25)', cx: 1200, cy: 4800 },
+    { id: 3, name: 'Obsidian Order',   color: '#c82aff', bg: 'rgba(200, 42, 255, 0.25)', cx: 4800, cy: 4800 },
+    { id: 4, name: 'Golden Grifters',  color: '#ffc82a', bg: 'rgba(255, 200, 42, 0.25)', cx: 3000, cy: 2500 },
+    { id: 5, name: 'Neon Nomads',      color: '#ff752a', bg: 'rgba(255, 117, 42, 0.25)', cx: 3000, cy: 4500 }
+];
+
+// --- GLOBALS ---
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false }); // Optimize for no transparency on base canvas
+const radarCanvas = document.getElementById('radarCanvas');
+const radarCtx = radarCanvas.getContext('2d');
+
+let cw, ch;
+let camera = { x: 3000, y: 3000, zoom: 1 };
+let keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false };
+
+// Map Data
+let roads = [];
+let buildings = [];
+let npcs = [];
+let territoryCanvas, territoryCtx;
+let radarBaseCanvas;
+
+// Touch Controls
+let touchX = 0, touchY = 0, isTouching = false;
+const joystickZone = document.getElementById('joystickZone');
+const joystickKnob = document.getElementById('joystickKnob');
+
+// --- PLAYER CLASS ---
+class Player {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.speed = 12; // Top speed
+        this.accel = 1.5;
+        this.friction = 0.85;
+        this.angle = 0;
+        this.radius = 12;
+        this.color = '#00ffff'; // Distinct cyan player color
+    }
+
+    update() {
+        let dx = 0;
+        let dy = 0;
+
+        // Keyboard Input
+        if (keys.w || keys.ArrowUp) dy -= 1;
+        if (keys.s || keys.ArrowDown) dy += 1;
+        if (keys.a || keys.ArrowLeft) dx -= 1;
+        if (keys.d || keys.ArrowRight) dx += 1;
+
+        // Touch Input Override
+        if (isTouching) {
+            dx = touchX;
+            dy = touchY;
+        }
+
+        // Normalize diagonal movement
+        if (dx !== 0 && dy !== 0 && !isTouching) {
+            let length = Math.sqrt(dx * dx + dy * dy);
+            dx /= length;
+            dy /= length;
+        }
+
+        this.vx += dx * this.accel;
+        this.vy += dy * this.accel;
+
+        // Apply friction
+        this.vx *= this.friction;
+        this.vy *= this.friction;
+
+        // Move
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Map boundaries
+        this.x = Math.max(0, Math.min(MAP_SIZE, this.x));
+        this.y = Math.max(0, Math.min(MAP_SIZE, this.y));
+
+        // Update Angle if moving significantly
+        if (Math.abs(this.vx) > 0.5 || Math.abs(this.vy) > 0.5) {
+            this.angle = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+        }
+    }
+
+    draw(c) {
+        c.save();
+        c.translate(this.x, this.y);
+        c.rotate(this.angle);
+        
+        // Shadow/Glow
+        c.shadowColor = this.color;
+        c.shadowBlur = 15;
+
+        // Draw Player Arrow
+        c.beginPath();
+        c.moveTo(0, -this.radius);
+        c.lineTo(this.radius * 0.8, this.radius);
+        c.lineTo(0, this.radius * 0.4);
+        c.lineTo(-this.radius * 0.8, this.radius);
+        c.closePath();
+        c.fillStyle = this.color;
+        c.fill();
+        c.lineWidth = 1;
+        c.strokeStyle = '#fff';
+        c.stroke();
+        
+        c.restore();
+    }
+}
+
+// --- NPC CLASS ---
+class NPC {
+    constructor(id) {
+        this.id = id;
+        this.gang = GANGS[Math.floor(Math.random() * GANGS.length)];
+        this.spawnNearGang();
+        this.vx = 0;
+        this.vy = 0;
+        this.speed = Math.random() * 1.5 + 1.0;
+        this.state = 'wander'; // wander, fight, dead
+        this.target = { x: this.x, y: this.y };
+        this.timer = 0;
+        this.radius = 4;
+    }
+
+    spawnNearGang() {
+        this.x = this.gang.cx + (Math.random() - 0.5) * 2000;
+        this.y = this.gang.cy + (Math.random() - 0.5) * 2000;
+        // Clamp
+        this.x = Math.max(50, Math.min(MAP_SIZE - 50, this.x));
+        this.y = Math.max(50, Math.min(MAP_SIZE - 50, this.y));
+        this.state = 'wander';
+    }
+
+    getNewWaypoint() {
+        this.target.x = this.x + (Math.random() - 0.5) * 400;
+        this.target.y = this.y + (Math.random() - 0.5) * 400;
+        this.target.x = Math.max(0, Math.min(MAP_SIZE, this.target.x));
+        this.target.y = Math.max(0, Math.min(MAP_SIZE, this.target.y));
+    }
+
+    update() {
+        if (this.state === 'dead') {
+            this.timer--;
+            if (this.timer <= 0) {
+                this.spawnNearGang(); // Respawn
+            }
+            return;
+        }
+
+        if (this.state === 'fight') {
+            this.timer--;
+            if (this.timer <= 0) {
+                // Chance to die or go back to wandering
+                if (Math.random() > 0.5) {
+                    this.state = 'dead';
+                    this.timer = 180; // 3 seconds dead
+                } else {
+                    this.state = 'wander';
+                    this.getNewWaypoint();
+                }
+            }
+            return; // Don't move while fighting
+        }
+
+        // Wandering logic
+        let dx = this.target.x - this.x;
+        let dy = this.target.y - this.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 10) {
+            this.getNewWaypoint();
+        } else {
+            this.vx = (dx / dist) * this.speed;
+            this.vy = (dy / dist) * this.speed;
+            this.x += this.vx;
+            this.y += this.vy;
+        }
+
+        // Check for enemies (expensive spatial check, optimized by skipping frames)
+        if (Math.random() < 0.05) { // Only check 5% of the time per frame
+            for (let i = 0; i < npcs.length; i++) {
+                let other = npcs[i];
+                if (other.state === 'wander' && other.gang.id !== this.gang.id) {
+                    let edx = other.x - this.x;
+                    let edy = other.y - this.y;
+                    let edist = edx * edx + edy * edy; // squared dist
+                    if (edist < 2500) { // 50px radius
+                        this.state = 'fight';
+                        other.state = 'fight';
+                        this.timer = Math.random() * 60 + 60; // 1-2 seconds of fighting
+                        other.timer = this.timer;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    draw(c, camBox) {
+        if (this.state === 'dead') return;
+        
+        // Simple Culling
+        if (this.x < camBox.left || this.x > camBox.right || this.y < camBox.top || this.y > camBox.bottom) return;
+
+        c.fillStyle = this.gang.color;
+        c.beginPath();
+        c.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        c.fill();
+
+        // Muzzle Flash
+        if (this.state === 'fight' && Math.random() > 0.6) {
+            c.fillStyle = '#ffffbb';
+            c.beginPath();
+            let flashSize = this.radius * 2;
+            c.arc(this.x + (Math.random()*10-5), this.y + (Math.random()*10-5), flashSize, 0, Math.PI * 2);
+            c.fill();
+            
+            // Add lighting glow
+            c.shadowColor = '#ffff00';
+            c.shadowBlur = 10;
+            c.fill();
+            c.shadowBlur = 0; // Reset
+        }
+    }
+}
+
+// --- MAP GENERATION ---
+function generateMap() {
+    // 1. Territories Offscreen Canvas
+    territoryCanvas = document.createElement('canvas');
+    territoryCanvas.width = MAP_SIZE / 10;
+    territoryCanvas.height = MAP_SIZE / 10;
+    territoryCtx = territoryCanvas.getContext('2d');
+    
+    territoryCtx.fillStyle = '#141418'; // Base dirt/ground dark color
+    territoryCtx.fillRect(0, 0, territoryCanvas.width, territoryCanvas.height);
+
+    // Draw blended gang zones
+    GANGS.forEach(g => {
+        let x = g.cx / 10;
+        let y = g.cy / 10;
+        let rad = 300; // 3000px radius scaled down
+        let grad = territoryCtx.createRadialGradient(x, y, 0, x, y, rad);
+        grad.addColorStop(0, g.bg);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        territoryCtx.fillStyle = grad;
+        territoryCtx.fillRect(0, 0, territoryCanvas.width, territoryCanvas.height);
+    });
+
+    // 2. Generate Roads
+    // Vertical
+    for (let x = 0; x <= MAP_SIZE; x += BLOCK_SIZE) {
+        let isMain = (x % MAIN_ROAD_INTERVAL === 0);
+        let w = isMain ? 40 : 16;
+        roads.push({ x: x - w/2, y: 0, w: w, h: MAP_SIZE, type: isMain ? 'main' : 'side' });
+    }
+    // Horizontal
+    for (let y = 0; y <= MAP_SIZE; y += BLOCK_SIZE) {
+        let isMain = (y % MAIN_ROAD_INTERVAL === 0);
+        let w = isMain ? 40 : 16;
+        roads.push({ x: 0, y: y - w/2, w: MAP_SIZE, h: w, type: isMain ? 'main' : 'side' });
+    }
+
+    // 3. Generate Buildings
+    for (let x = 0; x < MAP_SIZE; x += BLOCK_SIZE) {
+        for (let y = 0; y < MAP_SIZE; y += BLOCK_SIZE) {
+            let leftW = (x % MAIN_ROAD_INTERVAL === 0) ? 40 : 16;
+            let topW = (y % MAIN_ROAD_INTERVAL === 0) ? 40 : 16;
+
+            let bx = x + leftW / 2 + 15; // 15px sidewalk/margin
+            let by = y + topW / 2 + 15;
+            
+            // Calc next block boundary
+            let nextX = x + BLOCK_SIZE;
+            let nextY = y + BLOCK_SIZE;
+            let rightW = (nextX % MAIN_ROAD_INTERVAL === 0) ? 40 : 16;
+            let bottomW = (nextY % MAIN_ROAD_INTERVAL === 0) ? 40 : 16;
+
+            let bw = (nextX - rightW/2 - 15) - bx;
+            let bh = (nextY - bottomW/2 - 15) - by;
+
+            if (bw > 30 && bh > 30) {
+                // Procedural subdivision for varied building sizes
+                let splits = Math.random() > 0.5 ? 2 : 1;
+                if (splits === 2) {
+                    if (bw > bh) {
+                        // Split vertically
+                        let gap = 10;
+                        let halfW = (bw - gap) / 2;
+                        buildings.push(createBuilding(bx, by, halfW, bh));
+                        buildings.push(createBuilding(bx + halfW + gap, by, halfW, bh));
+                    } else {
+                        // Split horizontally
+                        let gap = 10;
+                        let halfH = (bh - gap) / 2;
+                        buildings.push(createBuilding(bx, by, bw, halfH));
+                        buildings.push(createBuilding(bx, by + halfH + gap, bw, halfH));
+                    }
+                } else {
+                    buildings.push(createBuilding(bx, by, bw, bh));
+                }
+            }
+        }
+    }
+
+    // 4. Pre-render Radar Base (Massive performance boost for minimap)
+    radarBaseCanvas = document.createElement('canvas');
+    radarBaseCanvas.width = MAP_SIZE / 4; // 25% scale for radar
+    radarBaseCanvas.height = MAP_SIZE / 4;
+    let rbCtx = radarBaseCanvas.getContext('2d');
+    let scale = 0.25;
+
+    // Draw Territories onto radar
+    rbCtx.drawImage(territoryCanvas, 0, 0, radarBaseCanvas.width, radarBaseCanvas.height);
+    
+    // Draw simplified roads
+    rbCtx.fillStyle = '#222226';
+    roads.forEach(r => {
+        if(r.type === 'main') {
+            rbCtx.fillRect(r.x * scale, r.y * scale, r.w * scale, r.h * scale);
+        }
+    });
+    // Draw simplified buildings
+    rbCtx.fillStyle = '#3a3a42';
+    buildings.forEach(b => {
+        rbCtx.fillRect(b.x * scale, b.y * scale, b.w * scale, b.h * scale);
+    });
+}
+
+function createBuilding(x, y, w, h) {
+    // Generate slight color variations for buildings
+    const shades = ['#28282e', '#2c2c34', '#32323a', '#26262a'];
+    return {
+        x: x, y: y, w: w, h: h,
+        color: shades[Math.floor(Math.random() * shades.length)],
+        roofColor: shades[Math.floor(Math.random() * shades.length)],
+        height: Math.random() * 20 + 10 // For faux 3D shadow effect
+    };
+}
+
+
+// --- INITIALIZATION ---
+let player;
+function init() {
+    resize();
+    window.addEventListener('resize', resize);
+    
+    // Setup Inputs
+    window.addEventListener('keydown', e => { if (keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+    window.addEventListener('keyup', e => { if (keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+    setupTouchControls();
+
+    generateMap();
+    player = new Player(3000, 3000);
+
+    for (let i = 0; i < MAX_NPCS; i++) {
+        npcs.push(new NPC(i));
+    }
+
+    buildUI();
+    requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+    cw = window.innerWidth;
+    ch = window.innerHeight;
+    canvas.width = cw;
+    canvas.height = ch;
+    
+    // Radar resize
+    let rRect = document.getElementById('radarContainer').getBoundingClientRect();
+    radarCanvas.width = rRect.width;
+    radarCanvas.height = rRect.height;
+}
+
+function setupTouchControls() {
+    // Check if touch device, show joystick zone if so
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        joystickZone.style.display = 'block';
+    }
+
+    let joyRect;
+    let joyCenterX, joyCenterY;
+    let maxDist = 50;
+
+    joystickZone.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        joyRect = joystickZone.getBoundingClientRect();
+        joyCenterX = joyRect.left + joyRect.width / 2;
+        joyCenterY = joyRect.top + joyRect.height / 2;
+        isTouching = true;
+        updateJoystick(e.touches[0]);
+    }, {passive: false});
+
+    joystickZone.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if(isTouching) updateJoystick(e.touches[0]);
+    }, {passive: false});
+
+    const endTouch = (e) => {
+        e.preventDefault();
+        isTouching = false;
+        touchX = 0;
+        touchY = 0;
+        joystickKnob.style.transform = `translate(-50%, -50%)`;
+    };
+
+    joystickZone.addEventListener('touchend', endTouch);
+    joystickZone.addEventListener('touchcancel', endTouch);
+
+    function updateJoystick(touch) {
+        let dx = touch.clientX - joyCenterX;
+        let dy = touch.clientY - joyCenterY;
+        let dist = Math.sqrt(dx*dx + dy*dy);
+        
+        if (dist > maxDist) {
+            dx = (dx / dist) * maxDist;
+            dy = (dy / dist) * maxDist;
+        }
+
+        // Normalize to -1 to 1 for player input
+        touchX = dx / maxDist;
+        touchY = dy / maxDist;
+
+        // Visual update
+        joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    }
+}
+
+function buildUI() {
+    const legend = document.getElementById('ui-legend');
+    GANGS.forEach(g => {
+        legend.innerHTML += `
+            <div class="flex items-center gap-3">
+                <div class="w-3 h-3 rounded-full" style="background-color: ${g.color}; box-shadow: 0 0 8px ${g.color}"></div>
+                <span class="text-sm font-medium tracking-wide">${g.name}</span>
+            </div>
+        `;
+    });
+    document.getElementById('ui-entities').innerText = MAX_NPCS;
+}
+
+// --- MAIN LOOP ---
+function gameLoop() {
+    update();
+    render();
+    renderRadar();
+    updateUI();
+    requestAnimationFrame(gameLoop);
+}
+
+function update() {
+    player.update();
+    
+    // Smooth camera follow
+    camera.x += (player.x - camera.x) * 0.1;
+    camera.y += (player.y - camera.y) * 0.1;
+
+    npcs.forEach(npc => npc.update());
+}
+
+function render() {
+    // Fill background (fallback)
+    ctx.fillStyle = '#0b0b0e';
+    ctx.fillRect(0, 0, cw, ch);
+
+    ctx.save();
+    
+    // Camera Transform (Center on screen)
+    ctx.translate(cw / 2, ch / 2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
+
+    // Calculate Camera Bounding Box for Culling
+    const camLeft = camera.x - (cw / 2) / camera.zoom;
+    const camRight = camera.x + (cw / 2) / camera.zoom;
+    const camTop = camera.y - (ch / 2) / camera.zoom;
+    const camBottom = camera.y + (ch / 2) / camera.zoom;
+    const pad = 200; // Padding for safe drawing
+    const camBox = { left: camLeft - pad, right: camRight + pad, top: camTop - pad, bottom: camBottom + pad };
+
+    // 1. Draw Territory Base (Scaled up from offscreen)
+    // We only need to draw the visible portion to optimize, or just draw the whole thing if it's fast enough.
+    // Drawing a single image is fast.
+    ctx.drawImage(territoryCanvas, 0, 0, MAP_SIZE, MAP_SIZE);
+
+    // 2. Draw Grid Pattern (Subtle)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    // Align grid to block sizes
+    let startGridX = Math.floor(camBox.left / BLOCK_SIZE) * BLOCK_SIZE;
+    let startGridY = Math.floor(camBox.top / BLOCK_SIZE) * BLOCK_SIZE;
+    for (let x = startGridX; x < camBox.right; x += BLOCK_SIZE) {
+        ctx.moveTo(x, camBox.top); ctx.lineTo(x, camBox.bottom);
+    }
+    for (let y = startGridY; y < camBox.bottom; y += BLOCK_SIZE) {
+        ctx.moveTo(camBox.left, y); ctx.lineTo(camBox.right, y);
+    }
+    ctx.stroke();
+
+    // 3. Draw Roads (Culled)
+    roads.forEach(r => {
+        // Simple AABB check
+        if (r.x < camBox.right && r.x + r.w > camBox.left && r.y < camBox.bottom && r.y + r.h > camBox.top) {
+            ctx.fillStyle = r.type === 'main' ? '#1c1c22' : '#222228';
+            ctx.fillRect(r.x, r.y, r.w, r.h);
+            
+            // Draw road markings for main roads
+            if (r.type === 'main') {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([15, 15]);
+                ctx.beginPath();
+                if (r.w > r.h) { // Horizontal
+                    ctx.moveTo(Math.max(r.x, camBox.left), r.y + r.h/2);
+                    ctx.lineTo(Math.min(r.x + r.w, camBox.right), r.y + r.h/2);
+                } else { // Vertical
+                    ctx.moveTo(r.x + r.w/2, Math.max(r.y, camBox.top));
+                    ctx.lineTo(r.x + r.w/2, Math.min(r.y + r.h, camBox.bottom));
+                }
+                ctx.stroke();
+                ctx.setLineDash([]); // Reset
+            }
+        }
+    });
+
+    // 4. Draw Buildings (Culled with fake 3D drop shadow)
+    buildings.forEach(b => {
+        if (b.x < camBox.right && b.x + b.w > camBox.left && b.y < camBox.bottom && b.y + b.h > camBox.top) {
+            // Shadow / Base for depth
+            ctx.fillStyle = '#0a0a0c'; 
+            ctx.fillRect(b.x + b.height, b.y + b.height, b.w, b.h);
+            
+            // Roof
+            ctx.fillStyle = b.color;
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+            
+            // Outline
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+        }
+    });
+
+    // 5. Draw NPCs
+    npcs.forEach(npc => npc.draw(ctx, camBox));
+
+    // 6. Draw Player
+    player.draw(ctx);
+
+    ctx.restore();
+}
+
+function renderRadar() {
+    let rw = radarCanvas.width;
+    let rh = radarCanvas.height;
+    
+    radarCtx.clearRect(0, 0, rw, rh);
+    radarCtx.save();
+    
+    // Center radar
+    radarCtx.translate(rw / 2, rh / 2);
+    
+    // Rotate inverse to player angle (GTA style rotating minimap)
+    // Note: player angle 0 is up, but standard canvas 0 is right. Adjust accordingly.
+    radarCtx.rotate(-player.angle);
+    
+    // Scale and translate map to player pos
+    let radarScale = 0.25; // How much of the radar base canvas to show
+    let zoomFactor = 0.8; // Map zoom level in radar
+    
+    radarCtx.scale(zoomFactor, zoomFactor);
+    radarCtx.translate(-player.x * radarScale, -player.y * radarScale);
+
+    // Draw pre-rendered radar base
+    radarCtx.drawImage(radarBaseCanvas, 0, 0);
+
+    // Draw nearby NPCs as blips on radar
+    // We only iterate nearby ones to save performance
+    let pScale = radarScale; // to align coords
+    npcs.forEach(npc => {
+        if (npc.state !== 'dead') {
+            let dx = npc.x - player.x;
+            let dy = npc.y - player.y;
+            // Only draw if within reasonable distance
+            if (dx*dx + dy*dy < 900000) { // ~950px radius limit
+                radarCtx.fillStyle = npc.state === 'fight' ? '#ffffff' : npc.gang.color;
+                radarCtx.beginPath();
+                radarCtx.arc(npc.x * pScale, npc.y * pScale, 10, 0, Math.PI*2); // Size 10 for visibility on mini map
+                radarCtx.fill();
+            }
+        }
+    });
+
+    radarCtx.restore();
+}
+
+function updateUI() {
+    // Find closest gang territory
+    let minDist = Infinity;
+    let currentZone = null;
+    
+    GANGS.forEach(g => {
+        let dx = player.x - g.cx;
+        let dy = player.y - g.cy;
+        let dist = dx*dx + dy*dy;
+        if (dist < minDist) {
+            minDist = dist;
+            currentZone = g;
+        }
+    });
+
+    const zoneText = document.getElementById('ui-zone');
+    if (minDist < 6000000) { // If within influence radius
+        zoneText.innerText = currentZone.name + " Territory";
+        zoneText.style.color = currentZone.color;
+    } else {
+        zoneText.innerText = "Unclaimed Badlands";
+        zoneText.style.color = "#9ca3af"; // Gray
+    }
+}
+
+// Start Application
+window.onload = init;
+
+</script>
+</body>
+</html>
