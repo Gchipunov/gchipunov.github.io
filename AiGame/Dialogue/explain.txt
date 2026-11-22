@@ -1,0 +1,1 @@
+where NPCs are started as static dialogers, later will become connected by MCP with javascript to hugguing face and local models. Users will prompt there models to do certain tasks.,
