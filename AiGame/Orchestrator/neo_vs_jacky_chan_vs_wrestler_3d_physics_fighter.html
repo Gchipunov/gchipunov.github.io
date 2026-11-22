@@ -1,0 +1,2932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>GTA CITY ALLEY BRAWL — Spider-Man, Sub-Zero, Lue Chang & Neo (3D Ragdoll & Soft-Body)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,600;0,700;1,700&family=Inter:wght@400;600;800&family=Pricedown&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #07090e;
+      font-family: 'Inter', sans-serif;
+      color: #f8fafc;
+    }
+    .font-arcade {
+      font-family: 'Chakra Petch', sans-serif;
+    }
+    .font-gta {
+      font-family: 'Bebas Neue', 'Chakra Petch', sans-serif;
+      letter-spacing: 0.06em;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    #vice-vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      transition: background 0.25s ease, box-shadow 0.25s ease;
+    }
+    .glass-panel {
+      background: rgba(10, 14, 24, 0.82);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65);
+    }
+    .btn-arcade {
+      transition: all 0.12s cubic-bezier(0.2, 0.8, 0.2, 1);
+      box-shadow: 0 4px 0 rgba(0, 0, 0, 0.65);
+    }
+    .btn-arcade:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.65);
+    }
+    @keyframes announcePop {
+      0% { transform: scale(0.3) rotate(-6deg); opacity: 0; }
+      60% { transform: scale(1.1) rotate(2deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    .announce-pop {
+      animation: announcePop 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 99px; }
+  </style>
+</head>
+<body>
+
+  <!-- 3D WebGL Viewport -->
+  <div id="canvas-container"></div>
+
+  <!-- Drunk / Mudd Screen Tint & Vignette Overlay -->
+  <div id="vice-vignette"></div>
+
+  <!-- GTA City Alley Brawl HUD -->
+  <div id="hud-overlay" class="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2 sm:p-4">
+
+    <!-- Top Row: Left Survival/Vice Stats | Center Sandbox Tools | Right GTA Radar + Cash/Stars -->
+    <div class="w-full max-w-7xl mx-auto flex items-start justify-between gap-2">
+
+      <!-- TOP-LEFT: Player Health, Hunger & Vice Bars (Vodka Drunk, Mudd, Cigs Counter) -->
+      <div class="glass-panel rounded-2xl p-2.5 sm:p-3.5 w-64 sm:w-80 border-l-4 border-emerald-400 pointer-events-auto">
+        <div class="flex items-center justify-between mb-1">
+          <div class="flex items-center gap-1.5">
+            <span class="px-1.5 py-0.5 text-[10px] font-extrabold rounded bg-emerald-500 text-slate-950">PLAYER</span>
+            <span id="p1-name" class="font-gta text-lg sm:text-2xl text-emerald-300 leading-none">SPIDER-MAN</span>
+          </div>
+          <button id="btn-open-roster" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-white/20 text-[10px] font-bold text-cyan-300 transition">
+            SWITCH FIGHTER
+          </button>
+        </div>
+
+        <!-- HP & Hunger Bars -->
+        <div class="space-y-1.5 mb-2.5">
+          <div>
+            <div class="flex justify-between text-[10px] font-bold text-slate-300">
+              <span>HEALTH</span>
+              <span id="hp-text">100 / 100</span>
+            </div>
+            <div class="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-white/15 p-0.5">
+              <div id="p1-hp" class="h-full rounded-full bg-gradient-to-r from-rose-500 via-emerald-400 to-emerald-300 transition-all duration-150" style="width: 100%;"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[10px] font-bold text-amber-300">
+              <span>HUNGER <span id="hunger-status" class="text-[9px] text-emerald-400">(WELL FED)</span></span>
+              <span id="hunger-text">85%</span>
+            </div>
+            <div class="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-amber-500/30 p-0.5">
+              <div id="p1-hunger" class="h-full rounded-full bg-gradient-to-r from-red-500 via-amber-400 to-lime-400 transition-all duration-150" style="width: 85%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Vice Stats Grid: Drunk (Vodka), Mudd (Lean), Cigs Counter -->
+        <div class="grid grid-cols-3 gap-1.5 pt-2 border-t border-white/10 text-center">
+          <div class="bg-slate-950/80 rounded-xl p-1.5 border border-cyan-500/30">
+            <div class="text-[9px] font-extrabold text-cyan-300 tracking-wider">VODKA DRUNK</div>
+            <div id="drunk-val" class="font-arcade font-bold text-sm sm:text-base text-white">0%</div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1">
+              <div id="drunk-bar" class="h-full bg-cyan-400 transition-all duration-150" style="width: 0%;"></div>
+            </div>
+            <button id="btn-drink-vodka" class="mt-1.5 w-full py-0.5 rounded bg-cyan-600/80 hover:bg-cyan-500 text-[9px] font-extrabold text-white">
+              SIP [1] (<span id="inv-vodka">2</span>)
+            </button>
+          </div>
+
+          <div class="bg-slate-950/80 rounded-xl p-1.5 border border-purple-500/30">
+            <div class="text-[9px] font-extrabold text-purple-300 tracking-wider">MUDD / LEAN</div>
+            <div id="mudd-val" class="font-arcade font-bold text-sm sm:text-base text-white">0%</div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1">
+              <div id="mudd-bar" class="h-full bg-purple-500 transition-all duration-150" style="width: 0%;"></div>
+            </div>
+            <button id="btn-sip-mudd" class="mt-1.5 w-full py-0.5 rounded bg-purple-600/80 hover:bg-purple-500 text-[9px] font-extrabold text-white">
+              POUR [2] (<span id="inv-mudd">2</span>)
+            </button>
+          </div>
+
+          <div class="bg-slate-950/80 rounded-xl p-1.5 border border-orange-500/30">
+            <div class="text-[9px] font-extrabold text-orange-300 tracking-wider">CIGS SMOKED</div>
+            <div id="cigs-count" class="font-arcade font-extrabold text-sm sm:text-base text-amber-300">0</div>
+            <div class="text-[8px] text-slate-400 mt-0.5" id="cig-buff-tag">PACK: <span id="inv-cigs">5</span></div>
+            <button id="btn-smoke-cig" class="mt-1.5 w-full py-0.5 rounded bg-orange-600/80 hover:bg-orange-500 text-[9px] font-extrabold text-white">
+              SMOKE [3]
+            </button>
+          </div>
+        </div>
+
+        <button id="btn-eat-food" class="mt-1.5 w-full py-1 rounded-lg bg-amber-600/80 hover:bg-amber-500 border border-amber-300/30 text-[10px] font-extrabold text-white tracking-wider transition">
+          🍔 EAT STREET BURGER [4] — INVENTORY: <span id="inv-food">2</span>
+        </button>
+      </div>
+
+      <!-- TOP-CENTER: Sandbox & Physics Toolbar + Active Alley Brawl Wave Info -->
+      <div class="hidden md:flex flex-col items-center gap-1.5 pointer-events-auto">
+        <div class="glass-panel px-4 py-1.5 rounded-2xl border border-amber-400/40 text-center">
+          <div class="font-gta text-xl text-amber-300 tracking-widest leading-none">GTA CITY • 4-BLOCK ALLEYWAY</div>
+          <div class="text-[10px] font-bold text-slate-300 mt-0.5">
+            ACTIVE ALLEY NPCs: <span id="npc-alive-count" class="text-rose-400 font-extrabold">4</span> • KOs: <span id="ko-counter" class="text-emerald-400 font-extrabold">0</span>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-center gap-1.5">
+          <button id="btn-xray" class="px-2.5 py-1 rounded-lg glass-panel hover:bg-cyan-950/80 border border-cyan-400/40 text-[10px] font-bold text-cyan-300 flex items-center gap-1 transition">
+            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+            X-RAY IK/SOFTBODY: <span id="xray-state" class="text-white">OFF</span>
+          </button>
+          <button id="btn-meshy" class="px-2.5 py-1 rounded-lg glass-panel hover:bg-fuchsia-950/80 border border-fuchsia-400/40 text-[10px] font-bold text-fuchsia-300 transition">
+            MESHY-2 GLITCH [G]: <span id="meshy-state" class="text-white">OFF</span>
+          </button>
+          <button id="btn-spawn-npc" class="px-2.5 py-1 rounded-lg bg-rose-600/85 hover:bg-rose-500 border border-rose-300/40 text-[10px] font-extrabold text-white transition">
+            + RANDOM ALLEY NPC
+          </button>
+          <button id="btn-spawn-softbody" class="px-2.5 py-1 rounded-lg glass-panel hover:bg-purple-950/80 border border-purple-400/40 text-[10px] font-bold text-purple-300 transition">
+            + SOFT-BODY CUBE
+          </button>
+          <button id="btn-spawn-prop" class="px-2.5 py-1 rounded-lg glass-panel hover:bg-amber-950/80 border border-amber-400/40 text-[10px] font-bold text-amber-300 transition">
+            + CRATE / BARREL
+          </button>
+          <button id="btn-reset" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/20 text-[10px] font-bold text-slate-200 transition">
+            RESPAWN [R]
+          </button>
+        </div>
+      </div>
+
+      <!-- TOP-RIGHT: GTA Radar Minimap + Cash + Wanted Stars -->
+      <div class="flex items-start gap-2.5">
+        <div class="text-right hidden sm:block">
+          <div id="gta-cash" class="font-gta text-2xl sm:text-3xl text-emerald-400 drop-shadow leading-none">$00000450</div>
+          <div id="gta-wanted" class="text-sm sm:text-base tracking-widest text-amber-400 drop-shadow mt-0.5">★☆☆☆☆</div>
+          <div class="text-[10px] font-bold text-slate-300 bg-slate-950/75 px-2 py-0.5 rounded mt-1 border border-white/10">
+            SUPER: <span id="p1-super-txt" class="text-cyan-300">60%</span>
+          </div>
+        </div>
+
+        <div class="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-slate-800 shadow-2xl overflow-hidden bg-slate-950 shrink-0">
+          <canvas id="radar-canvas" width="140" height="140" class="w-full h-full"></canvas>
+          <div class="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] font-extrabold text-amber-300 bg-slate-950/80 px-1 rounded">N</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center Dynamic Announcements & Combo Counter -->
+    <div class="relative flex-1 flex items-center justify-center">
+      <div id="combo-box" class="hidden absolute left-2 sm:left-6 top-1/3 glass-panel px-3.5 py-2 rounded-2xl border-l-4 border-amber-400">
+        <div id="combo-count" class="font-gta text-3xl sm:text-5xl text-amber-400 leading-none">3 HIT COMBO!</div>
+        <div id="combo-dmg" class="text-[11px] font-bold tracking-wider text-slate-200 uppercase mt-0.5">42 DMG • ALLEY BRAWL</div>
+      </div>
+
+      <div id="center-banner" class="hidden text-center px-6 py-3 rounded-2xl bg-slate-950/80 border-2 border-amber-400/80 shadow-2xl">
+        <div id="banner-title" class="font-gta text-4xl sm:text-6xl tracking-wider text-transparent bg-clip-text bg-gradient-to-b from-amber-200 via-amber-400 to-rose-500 uppercase">
+          ALLEY BRAWL!
+        </div>
+        <div id="banner-sub" class="text-xs sm:text-sm font-bold tracking-widest text-cyan-300 uppercase mt-0.5">
+          4-BLOCK GTA CITY • RANDOM NPC RUMBLE
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Controls Bar -->
+    <div class="w-full max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 pb-1">
+      <div class="pointer-events-auto flex items-center gap-1.5 glass-panel p-1.5 rounded-2xl">
+        <button data-key="KeyA" class="ctrl-btn btn-arcade w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-arcade font-bold text-base text-white flex items-center justify-center">◀</button>
+        <div class="flex flex-col gap-1">
+          <button data-key="KeyW" class="ctrl-btn btn-arcade w-10 h-5 sm:w-11 sm:h-5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 font-arcade font-bold text-[9px] text-slate-200 flex items-center justify-center">▲</button>
+          <button data-key="KeyS" class="ctrl-btn btn-arcade w-10 h-5 sm:w-11 sm:h-5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 font-arcade font-bold text-[9px] text-slate-200 flex items-center justify-center">▼</button>
+        </div>
+        <button data-key="KeyD" class="ctrl-btn btn-arcade w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-arcade font-bold text-base text-white flex items-center justify-center">▶</button>
+        <button data-key="Space" class="ctrl-btn btn-arcade px-2.5 h-10 sm:h-11 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-400/30 font-arcade font-bold text-[10px] text-cyan-300 flex items-center justify-center">JUMP</button>
+
+        <div class="hidden xl:flex flex-col text-[10px] text-slate-300 px-2 leading-tight">
+          <span><strong class="text-white">WASD:</strong> Roam/Wall-Crawl • <strong class="text-rose-400">[V]</strong> Web-Swing • <strong class="text-fuchsia-300">[G]</strong> Meshy-2 Glitch</span>
+          <span><strong class="text-cyan-300">[1]</strong> Vodka • <strong class="text-purple-300">[2]</strong> Mudd • <strong class="text-orange-300">[3]</strong> Smoke Cig • <strong class="text-amber-300">[4]</strong> Eat Burger</span>
+        </div>
+      </div>
+
+      <div class="pointer-events-auto flex items-center gap-1.5 sm:gap-2 glass-panel p-1.5 rounded-2xl">
+        <button id="act-punch" class="btn-arcade px-2.5 py-2.5 sm:px-3.5 sm:py-3 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-700 border border-emerald-300/40 font-arcade font-bold text-xs sm:text-sm text-white shadow-lg">
+          PUNCH <span class="opacity-75 text-[10px]">[J]</span>
+        </button>
+        <button id="act-kick" class="btn-arcade px-2.5 py-2.5 sm:px-3.5 sm:py-3 rounded-xl bg-gradient-to-b from-cyan-500 to-blue-700 border border-cyan-300/40 font-arcade font-bold text-xs sm:text-sm text-white shadow-lg">
+          IK KICK <span class="opacity-75 text-[10px]">[K]</span>
+        </button>
+        <button id="act-swing" class="btn-arcade px-2.5 py-2.5 sm:px-3.5 sm:py-3 rounded-xl bg-gradient-to-b from-red-500 to-blue-800 border border-red-300/50 font-arcade font-bold text-xs sm:text-sm text-white shadow-lg">
+          WEB SWING <span class="opacity-75 text-[10px]">[V]</span>
+        </button>
+        <button id="act-throw" class="btn-arcade px-2.5 py-2.5 sm:px-3.5 sm:py-3 rounded-xl bg-gradient-to-b from-amber-500 to-orange-700 border border-amber-300/40 font-arcade font-bold text-xs sm:text-sm text-white shadow-lg">
+          SIG / PROP <span class="opacity-75 text-[10px]">[E]</span>
+        </button>
+        <button id="act-special" class="btn-arcade px-2.5 py-2.5 sm:px-4 sm:py-3 rounded-xl bg-gradient-to-b from-fuchsia-600 via-rose-600 to-red-800 border border-pink-300/50 font-arcade font-extrabold text-xs sm:text-sm text-white shadow-lg">
+          SPECIAL <span class="opacity-75 text-[10px]">[F/L]</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fighter Selection Modal -->
+  <div id="roster-modal" class="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-6">
+    <div class="glass-panel w-full max-w-5xl rounded-3xl border border-white/15 p-4 sm:p-7 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+        <div>
+          <span class="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[10px] font-bold tracking-widest uppercase">Open-World 4-Building Alley Sandbox • Spider-Man Locomotion & Meshy-2 Retarget</span>
+          <h1 class="font-gta text-3xl sm:text-5xl text-white tracking-wider mt-1">
+            GTA CITY BRAWL: <span class="text-rose-500">SPIDER-MAN</span> • <span class="text-cyan-400">SUB-ZERO (SMOKING)</span> • <span class="text-red-500">LUE CHANG</span> • <span class="text-emerald-400">NEO</span>
+          </h1>
+        </div>
+        <button id="btn-close-roster" class="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold flex items-center justify-center">✕</button>
+      </div>
+
+      <div class="text-xs font-extrabold tracking-widest text-emerald-400 uppercase mb-2">Choose Your Street Brawler (All Fighters Also Spawn as Random Alley NPCs)</div>
+      <div id="p1-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+
+      <div class="mt-4 p-3.5 rounded-2xl bg-slate-900/85 border border-white/10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        <div>
+          <div class="font-bold text-rose-400">🕸️ Spider-Man Locomotion</div>
+          <p class="text-slate-400 mt-0.5">Press [V] to web-swing off the 4 buildings, run into walls to wall-crawl, or press [E] for Web-Yank pull.</p>
+        </div>
+        <div>
+          <div class="font-bold text-cyan-300">❄️ Sub-Zero (Smoking)</div>
+          <p class="text-slate-400 mt-0.5">Puffs a lit cigarette through his mask while freezing rivals in 3D ice blocks [F] and Ice Sliding [C].</p>
+        </div>
+        <div>
+          <div class="font-bold text-fuchsia-300">🦾 Meshy-2 Retarget Glitch [G]</div>
+          <p class="text-slate-400 mt-0.5">Blends rhythmic mocap arcs & IK constraint glitch jitter while keeping full KO ragdoll dead-mode.</p>
+        </div>
+        <div>
+          <div class="font-bold text-amber-300">🍾 Vodka, Mudd, Cigs & Hunger</div>
+          <p class="text-slate-400 mt-0.5">Drink Vodka [1], sip Mudd [2], smoke Cigs [3], and eat Street Burgers [4] to rule the alley.</p>
+        </div>
+      </div>
+
+      <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <div class="text-xs text-slate-400">
+          Hotkeys: <span class="text-white font-semibold">WASD</span> Roam/Climb • <span class="text-white font-semibold">V</span> Web-Swing • <span class="text-white font-semibold">G</span> Meshy-2 Glitch • <span class="text-white font-semibold">J/K/E/C/F</span> Attacks
+        </div>
+        <button id="btn-start-match" class="btn-arcade px-7 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 font-gta text-xl sm:text-2xl text-slate-950 tracking-wider uppercase shadow-xl">
+          DROP INTO ALLEYWAY
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ============================================================================
+     * PROCEDURAL WEB AUDIO SYNTHESIZER
+     * ============================================================================
+     */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+      }
+      playPunch(heavy = false) {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = heavy ? 'sawtooth' : 'triangle';
+        osc.frequency.setValueAtTime(heavy ? 145 : 210, now);
+        osc.frequency.exponentialRampToValueAtTime(34, now + (heavy ? 0.22 : 0.12));
+        gain.gain.setValueAtTime(heavy ? 0.42 : 0.26, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + (heavy ? 0.24 : 0.13));
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + (heavy ? 0.25 : 0.14));
+      }
+      playWhoosh() {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        const bufferSize = this.ctx.sampleRate * 0.11;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(750, now);
+        filter.frequency.exponentialRampToValueAtTime(220, now + 0.11);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.16, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+      playConsume(type = 'drink') {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type === 'smoke' ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(type === 'smoke' ? 160 : 320, now);
+        osc.frequency.exponentialRampToValueAtTime(type === 'smoke' ? 95 : 640, now + 0.18);
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.21);
+      }
+      playFireball() {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(420, now);
+        osc.frequency.exponentialRampToValueAtTime(95, now + 0.32);
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.34);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      }
+      playIceFreeze() {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        [880, 1320, 1760].forEach((freq, i) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + i * 0.04);
+          osc.frequency.exponentialRampToValueAtTime(freq * 1.25, now + 0.32 + i * 0.04);
+          gain.gain.setValueAtTime(0.14, now + i * 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36 + i * 0.04);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + i * 0.04);
+          osc.stop(now + 0.38 + i * 0.04);
+        });
+      }
+      playBulletTime() {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(280, now);
+        osc.frequency.exponentialRampToValueAtTime(48, now + 0.65);
+        gain.gain.setValueAtTime(0.38, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.68);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.7);
+      }
+      playExplosion() {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        const bufferSize = this.ctx.sampleRate * 0.52;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 1.6);
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(340, now);
+        filter.frequency.exponentialRampToValueAtTime(45, now + 0.52);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(now);
+      }
+      playBell() {
+        this.init();
+        if (!this.ctx || this.muted) return;
+        const now = this.ctx.currentTime;
+        [523.25, 783.99].forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(0.15 / (idx + 1), now);
+          gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.85);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.9);
+        });
+      }
+    }
+
+    const sfx = new SoundEngine();
+
+    /**
+     * ============================================================================
+     * THREE.JS SCENE, 4-BUILDING GTA CITY ALLEYWAY, SOFT-BODY & PROPS SETUP
+     * ============================================================================
+     */
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b101b);
+    scene.fog = new THREE.FogExp2(0x0b101b, 0.015);
+
+    const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 220);
+    camera.position.set(0, 6, 14);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    let xrayMode = false;
+    let meshyRetargetGlitchMode = false;
+    const CITY_HALF = 28;
+    const buildingColliders = [];
+
+    const hemiLight = new THREE.HemisphereLight(0x93c5fd, 0x1e293b, 0.85);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfef3c7, 1.35);
+    dirLight.position.set(18, 32, 16);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.camera.left = -35;
+    dirLight.shadow.camera.right = 35;
+    dirLight.shadow.camera.top = 35;
+    dirLight.shadow.camera.bottom = -35;
+    scene.add(dirLight);
+
+    const groundMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(CITY_HALF * 2.4, CITY_HALF * 2.4),
+      new THREE.MeshStandardMaterial({ color: 0x181c24, roughness: 0.88 })
+    );
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.receiveShadow = true;
+    scene.add(groundMesh);
+
+    const gridHelper = new THREE.GridHelper(CITY_HALF * 2, 28, 0x334155, 0x1e293b);
+    gridHelper.position.y = 0.01;
+    scene.add(gridHelper);
+
+    function buildCityBlocks() {
+      const blocks = [
+        { x: -11.5, z: -11.5, w: 14, d: 14, h: 18, color: 0x262e3d, neon: 0xf43f5e },
+        { x: 11.5, z: -11.5, w: 14, d: 14, h: 22, color: 0x2d2a3e, neon: 0x38bdf8 },
+        { x: -11.5, z: 11.5, w: 14, d: 14, h: 16, color: 0x2a3338, neon: 0xf59e0b },
+        { x: 11.5, z: 11.5, w: 14, d: 14, h: 20, color: 0x252b3b, neon: 0x10b981 }
+      ];
+
+      blocks.forEach((b) => {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w, b.h, b.d),
+          new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.78 })
+        );
+        mesh.position.set(b.x, b.h / 2, b.z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+
+        const trim = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 0.25, 0.28, b.d + 0.25),
+          new THREE.MeshBasicMaterial({ color: b.neon })
+        );
+        trim.position.set(b.x, 3.6, b.z);
+        scene.add(trim);
+
+        const curb = new THREE.Mesh(
+          new THREE.BoxGeometry(b.w + 1.4, 0.14, b.d + 1.4),
+          new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.9 })
+        );
+        curb.position.set(b.x, 0.07, b.z);
+        curb.receiveShadow = true;
+        scene.add(curb);
+
+        buildingColliders.push({
+          x: b.x,
+          z: b.z,
+          w: b.w,
+          d: b.d,
+          h: b.h,
+          minX: b.x - b.w / 2,
+          maxX: b.x + b.w / 2,
+          minZ: b.z - b.d / 2,
+          maxZ: b.z + b.d / 2
+        });
+      });
+    }
+    buildCityBlocks();
+
+    function resolveBuildingCollisions(pos, vel, radius = 0.65, canWallCrawl = false) {
+      let touchingWall = null;
+      for (const b of buildingColliders) {
+        if (pos.y > b.h) continue;
+        const closestX = Math.max(b.minX, Math.min(pos.x, b.maxX));
+        const closestZ = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
+        const dx = pos.x - closestX;
+        const dz = pos.z - closestZ;
+        const distSq = dx * dx + dz * dz;
+
+        if (distSq < radius * radius) {
+          const dist = Math.sqrt(distSq);
+          if (dist > 0.0001) {
+            const overlap = radius - dist;
+            const nx = dx / dist;
+            const nz = dz / dist;
+            pos.x += nx * overlap;
+            pos.z += nz * overlap;
+            touchingWall = { normal: new THREE.Vector3(nx, 0, nz), building: b };
+            if (vel && !canWallCrawl) {
+              const vn = vel.x * nx + vel.z * nz;
+              if (vn < 0) {
+                vel.x -= vn * nx * 1.2;
+                vel.z -= vn * nz * 1.2;
+              }
+            }
+          } else {
+            pos.x = b.maxX + radius;
+          }
+        }
+      }
+      return touchingWall;
+    }
+
+    // Particles (Hit Sparks & Cigarette Smoke)
+    const activeParticles = [];
+    const sparkGeo = new THREE.BoxGeometry(0.11, 0.11, 0.11);
+    const smokeGeo = new THREE.SphereGeometry(0.12, 6, 6);
+
+    function spawnHitSparks(origin, colorHex = 0xfacc15, count = 12) {
+      const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+      for (let i = 0; i < count; i++) {
+        const mesh = new THREE.Mesh(sparkGeo, mat);
+        mesh.position.copy(origin);
+        scene.add(mesh);
+        activeParticles.push({
+          mesh,
+          vel: new THREE.Vector3((Math.random() - 0.5) * 11, Math.random() * 8 + 2, (Math.random() - 0.5) * 11),
+          life: 0.35 + Math.random() * 0.25,
+          isSmoke: false
+        });
+      }
+    }
+
+    function spawnSmokePuff(origin) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0xcbd5e1, transparent: true, opacity: 0.55 });
+      const mesh = new THREE.Mesh(smokeGeo, mat);
+      mesh.position.copy(origin);
+      scene.add(mesh);
+      activeParticles.push({
+        mesh,
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.6, 1.3 + Math.random() * 0.6, (Math.random() - 0.5) * 0.6),
+        life: 0.85,
+        isSmoke: true
+      });
+    }
+
+    function updateParticles(dt) {
+      for (let i = activeParticles.length - 1; i >= 0; i--) {
+        const p = activeParticles[i];
+        p.life -= dt;
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          activeParticles.splice(i, 1);
+          continue;
+        }
+        if (!p.isSmoke) p.vel.y -= 24 * dt;
+        else p.mesh.scale.addScalar(dt * 1.4);
+        p.mesh.position.addScaledVector(p.vel, dt);
+      }
+    }
+
+    // Deformable Spring-Mass Soft-Body Meshes
+    const softBodies = [];
+    class SoftBodyMesh {
+      constructor({ type = 'cube', pos, size = new THREE.Vector3(1.5, 1.5, 1.5), color = 0xa855f7, anchoredTop = false, mass = 1.0 }) {
+        this.anchoredTop = anchoredTop;
+        this.mass = mass;
+        this.vel = new THREE.Vector3();
+        this.geometry = new THREE.BoxGeometry(size.x, size.y, size.z, 3, 3, 3);
+        const posAttr = this.geometry.attributes.position;
+        this.restPositions = new Float32Array(posAttr.array.length);
+        this.restPositions.set(posAttr.array);
+        this.vertexVelocities = new Float32Array(posAttr.array.length);
+        this.halfH = size.y * 0.5;
+
+        this.material = new THREE.MeshStandardMaterial({
+          color,
+          roughness: 0.35,
+          metalness: 0.1
+        });
+        this.mesh = new THREE.Mesh(this.geometry, this.material);
+        this.mesh.position.copy(pos);
+        this.mesh.castShadow = true;
+        this.mesh.receiveShadow = true;
+        scene.add(this.mesh);
+        softBodies.push(this);
+      }
+
+      applyImpulseAtPoint(worldPoint, impulse, radius = 1.8) {
+        const localPt = this.mesh.worldToLocal(worldPoint.clone());
+        const posAttr = this.geometry.attributes.position;
+        for (let i = 0; i < posAttr.count; i++) {
+          const idx = i * 3;
+          const vx = posAttr.array[idx];
+          const vy = posAttr.array[idx + 1];
+          const vz = posAttr.array[idx + 2];
+          if (this.anchoredTop && vy > this.halfH * 0.75) continue;
+          const dist = Math.hypot(vx - localPt.x, vy - localPt.y, vz - localPt.z);
+          if (dist < radius) {
+            const w = (1 - dist / radius) * 0.45;
+            this.vertexVelocities[idx] += impulse.x * w;
+            this.vertexVelocities[idx + 1] += impulse.y * w;
+            this.vertexVelocities[idx + 2] += impulse.z * w;
+          }
+        }
+        if (!this.anchoredTop) {
+          this.vel.addScaledVector(impulse, 0.35 / this.mass);
+        }
+      }
+
+      update(dt) {
+        this.material.wireframe = xrayMode;
+        if (!this.anchoredTop) {
+          this.vel.y -= 26 * dt;
+          this.mesh.position.addScaledVector(this.vel, dt);
+          if (this.mesh.position.y < this.halfH) {
+            this.mesh.position.y = this.halfH;
+            this.vel.y *= -0.45;
+            this.vel.x *= 0.85;
+            this.vel.z *= 0.85;
+          }
+          resolveBuildingCollisions(this.mesh.position, this.vel, 0.9);
+        }
+
+        const posAttr = this.geometry.attributes.position;
+        const stiffness = 135;
+        const damping = 7.5;
+        for (let i = 0; i < posAttr.array.length; i++) {
+          const disp = posAttr.array[i] - this.restPositions[i];
+          const force = -stiffness * disp - damping * this.vertexVelocities[i];
+          this.vertexVelocities[i] += force * dt;
+          posAttr.array[i] += this.vertexVelocities[i] * dt;
+        }
+        posAttr.needsUpdate = true;
+        this.geometry.computeVertexNormals();
+      }
+    }
+
+    // Throwable & Destructible Street Props
+    const arenaProps = [];
+    class InteractiveProp {
+      constructor(type = 'crate', pos = new THREE.Vector3()) {
+        this.type = type;
+        this.heldBy = null;
+        this.destroyed = false;
+        this.velocity = new THREE.Vector3();
+
+        if (type === 'barrel') {
+          this.mesh = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.42, 0.42, 1.15, 12),
+            new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.45 })
+          );
+          this.halfH = 0.58;
+        } else if (type === 'cone') {
+          this.mesh = new THREE.Mesh(
+            new THREE.ConeGeometry(0.32, 0.75, 10),
+            new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.5 })
+          );
+          this.halfH = 0.38;
+        } else {
+          this.mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.95, 0.95, 0.95),
+            new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.8 })
+          );
+          this.halfH = 0.48;
+        }
+
+        this.mesh.position.copy(pos);
+        this.mesh.castShadow = true;
+        scene.add(this.mesh);
+        arenaProps.push(this);
+      }
+
+      update(dt, allFighters) {
+        if (this.destroyed) return;
+        if (this.heldBy) {
+          if (this.heldBy.state === 'ko') {
+            this.heldBy = null;
+            return;
+          }
+          this.mesh.position.copy(this.heldBy.pos).add(new THREE.Vector3(0, 2.35, 0));
+          this.mesh.rotation.y = this.heldBy.facingAngle;
+          return;
+        }
+
+        this.velocity.y -= 28 * dt;
+        this.mesh.position.addScaledVector(this.velocity, dt);
+
+        if (this.mesh.position.y < this.halfH) {
+          this.mesh.position.y = this.halfH;
+          this.velocity.y = 0;
+          this.velocity.x *= Math.pow(0.01, dt);
+          this.velocity.z *= Math.pow(0.01, dt);
+        } else {
+          this.mesh.rotation.x += 6 * dt;
+          this.mesh.rotation.z += 5 * dt;
+        }
+
+        resolveBuildingCollisions(this.mesh.position, this.velocity, 0.55);
+
+        const speed = this.velocity.length();
+        if (speed > 7.5) {
+          for (const f of allFighters) {
+            if (f.state === 'ko') continue;
+            if (f.pos.distanceTo(this.mesh.position) < 1.25) {
+              const hitDir = this.velocity.clone().setY(0).normalize();
+              if (this.type === 'barrel') {
+                sfx.playExplosion();
+                triggerShake(0.45);
+                spawnHitSparks(this.mesh.position, 0xf97316, 26);
+                f.takeHit({
+                  damage: 26,
+                  knockback: hitDir.multiplyScalar(15).add(new THREE.Vector3(0, 10, 0)),
+                  hitPoint: this.mesh.position.clone(),
+                  ragdollTime: 1.35,
+                  label: 'BARREL EXPLOSION!'
+                });
+                this.destroy();
+              } else {
+                sfx.playPunch(true);
+                f.takeHit({
+                  damage: 18,
+                  knockback: hitDir.multiplyScalar(12).add(new THREE.Vector3(0, 6, 0)),
+                  hitPoint: this.mesh.position.clone(),
+                  ragdollTime: 0.9,
+                  label: 'ALLEY PROP SMASH!'
+                });
+                this.velocity.multiplyScalar(-0.3);
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      destroy() {
+        if (this.destroyed) return;
+        this.destroyed = true;
+        scene.remove(this.mesh);
+      }
+    }
+
+    function spawnInitialProps() {
+      softBodies.forEach((sb) => scene.remove(sb.mesh));
+      softBodies.length = 0;
+
+      new SoftBodyMesh({ type: 'pad', pos: new THREE.Vector3(-2.6, 0.6, -7.5), size: new THREE.Vector3(2.8, 1.2, 2.2), color: 0x0284c7, anchoredTop: false, mass: 2.5 });
+      new SoftBodyMesh({ type: 'cube', pos: new THREE.Vector3(2.8, 0.8, 8.0), size: new THREE.Vector3(1.5, 1.5, 1.5), color: 0xa855f7, anchoredTop: false, mass: 0.9 });
+
+      new InteractiveProp('barrel', new THREE.Vector3(-2.5, 0.6, 5.5));
+      new InteractiveProp('barrel', new THREE.Vector3(6.5, 0.6, -2.5));
+      new InteractiveProp('crate', new THREE.Vector3(2.4, 0.5, -5.0));
+      new InteractiveProp('crate', new THREE.Vector3(-6.5, 0.5, 2.2));
+      new InteractiveProp('cone', new THREE.Vector3(1.5, 0.4, 3.5));
+    }
+
+    // Street Loot Pickups
+    const streetPickups = [];
+    class StreetPickup {
+      constructor(type, pos) {
+        this.type = type;
+        this.pos = pos.clone().setY(0.65);
+        this.collected = false;
+        this.bobPhase = Math.random() * Math.PI * 2;
+
+        const colorMap = {
+          vodka: 0x38bdf8,
+          mudd: 0xc084fc,
+          cigs: 0xf97316,
+          food: 0xf59e0b,
+          cash: 0x10b981
+        };
+        const col = colorMap[type] || 0xfacc15;
+
+        this.group = new THREE.Group();
+        this.group.position.copy(this.pos);
+
+        const core = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.36, 0),
+          new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.45 })
+        );
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.45, 0.58, 16),
+          new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = -0.58;
+
+        this.group.add(core, ring);
+        scene.add(this.group);
+        streetPickups.push(this);
+      }
+
+      update(dt, player) {
+        if (this.collected || !player || player.state === 'ko') return;
+        this.bobPhase += dt * 3.5;
+        this.group.position.y = 0.65 + Math.sin(this.bobPhase) * 0.15;
+        this.group.children[0].rotation.y += dt * 2.5;
+
+        if (Math.hypot(player.pos.x - this.pos.x, player.pos.z - this.pos.z) < 1.35) {
+          this.collected = true;
+          scene.remove(this.group);
+          collectPickup(this.type);
+        }
+      }
+    }
+
+    function spawnRandomStreetPickups() {
+      const spots = [
+        ['vodka', new THREE.Vector3(0, 0, -9)],
+        ['mudd', new THREE.Vector3(9, 0, 0)],
+        ['cigs', new THREE.Vector3(-9, 0, 0)],
+        ['food', new THREE.Vector3(0, 0, 10)],
+        ['cash', new THREE.Vector3(14, 0, 14)],
+        ['vodka', new THREE.Vector3(-14, 0, -14)]
+      ];
+      spots.forEach(([t, p]) => new StreetPickup(t, p));
+    }
+
+    /**
+     * ============================================================================
+     * MORTAL KOMBAT PROJECTILES (LUE CHANG DRAGON FIREBALL & SUB-ZERO ICE BALL)
+     * ============================================================================
+     */
+    const mkProjectiles = [];
+    class MKProjectile {
+      constructor({ type, owner, pos, dir }) {
+        this.type = type;
+        this.owner = owner;
+        this.pos = pos.clone();
+        this.dir = dir.clone().normalize();
+        this.speed = type === 'iceball' ? 19.5 : 22.5;
+        this.life = 2.2;
+        this.dead = false;
+
+        const isIce = type === 'iceball';
+        this.group = new THREE.Group();
+        this.group.position.copy(this.pos);
+
+        const core = new THREE.Mesh(
+          isIce ? new THREE.IcosahedronGeometry(0.38, 1) : new THREE.SphereGeometry(0.36, 12, 12),
+          new THREE.MeshBasicMaterial({ color: isIce ? 0x7dd3fc : 0xf97316 })
+        );
+        const aura = new THREE.Mesh(
+          new THREE.SphereGeometry(0.55, 10, 10),
+          new THREE.MeshBasicMaterial({ color: isIce ? 0x0284c7 : 0xef4444, transparent: true, opacity: 0.45 })
+        );
+        this.group.add(core, aura);
+        scene.add(this.group);
+        mkProjectiles.push(this);
+      }
+
+      update(dt, allFighters) {
+        if (this.dead) return;
+        this.life -= dt;
+        if (this.life <= 0) {
+          this.destroy();
+          return;
+        }
+
+        this.pos.addScaledVector(this.dir, this.speed * dt);
+        this.group.position.copy(this.pos);
+        this.group.rotation.y += 10 * dt;
+        this.group.rotation.x += 8 * dt;
+
+        // Check building hit
+        for (const b of buildingColliders) {
+          if (this.pos.y <= b.h && this.pos.x >= b.minX && this.pos.x <= b.maxX && this.pos.z >= b.minZ && this.pos.z <= b.maxZ) {
+            spawnHitSparks(this.pos, this.type === 'iceball' ? 0x38bdf8 : 0xf97316, 14);
+            this.destroy();
+            return;
+          }
+        }
+
+        for (const f of allFighters) {
+          if (f === this.owner || f.state === 'ko') continue;
+          if (Math.hypot(f.pos.x - this.pos.x, f.pos.z - this.pos.z) < 1.15 && Math.abs((f.pos.y + 1.0) - this.pos.y) < 1.35) {
+            if (this.type === 'iceball') {
+              sfx.playIceFreeze();
+              spawnHitSparks(this.pos, 0x38bdf8, 22);
+              f.freezeFighter(3.0);
+              f.takeHit({
+                damage: 14,
+                knockback: new THREE.Vector3(0, 0.5, 0),
+                hitPoint: this.pos.clone(),
+                ragdollTime: 0,
+                attacker: this.owner,
+                label: 'DEEP FREEZE!'
+              });
+            } else {
+              sfx.playExplosion();
+              triggerShake(0.32);
+              spawnHitSparks(this.pos, 0xf97316, 22);
+              f.takeHit({
+                damage: 22,
+                knockback: this.dir.clone().multiplyScalar(14).add(new THREE.Vector3(0, 7.5, 0)),
+                hitPoint: this.pos.clone(),
+                ragdollTime: 0.95,
+                attacker: this.owner,
+                label: 'DRAGON FIREBALL!'
+              });
+            }
+            this.destroy();
+            return;
+          }
+        }
+      }
+
+      destroy() {
+        if (this.dead) return;
+        this.dead = true;
+        scene.remove(this.group);
+      }
+    }
+
+    /**
+     * ============================================================================
+     * FIGHTER ARCHETYPES (PLAYER + RANDOM ALLEY NPC VARIANTS)
+     * ============================================================================
+     */
+    const FIGHTERS = {
+      spiderman: {
+        id: 'spiderman',
+        name: 'SPIDER-MAN',
+        title: 'WEB-SLINGING ALLEY ACROBAT',
+        tag: 'WEB SWING / WALL CRAWL',
+        colorHex: '#f43f5e',
+        primaryColor: 0xdc2626,
+        secondaryColor: 0x1d4ed8,
+        accentColor: 0xf8fafc,
+        skinColor: 0xdc2626,
+        speed: 10.6,
+        jumpForce: 17.5,
+        punchDmg: 12,
+        kickDmg: 17,
+        specialName: 'WEB-SLING METEOR SLAM',
+        desc: 'Red & blue web-suit. Swings between the 4 mid-array skyscrapers [V], wall-crawls up buildings, and yanks thugs with web-lines [E]!',
+        scale: { w: 0.96, h: 1.0 }
+      },
+      subzero: {
+        id: 'subzero',
+        name: 'SUB-ZERO',
+        title: 'LIN KUEI CRYO GRANDMASTER (SMOKING)',
+        tag: 'CIGARETTE / ICE BALL / SLIDE',
+        colorHex: '#38bdf8',
+        primaryColor: 0x0284c7,
+        secondaryColor: 0x0f172a,
+        accentColor: 0x38bdf8,
+        skinColor: 0xe2b49a,
+        speed: 9.2,
+        jumpForce: 13.8,
+        punchDmg: 12,
+        kickDmg: 16,
+        specialName: 'DEEP FREEZE ICE BALL',
+        desc: 'Puffs a lit cigarette through his Lin Kuei mask while freezing rivals solid with Ice Ball [F] and Ice Sliding [C]!',
+        scale: { w: 1.02, h: 1.02 }
+      },
+      luechang: {
+        id: 'luechang',
+        name: 'LUE CHANG',
+        title: 'SHAOLIN DRAGON CHAMPION',
+        tag: 'BICYCLE KICK / DRAGON FIREBALL',
+        colorHex: '#ef4444',
+        primaryColor: 0xd99b6c,
+        secondaryColor: 0x111827,
+        accentColor: 0xef4444,
+        skinColor: 0xd99b6c,
+        speed: 9.8,
+        jumpForce: 14.5,
+        punchDmg: 12,
+        kickDmg: 17,
+        specialName: 'BICYCLE KICK BARRAGE',
+        desc: 'Red headband & black martial arts pants. Unleashes Dragon Fireballs [E], Flying Dragon Kick [C], and multi-hit Bicycle Kicks [F]!',
+        scale: { w: 0.98, h: 1.0 }
+      },
+      neo: {
+        id: 'neo',
+        name: 'NEO',
+        title: 'THE ONE • MATRIX ANOMALY',
+        tag: 'BULLET TIME / TELEKINESIS',
+        colorHex: '#10b981',
+        primaryColor: 0x111827,
+        secondaryColor: 0x090d16,
+        accentColor: 0x10b981,
+        skinColor: 0xf1c27d,
+        speed: 9.6,
+        jumpForce: 14.2,
+        punchDmg: 11,
+        kickDmg: 15,
+        specialName: 'BULLET-TIME MATRIX BLAST',
+        desc: 'Black trenchcoat & shades. Triggers Bullet-Time slow-motion [F] and telekinetic alley shockwaves.',
+        scale: { w: 1.0, h: 1.04 }
+      },
+      jacky: {
+        id: 'jacky',
+        name: 'JACKY CHAN',
+        title: 'DRUNKEN KUNG FU STUNTMASTER',
+        tag: 'ACROBATIC IK / PROP MASTER',
+        colorHex: '#f59e0b',
+        primaryColor: 0xf8fafc,
+        secondaryColor: 0x1e293b,
+        accentColor: 0xf59e0b,
+        skinColor: 0xe0ac69,
+        speed: 10.8,
+        jumpForce: 15.0,
+        punchDmg: 10,
+        kickDmg: 16,
+        specialName: 'DRUNKEN TORNADO KICK',
+        desc: 'Lightning-fast aerial IK kicks and bonus damage when throwing GTA street crates & barrels.',
+        scale: { w: 0.96, h: 0.98 }
+      },
+      wrestler: {
+        id: 'wrestler',
+        name: 'EL TITAN',
+        title: 'LUCHA RAGDOLL HEAVYWEIGHT',
+        tag: 'SUPLEX / SEISMIC SLAM',
+        colorHex: '#f43f5e',
+        primaryColor: 0xe11d48,
+        secondaryColor: 0xfacc15,
+        accentColor: 0xf43f5e,
+        skinColor: 0xd99b6c,
+        speed: 8.2,
+        jumpForce: 12.6,
+        punchDmg: 15,
+        kickDmg: 18,
+        specialName: 'GERMAN RAGDOLL SUPLEX',
+        desc: 'High-impact grappler who launches street thugs into prolonged active ragdoll tumbles.',
+        scale: { w: 1.24, h: 1.08 }
+      },
+      thug: {
+        id: 'thug',
+        name: 'ALLEY BRAWLER',
+        title: 'GTA STREET GANGSTER',
+        tag: 'STREET ENFORCER',
+        colorHex: '#94a3b8',
+        primaryColor: 0x475569,
+        secondaryColor: 0x1e293b,
+        accentColor: 0xf97316,
+        skinColor: 0xc68642,
+        speed: 8.4,
+        jumpForce: 12.2,
+        punchDmg: 9,
+        kickDmg: 12,
+        specialName: 'HAYMAKER RUSH',
+        desc: 'Local GTA city alley brawler roaming between the four mid-array apartment blocks.',
+        scale: { w: 1.0, h: 1.0 }
+      }
+    };
+
+    /**
+     * ============================================================================
+     * ANALYTICAL TWO-BONE INVERSE KINEMATICS (IK) SOLVER
+     * ============================================================================
+     */
+    function solveTwoBoneIK(rootPos, targetPos, len1, len2, bendHintDir) {
+      const diff = new THREE.Vector3().subVectors(targetPos, rootPos);
+      const maxReach = (len1 + len2) * 0.992;
+      const minReach = Math.abs(len1 - len2) + 0.05;
+      let dist = diff.length();
+
+      const clampedTarget = targetPos.clone();
+      if (dist > maxReach) {
+        diff.normalize().multiplyScalar(maxReach);
+        clampedTarget.copy(rootPos).add(diff);
+        dist = maxReach;
+      } else if (dist < minReach) {
+        diff.normalize().multiplyScalar(minReach);
+        clampedTarget.copy(rootPos).add(diff);
+        dist = minReach;
+      }
+
+      const dir = diff.clone().normalize();
+      const cosAngle = THREE.MathUtils.clamp(
+        (len1 * len1 + dist * dist - len2 * len2) / (2 * len1 * dist),
+        -1,
+        1
+      );
+      const angle = Math.acos(cosAngle);
+
+      const bendProj = bendHintDir.clone().sub(dir.clone().multiplyScalar(bendHintDir.dot(dir)));
+      if (bendProj.lengthSq() < 0.0001) {
+        bendProj.set(0, 0, 1).cross(dir);
+        if (bendProj.lengthSq() < 0.0001) bendProj.set(1, 0, 0);
+      }
+      bendProj.normalize();
+
+      const jointDir = dir.clone().multiplyScalar(Math.cos(angle)).addScaledVector(bendProj, Math.sin(angle));
+      const jointPos = rootPos.clone().addScaledVector(jointDir, len1);
+
+      return { jointPos, endPos: clampedTarget };
+    }
+
+    /**
+     * ============================================================================
+     * ACTIVE RAGDOLL + 3D IK FIGHTER RIG (SPIDER-MAN, SUB-ZERO, LUE CHANG, ETC.)
+     * ============================================================================
+     */
+    class ActiveRagdollFighter {
+      constructor(archetypeKey, isPlayer = false, spawnPos = new THREE.Vector3()) {
+        this.config = FIGHTERS[archetypeKey] || FIGHTERS.spiderman;
+        this.isPlayer = isPlayer;
+
+        this.hp = isPlayer ? 120 : 65;
+        this.maxHp = this.hp;
+        this.superMeter = isPlayer ? 60 : 30;
+        this.pos = spawnPos.clone();
+        this.vel = new THREE.Vector3();
+        this.facingAngle = isPlayer ? Math.PI : Math.random() * Math.PI * 2;
+        this.grounded = true;
+        this.crouching = false;
+
+        this.state = 'idle';
+        this.attackType = null;
+        this.attackTimer = 0;
+        this.attackDuration = 0;
+        this.attackHasHit = false;
+        this.bicycleHitsLeft = 0;
+        this.ragdollTimer = 0;
+        this.koDespawnTimer = 3.2;
+        this.bulletTimeTimer = 0;
+        this.frozenTimer = 0;
+        this.cigLitTimer = archetypeKey === 'subzero' ? 999999 : 0;
+        this.smokeEmitAccum = 0;
+        this.comboCount = 0;
+        this.comboDamage = 0;
+        this.comboResetTimer = 0;
+        this.walkCycle = Math.random() * Math.PI * 2;
+        this.heldProp = null;
+
+        // Spider-Man Web-Swing & Wall-Crawl Locomotion State
+        this.isWebSwinging = false;
+        this.webAnchor = new THREE.Vector3();
+        this.webRopeLen = 0;
+        this.wallCrawlNormal = null;
+        this.meshyPhase = Math.random() * Math.PI * 2;
+        this.glitchTimer = 0;
+
+        // NPC AI state
+        this.aiTimer = Math.random() * 0.5;
+        this.aiDesiredDir = new THREE.Vector3();
+        this.aggro = false;
+
+        // Active Ragdoll Spring-Damper Torso Tilt & Head Wobble
+        this.torsoTilt = new THREE.Vector2(0, 0);
+        this.torsoTiltVel = new THREE.Vector2(0, 0);
+        this.headOffset = new THREE.Vector3();
+        this.headVel = new THREE.Vector3();
+
+        this.buildRig();
+      }
+
+      getForwardVec() {
+        return new THREE.Vector3(Math.sin(this.facingAngle), 0, Math.cos(this.facingAngle));
+      }
+
+      getRightVec() {
+        return new THREE.Vector3(Math.cos(this.facingAngle), 0, -Math.sin(this.facingAngle));
+      }
+
+      buildRig() {
+        this.rootGroup = new THREE.Group();
+        scene.add(this.rootGroup);
+
+        const s = this.config.scale;
+        const matPrimary = new THREE.MeshStandardMaterial({ color: this.config.primaryColor, roughness: 0.55 });
+        const matSecondary = new THREE.MeshStandardMaterial({ color: this.config.secondaryColor, roughness: 0.65 });
+        const matAccent = new THREE.MeshStandardMaterial({ color: this.config.accentColor, emissive: this.config.accentColor, emissiveIntensity: 0.25 });
+        const matSkin = new THREE.MeshStandardMaterial({ color: this.config.skinColor, roughness: 0.5 });
+
+        this.pelvisMesh = new THREE.Mesh(new THREE.BoxGeometry(0.56 * s.w, 0.28, 0.34 * s.w), matSecondary);
+        this.pelvisMesh.castShadow = true;
+        this.rootGroup.add(this.pelvisMesh);
+
+        this.torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.66 * s.w, 0.72 * s.h, 0.38 * s.w), matPrimary);
+        this.torsoMesh.castShadow = true;
+        this.rootGroup.add(this.torsoMesh);
+
+        if (this.config.id === 'neo') {
+          const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.34 * s.w, 0.48 * s.w, 0.72, 10, 1, true), matPrimary);
+          coat.position.y = -0.34;
+          coat.material.side = THREE.DoubleSide;
+          this.pelvisMesh.add(coat);
+        } else if (this.config.id === 'jacky') {
+          const belt = new THREE.Mesh(new THREE.BoxGeometry(0.62 * s.w, 0.12, 0.38 * s.w), matAccent);
+          this.pelvisMesh.add(belt);
+        } else if (this.config.id === 'wrestler') {
+          const champBelt = new THREE.Mesh(new THREE.CylinderGeometry(0.36 * s.w, 0.36 * s.w, 0.16, 12), matSecondary);
+          this.pelvisMesh.add(champBelt);
+        } else if (this.config.id === 'luechang') {
+          const sash = new THREE.Mesh(new THREE.BoxGeometry(0.60 * s.w, 0.14, 0.36 * s.w), matAccent);
+          this.pelvisMesh.add(sash);
+        } else if (this.config.id === 'spiderman') {
+          const blueSide = new THREE.Mesh(new THREE.BoxGeometry(0.70 * s.w, 0.44 * s.h, 0.34 * s.w), matSecondary);
+          blueSide.position.y = -0.12;
+          const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), matAccent);
+          emblem.position.set(0, 0.08, 0.20 * s.w);
+          this.torsoMesh.add(blueSide, emblem);
+        }
+
+        this.headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.24 * Math.sqrt(s.w), 14, 14), this.config.id === 'wrestler' ? matPrimary : matSkin);
+        this.headMesh.castShadow = true;
+        this.rootGroup.add(this.headMesh);
+
+        if (this.config.id === 'neo') {
+          const glasses = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.08, 0.14), new THREE.MeshBasicMaterial({ color: 0x020617 }));
+          glasses.position.set(0, 0.03, 0.2);
+          this.headMesh.add(glasses);
+        } else if (this.config.id === 'jacky') {
+          const hair = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: 0x0f172a }));
+          hair.position.y = 0.03;
+          this.headMesh.add(hair);
+        } else if (this.config.id === 'wrestler') {
+          const maskStripe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.48, 0.49), matSecondary);
+          this.headMesh.add(maskStripe);
+        } else if (this.config.id === 'luechang') {
+          const hair = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.58), new THREE.MeshStandardMaterial({ color: 0x090d16 }));
+          hair.position.y = 0.03;
+          const headband = new THREE.Mesh(new THREE.CylinderGeometry(0.252, 0.252, 0.075, 14), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+          headband.position.y = 0.06;
+          const tail1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.34, 0.03), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+          tail1.position.set(-0.06, -0.06, -0.26);
+          tail1.rotation.x = 0.35;
+          const tail2 = tail1.clone();
+          tail2.position.set(0.06, -0.08, -0.26);
+          this.headMesh.add(hair, headband, tail1, tail2);
+        } else if (this.config.id === 'subzero') {
+          const cowl = new THREE.Mesh(new THREE.SphereGeometry(0.252, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.52), matPrimary);
+          cowl.position.y = 0.03;
+          const faceMask = new THREE.Mesh(new THREE.CylinderGeometry(0.245, 0.22, 0.22, 12), matPrimary);
+          faceMask.position.y = -0.1;
+          const eyeGlow = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.045, 0.14), new THREE.MeshBasicMaterial({ color: 0xe0f2fe }));
+          eyeGlow.position.set(0, 0.02, 0.2);
+          this.headMesh.add(cowl, faceMask, eyeGlow);
+        } else if (this.config.id === 'spiderman') {
+          const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.08), matAccent);
+          eyeL.position.set(-0.08, 0.03, 0.21);
+          eyeL.rotation.z = -0.28;
+          const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.08), matAccent);
+          eyeR.position.set(0.08, 0.03, 0.21);
+          eyeR.rotation.z = 0.28;
+          this.headMesh.add(eyeL, eyeR);
+        }
+
+        // Lit Cigarette Mesh attached to mouth (Sub-Zero smokes continuously!)
+        this.cigMesh = new THREE.Group();
+        const cigBody = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.16, 6), new THREE.MeshBasicMaterial({ color: 0xf8fafc }));
+        cigBody.rotation.x = Math.PI / 2;
+        const ember = new THREE.Mesh(new THREE.SphereGeometry(0.022, 6, 6), new THREE.MeshBasicMaterial({ color: 0xf97316 }));
+        ember.position.z = 0.085;
+        this.cigMesh.add(cigBody, ember);
+        this.cigMesh.position.set(0.06, -0.07, 0.26);
+        this.cigMesh.visible = this.config.id === 'subzero';
+        this.headMesh.add(this.cigMesh);
+
+        // 3D Ice Block Mesh for Sub-Zero Deep Freeze
+        this.iceBlockMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(1.15, 2.05, 1.15),
+          new THREE.MeshStandardMaterial({ color: 0x7dd3fc, emissive: 0x0284c7, emissiveIntensity: 0.35, transparent: true, opacity: 0.58 })
+        );
+        this.iceBlockMesh.visible = false;
+        scene.add(this.iceBlockMesh);
+
+        // 3D Web-Swing Line Mesh
+        const webGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 5, 0)]);
+        this.webLineMesh = new THREE.Line(
+          webGeo,
+          new THREE.LineBasicMaterial({ color: 0xf8fafc, linewidth: 2 })
+        );
+        this.webLineMesh.visible = false;
+        scene.add(this.webLineMesh);
+
+        if (!this.isPlayer) {
+          this.hpBarGroup = new THREE.Group();
+          const bg = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.14), new THREE.MeshBasicMaterial({ color: 0x090d16, side: THREE.DoubleSide }));
+          this.hpBarFill = new THREE.Mesh(new THREE.PlaneGeometry(1.04, 0.09), new THREE.MeshBasicMaterial({ color: 0xf43f5e, side: THREE.DoubleSide }));
+          this.hpBarFill.position.z = 0.01;
+          this.hpBarGroup.add(bg, this.hpBarFill);
+          this.rootGroup.add(this.hpBarGroup);
+        }
+
+        const makeLimb = (rTop, rBot, len1, len2, mat1, mat2, matEnd) => {
+          const seg1 = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, len1, 10), mat1);
+          const seg2 = new THREE.Mesh(new THREE.CylinderGeometry(rBot * 0.92, rBot * 0.8, len2, 10), mat2);
+          const end = new THREE.Mesh(new THREE.SphereGeometry(rBot * 1.15, 10, 10), matEnd);
+          seg1.castShadow = true;
+          seg2.castShadow = true;
+          end.castShadow = true;
+          this.rootGroup.add(seg1, seg2, end);
+          return { seg1, seg2, end, len1, len2 };
+        };
+
+        const armW = 0.11 * s.w;
+        const legW = 0.13 * s.w;
+        this.limbs = {
+          leftArm: makeLimb(armW, armW * 0.85, 0.44 * s.h, 0.42 * s.h, matPrimary, this.config.id === 'neo' ? matPrimary : matSkin, matAccent),
+          rightArm: makeLimb(armW, armW * 0.85, 0.44 * s.h, 0.42 * s.h, matPrimary, this.config.id === 'neo' ? matPrimary : matSkin, matAccent),
+          leftLeg: makeLimb(legW, legW * 0.82, 0.52 * s.h, 0.50 * s.h, matSecondary, matSecondary, matPrimary),
+          rightLeg: makeLimb(legW, legW * 0.82, 0.52 * s.h, 0.50 * s.h, matSecondary, matSecondary, matPrimary)
+        };
+
+        // X-Ray Debug Skeleton
+        this.xrayGroup = new THREE.Group();
+        this.xrayGroup.visible = xrayMode;
+        this.rootGroup.add(this.xrayGroup);
+
+        const boneLineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8 });
+        this.xrayLines = [];
+        for (let i = 0; i < 6; i++) {
+          const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]);
+          const line = new THREE.Line(geo, boneLineMat);
+          this.xrayGroup.add(line);
+          this.xrayLines.push(line);
+        }
+
+        this.ikMarkers = {};
+        ['leftHand', 'rightHand', 'leftFoot', 'rightFoot'].forEach((k) => {
+          const marker = new THREE.Mesh(
+            new THREE.SphereGeometry(0.11, 8, 8),
+            new THREE.MeshBasicMaterial({ color: k.includes('Hand') ? 0xf43f5e : 0x10b981, wireframe: true })
+          );
+          this.xrayGroup.add(marker);
+          this.ikMarkers[k] = marker;
+        });
+      }
+
+      positionSegment(mesh, pA, pB) {
+        const mid = new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5);
+        mesh.position.copy(mid);
+        const dir = new THREE.Vector3().subVectors(pB, pA);
+        const len = dir.length();
+        if (len > 0.0001) {
+          mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+        }
+      }
+
+      findNearestTarget(allFighters) {
+        let best = null;
+        let bestDist = Infinity;
+        for (const other of allFighters) {
+          if (other === this || other.state === 'ko') continue;
+          const d = this.pos.distanceTo(other.pos);
+          if (d < bestDist) {
+            bestDist = d;
+            best = other;
+          }
+        }
+        return best;
+      }
+
+      throwHeldProp(target) {
+        if (!this.heldProp) return;
+        const prop = this.heldProp;
+        prop.heldBy = null;
+        this.heldProp = null;
+        const dir = target && this.pos.distanceTo(target.pos) < 16
+          ? new THREE.Vector3().subVectors(target.pos, this.pos).setY(0.15).normalize()
+          : this.getForwardVec().add(new THREE.Vector3(0, 0.15, 0)).normalize();
+        prop.velocity.copy(dir).multiplyScalar(22);
+        sfx.playWhoosh();
+      }
+
+      startAttack(type, allFighters) {
+        if (this.state === 'ragdoll' || this.state === 'ko' || this.state === 'attack' || this.frozenTimer > 0) return;
+
+        const target = this.findNearestTarget(allFighters);
+        if (target && this.pos.distanceTo(target.pos) < 6.5) {
+          const dx = target.pos.x - this.pos.x;
+          const dz = target.pos.z - this.pos.z;
+          this.facingAngle = Math.atan2(dx, dz);
+        }
+
+        if (this.heldProp && (type === 'punch' || type === 'throw')) {
+          this.throwHeldProp(target);
+          return;
+        }
+
+        const fwd = this.getForwardVec();
+
+        // Spider-Man Web-Pull [E] when not holding a street prop
+        if (type === 'throw' && this.config.id === 'spiderman') {
+          const nearProp = arenaProps.find(
+            (p) => !p.destroyed && !p.heldBy && p.mesh.position.distanceTo(this.pos) < 2.3
+          );
+          if (!nearProp && target && this.pos.distanceTo(target.pos) < 15) {
+            this.state = 'attack';
+            this.attackType = 'webpull';
+            this.attackDuration = 0.36;
+            this.attackTimer = 0.36;
+            this.attackHasHit = true;
+            const pullDir = new THREE.Vector3().subVectors(this.pos, target.pos).setY(0).normalize();
+            target.takeHit({
+              damage: 14,
+              knockback: pullDir.multiplyScalar(14.5).add(new THREE.Vector3(0, 6.5, 0)),
+              hitPoint: target.pos.clone().add(new THREE.Vector3(0, 1.1, 0)),
+              ragdollTime: 0.85,
+              attacker: this,
+              label: 'WEB-YANK PULL!'
+            });
+            sfx.playWhoosh();
+            if (this.isPlayer) showBanner('WEB-YANK!', 'SPIDER-MAN REMOTE RAGDOLL PULL');
+            return;
+          }
+        }
+
+        // Signature Mobility Move [C]: Sub-Zero Ice Slide OR Lue Chang Flying Dragon Kick
+        if (type === 'mobility') {
+          this.state = 'attack';
+          this.attackHasHit = false;
+          if (this.config.id === 'subzero') {
+            this.attackType = 'iceslide';
+            this.attackDuration = 0.46;
+            this.attackTimer = 0.46;
+            this.vel.set(fwd.x * 16.5, 0, fwd.z * 16.5);
+            spawnHitSparks(this.pos.clone().add(new THREE.Vector3(0, 0.2, 0)), 0x38bdf8, 12);
+            sfx.playIceFreeze();
+            if (this.isPlayer) showBanner('ICE SLIDE!', 'LIN KUEI CRYO SWEEP');
+          } else {
+            this.attackType = 'dragonkick';
+            this.attackDuration = 0.48;
+            this.attackTimer = 0.48;
+            this.vel.set(fwd.x * 17.5, 5.2, fwd.z * 17.5);
+            this.grounded = false;
+            spawnHitSparks(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xf97316, 14);
+            sfx.playFireball();
+            if (this.isPlayer) showBanner('FLYING DRAGON KICK!', 'SHAOLIN AERIAL FLAME');
+          }
+          return;
+        }
+
+        if (type === 'throw') {
+          const nearProp = arenaProps.find(
+            (p) => !p.destroyed && !p.heldBy && p.mesh.position.distanceTo(this.pos) < 2.3
+          );
+          if (nearProp) {
+            nearProp.heldBy = this;
+            this.heldProp = nearProp;
+            sfx.playWhoosh();
+            return;
+          }
+
+          if (this.config.id === 'luechang') {
+            this.state = 'attack';
+            this.attackType = 'fireball';
+            this.attackDuration = 0.34;
+            this.attackTimer = 0.34;
+            this.attackHasHit = true;
+            new MKProjectile({
+              type: 'fireball',
+              owner: this,
+              pos: this.pos.clone().add(new THREE.Vector3(0, 1.25, 0)).addScaledVector(fwd, 0.85),
+              dir: fwd
+            });
+            sfx.playFireball();
+            return;
+          }
+
+          if (this.config.id === 'subzero') {
+            this.state = 'attack';
+            this.attackType = 'uppercut';
+            this.attackDuration = 0.40;
+            this.attackTimer = 0.40;
+            this.attackHasHit = false;
+            this.vel.addScaledVector(fwd, 5.5);
+            sfx.playWhoosh();
+            return;
+          }
+        }
+
+        this.state = 'attack';
+        this.attackType = type;
+        this.attackHasHit = false;
+        this.bicycleHitsLeft = 0;
+
+        if (type === 'punch') {
+          this.attackDuration = 0.28;
+          this.attackTimer = 0.28;
+          this.vel.addScaledVector(fwd, 4.2);
+          sfx.playWhoosh();
+        } else if (type === 'kick') {
+          this.attackDuration = 0.36;
+          this.attackTimer = 0.36;
+          this.vel.addScaledVector(fwd, 5.4);
+          sfx.playWhoosh();
+        } else if (type === 'throw') {
+          this.attackDuration = 0.42;
+          this.attackTimer = 0.42;
+          this.vel.addScaledVector(fwd, 6.2);
+          sfx.playWhoosh();
+        } else if (type === 'special') {
+          if (this.superMeter < 45) {
+            this.attackType = 'kick';
+            this.attackDuration = 0.36;
+            this.attackTimer = 0.36;
+            sfx.playWhoosh();
+            return;
+          }
+          this.superMeter -= 45;
+
+          if (this.config.id === 'spiderman') {
+            this.attackDuration = 0.58;
+            this.attackTimer = 0.58;
+            this.vel.set(fwd.x * 16.5, 11.5, fwd.z * 16.5);
+            this.grounded = false;
+            sfx.playWhoosh();
+            if (this.isPlayer) showBanner('WEB-SLING METEOR SLAM!', 'ACROBATIC SPIDER-STRIKE');
+          } else if (this.config.id === 'luechang') {
+            this.attackType = 'bicycle';
+            this.attackDuration = 0.72;
+            this.attackTimer = 0.72;
+            this.bicycleHitsLeft = 6;
+            this.vel.set(fwd.x * 13.5, 4.5, fwd.z * 13.5);
+            this.grounded = false;
+            sfx.playFireball();
+            if (this.isPlayer) showBanner('BICYCLE KICK BARRAGE!', '6-HIT SHAOLIN FLURRY');
+          } else if (this.config.id === 'subzero') {
+            this.attackType = 'iceball';
+            this.attackDuration = 0.36;
+            this.attackTimer = 0.36;
+            this.attackHasHit = true;
+            new MKProjectile({
+              type: 'iceball',
+              owner: this,
+              pos: this.pos.clone().add(new THREE.Vector3(0, 1.25, 0)).addScaledVector(fwd, 0.85),
+              dir: fwd
+            });
+            sfx.playIceFreeze();
+            if (this.isPlayer) showBanner('DEEP FREEZE ICE BALL!', 'SHATTER FROZEN RIVALS FOR 1.65X DMG');
+          } else if (this.config.id === 'neo') {
+            this.attackDuration = 0.52;
+            this.attackTimer = 0.52;
+            this.bulletTimeTimer = 3.2;
+            sfx.playBulletTime();
+            if (this.isPlayer) showBanner('BULLET TIME!', 'MATRIX TELEKINETIC BLAST');
+          } else if (this.config.id === 'jacky') {
+            this.attackDuration = 0.58;
+            this.attackTimer = 0.58;
+            this.vel.y = 10.5;
+            this.vel.addScaledVector(fwd, 9.0);
+            this.grounded = false;
+            sfx.playWhoosh();
+            if (this.isPlayer) showBanner('DRUNKEN TORNADO!', '360° IK SPINNING KICK');
+          } else {
+            this.attackDuration = 0.55;
+            this.attackTimer = 0.55;
+            this.vel.addScaledVector(fwd, 9.5);
+            sfx.playWhoosh();
+            if (this.isPlayer) showBanner('GERMAN SUPLEX!', 'FULL RAGDOLL LAUNCH');
+          }
+        }
+      }
+
+      toggleWebSwing() {
+        if (this.state === 'ko' || this.state === 'ragdoll') return;
+        if (this.isWebSwinging) {
+          this.isWebSwinging = false;
+          this.webLineMesh.visible = false;
+          this.vel.y = Math.max(this.vel.y, 8.5);
+          return;
+        }
+        let bestAnchor = null;
+        let bestDist = Infinity;
+        const fwd = this.getForwardVec();
+        for (const b of buildingColliders) {
+          const anchor = new THREE.Vector3(
+            Math.max(b.minX, Math.min(this.pos.x + fwd.x * 5, b.maxX)),
+            b.h - 1.5,
+            Math.max(b.minZ, Math.min(this.pos.z + fwd.z * 5, b.maxZ))
+          );
+          const d = this.pos.distanceTo(anchor);
+          if (d < bestDist) {
+            bestDist = d;
+            bestAnchor = anchor;
+          }
+        }
+        if (bestAnchor) {
+          this.isWebSwinging = true;
+          this.webAnchor.copy(bestAnchor);
+          this.webRopeLen = Math.max(4.5, Math.min(18.0, bestDist));
+          if (this.grounded) {
+            this.pos.y += 0.6;
+            this.vel.y = 7.5;
+            this.grounded = false;
+          }
+          this.vel.addScaledVector(fwd, 9.5);
+          this.webLineMesh.visible = true;
+          sfx.playWhoosh();
+          if (this.isPlayer) showBanner('WEB-SWING LOCOMOTION!', 'PRESS [V] OR [SPACE] TO RELEASE & LAUNCH');
+        }
+      }
+
+      freezeFighter(duration = 3.0) {
+        if (this.state === 'ko') return;
+        this.frozenTimer = duration;
+        this.state = 'idle';
+        this.vel.set(0, 0, 0);
+        this.iceBlockMesh.visible = true;
+      }
+
+      takeHit({ damage, knockback, hitPoint, ragdollTime = 0, attacker = null, label = '' }) {
+        if (this.state === 'ko') return;
+
+        let finalDmg = damage;
+        let finalRagdoll = ragdollTime;
+        let finalLabel = label;
+
+        // Ice Shatter bonus if frozen by Sub-Zero!
+        if (this.frozenTimer > 0) {
+          this.frozenTimer = 0;
+          this.iceBlockMesh.visible = false;
+          finalDmg = Math.round(finalDmg * 1.65);
+          finalRagdoll = Math.max(finalRagdoll, 1.15);
+          knockback.multiplyScalar(1.35);
+          knockback.y = Math.max(knockback.y, 9.5);
+          finalLabel = 'ICE SHATTER CRUSH!';
+          sfx.playExplosion();
+          spawnHitSparks(this.pos.clone().add(new THREE.Vector3(0, 1.1, 0)), 0x7dd3fc, 24);
+        }
+
+        // Mudd / Lean Damage Reduction on Player
+        if (this.isPlayer && viceStats.mudd > 15) {
+          const resist = 1 - (viceStats.mudd / 100) * 0.42;
+          finalDmg = Math.max(2, Math.round(finalDmg * resist));
+        }
+
+        this.hp = Math.max(0, this.hp - finalDmg);
+        this.superMeter = Math.min(100, this.superMeter + finalDmg * 0.6);
+        this.vel.add(knockback);
+        if (knockback.y > 1) this.grounded = false;
+
+        this.torsoTiltVel.x += knockback.z * 0.9;
+        this.torsoTiltVel.z -= knockback.x * 0.9;
+        this.headVel.addScaledVector(knockback, 0.35);
+
+        spawnHitSparks(hitPoint, finalDmg >= 18 ? 0xf43f5e : 0xfacc15, finalDmg >= 18 ? 18 : 10);
+
+        if (attacker) {
+          attacker.superMeter = Math.min(100, attacker.superMeter + finalDmg * 0.85);
+          attacker.comboCount += 1;
+          attacker.comboDamage += finalDmg;
+          attacker.comboResetTimer = 2.0;
+          if (attacker.isPlayer) {
+            updateComboHUD(attacker.comboCount, attacker.comboDamage, finalLabel);
+          }
+        }
+
+        if (this.hp <= 0) {
+          this.state = 'ko';
+          this.frozenTimer = 0;
+          this.iceBlockMesh.visible = false;
+          this.isWebSwinging = false;
+          this.webLineMesh.visible = false;
+          this.ragdollTimer = 999;
+          this.vel.y = Math.max(this.vel.y, 10.5);
+          sfx.playBell();
+          triggerHitStop(0.11);
+          triggerShake(0.42);
+          koSlowMoTimer = 0.65;
+
+          if (!this.isPlayer) {
+            viceStats.kos += 1;
+            viceStats.cash += 85 + Math.floor(Math.random() * 90);
+            viceStats.wantedStars = Math.min(5, 1 + Math.floor(viceStats.kos / 3));
+
+            const drops = ['vodka', 'mudd', 'cigs', 'food', 'cash'];
+            const dropType = drops[Math.floor(Math.random() * drops.length)];
+            new StreetPickup(dropType, this.pos.clone());
+            showBanner(`${this.config.name} KO'D!`, `DROPPED ${dropType.toUpperCase()} + CASH!`);
+          } else {
+            showBanner('WASTED!', 'PRESS [R] TO RESPAWN IN THE ALLEY', true);
+          }
+        } else if (finalRagdoll > 0) {
+          this.state = 'ragdoll';
+          this.ragdollTimer = finalRagdoll;
+          triggerHitStop(0.06);
+          triggerShake(0.24);
+        } else {
+          triggerHitStop(0.035);
+          triggerShake(0.1);
+        }
+      }
+
+      evaluateAttackHits(allFighters) {
+        if (this.state !== 'attack') return;
+
+        const progress = 1 - this.attackTimer / this.attackDuration;
+        const fwd = this.getForwardVec();
+
+        // Multi-hit Bicycle Kick Barrage for Lue Chang
+        if (this.attackType === 'bicycle' && this.bicycleHitsLeft > 0) {
+          const threshold = (6 - this.bicycleHitsLeft) / 6;
+          if (progress >= threshold) {
+            this.bicycleHitsLeft--;
+            const strikeOrigin = this.pos.clone().add(new THREE.Vector3(0, 1.05, 0)).addScaledVector(fwd, 1.15);
+            spawnHitSparks(strikeOrigin, 0xf97316, 6);
+            for (const other of allFighters) {
+              if (other === this || other.state === 'ko') continue;
+              if (other.pos.distanceTo(strikeOrigin) < 1.85) {
+                sfx.playPunch(this.bicycleHitsLeft === 0);
+                const isLast = this.bicycleHitsLeft === 0;
+                other.takeHit({
+                  damage: isLast ? 10 : 5,
+                  knockback: fwd.clone().multiplyScalar(isLast ? 15 : 4.5).add(new THREE.Vector3(0, isLast ? 9.5 : 2.5, 0)),
+                  hitPoint: strikeOrigin.clone(),
+                  ragdollTime: isLast ? 1.15 : 0,
+                  attacker: this,
+                  label: isLast ? 'BICYCLE KICK FINISHER!' : 'BICYCLE KICK!'
+                });
+              }
+            }
+          }
+          return;
+        }
+
+        if (this.attackHasHit || progress < 0.25 || progress > 0.72) return;
+
+        const isIceSlide = this.attackType === 'iceslide';
+        const isDragonKick = this.attackType === 'dragonkick';
+        const isUppercut = this.attackType === 'uppercut';
+        const reach = (this.attackType === 'special' || isIceSlide || isDragonKick) ? 2.45 : (this.attackType === 'kick' ? 1.95 : 1.55);
+        const strikeOrigin = this.pos.clone()
+          .add(new THREE.Vector3(0, isIceSlide ? 0.45 : (this.attackType === 'kick' ? 0.85 : 1.25), 0))
+          .addScaledVector(fwd, reach * 0.75);
+
+        softBodies.forEach((sb) => {
+          if (sb.mesh.position.distanceTo(strikeOrigin) < reach + 0.9) {
+            sb.applyImpulseAtPoint(strikeOrigin, fwd.clone().multiplyScalar(16).add(new THREE.Vector3(0, 5, 0)), 2.2);
+            this.attackHasHit = true;
+            sfx.playPunch(true);
+          }
+        });
+
+        const drunkMult = (this.isPlayer && viceStats.drunk > 15) ? (1 + (viceStats.drunk / 100) * 0.45) : 1.0;
+
+        for (const other of allFighters) {
+          if (other === this || other.state === 'ko') continue;
+          const dist = Math.hypot(other.pos.x - strikeOrigin.x, other.pos.z - strikeOrigin.z);
+          if (dist < reach) {
+            this.attackHasHit = true;
+
+            if (isIceSlide) {
+              sfx.playIceFreeze();
+              other.takeHit({
+                damage: Math.round(15 * drunkMult),
+                knockback: fwd.clone().multiplyScalar(8).add(new THREE.Vector3(0, 8.5, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 1.0,
+                attacker: this,
+                label: 'ICE SLIDE TRIP!'
+              });
+            } else if (isDragonKick) {
+              sfx.playExplosion();
+              other.takeHit({
+                damage: Math.round(21 * drunkMult),
+                knockback: fwd.clone().multiplyScalar(16.5).add(new THREE.Vector3(0, 8.5, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 1.1,
+                attacker: this,
+                label: 'FLYING DRAGON KICK!'
+              });
+            } else if (isUppercut) {
+              sfx.playPunch(true);
+              other.takeHit({
+                damage: Math.round(19 * drunkMult),
+                knockback: fwd.clone().multiplyScalar(6.5).add(new THREE.Vector3(0, 14.5, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 1.05,
+                attacker: this,
+                label: 'CRYO UPPERCUT!'
+              });
+            } else if (this.attackType === 'punch') {
+              sfx.playPunch(false);
+              other.takeHit({
+                damage: Math.round(this.config.punchDmg * drunkMult),
+                knockback: fwd.clone().multiplyScalar(6.2).add(new THREE.Vector3(0, 2.2, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 0,
+                attacker: this,
+                label: drunkMult > 1.1 ? 'DRUNKEN JAB!' : 'ALLEY JAB'
+              });
+            } else if (this.attackType === 'kick') {
+              sfx.playPunch(true);
+              other.takeHit({
+                damage: Math.round(this.config.kickDmg * drunkMult),
+                knockback: fwd.clone().multiplyScalar(10.5).add(new THREE.Vector3(0, 5.2, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 0.48,
+                attacker: this,
+                label: 'IK ROUNDHOUSE'
+              });
+            } else if (this.attackType === 'throw') {
+              sfx.playPunch(true);
+              other.takeHit({
+                damage: Math.round(17 * drunkMult),
+                knockback: fwd.clone().multiplyScalar(12.5).add(new THREE.Vector3(0, 10.5, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 1.05,
+                attacker: this,
+                label: 'STREET SLAM!'
+              });
+            } else if (this.attackType === 'special') {
+              sfx.playPunch(true);
+              other.takeHit({
+                damage: Math.round(28 * drunkMult),
+                knockback: fwd.clone().multiplyScalar(17).add(new THREE.Vector3(0, 13.5, 0)),
+                hitPoint: strikeOrigin,
+                ragdollTime: 1.45,
+                attacker: this,
+                label: this.config.specialName
+              });
+            }
+          }
+        }
+      }
+
+      update(dt, allFighters) {
+        if (this.comboResetTimer > 0) {
+          this.comboResetTimer -= dt;
+          if (this.comboResetTimer <= 0) {
+            this.comboCount = 0;
+            this.comboDamage = 0;
+          }
+        }
+
+        if (this.bulletTimeTimer > 0) {
+          this.bulletTimeTimer = Math.max(0, this.bulletTimeTimer - dt);
+        }
+
+        // Frozen in Sub-Zero Ice Block
+        if (this.frozenTimer > 0) {
+          this.frozenTimer -= dt;
+          this.iceBlockMesh.visible = true;
+          this.iceBlockMesh.position.copy(this.pos).add(new THREE.Vector3(0, 1.02, 0));
+          if (this.frozenTimer <= 0) {
+            this.iceBlockMesh.visible = false;
+            spawnHitSparks(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0x7dd3fc, 12);
+          }
+          return;
+        } else {
+          this.iceBlockMesh.visible = false;
+        }
+
+        // Cigarette smoke puffs when lit (Sub-Zero smokes continuously!)
+        if (this.cigLitTimer > 0) {
+          this.cigLitTimer -= dt;
+          this.cigMesh.visible = true;
+          this.smokeEmitAccum += dt;
+          if (this.smokeEmitAccum > 0.28) {
+            this.smokeEmitAccum = 0;
+            const tipWorld = new THREE.Vector3(0.06, -0.07, 0.34);
+            this.headMesh.localToWorld(tipWorld);
+            spawnSmokePuff(tipWorld);
+          }
+        } else {
+          this.cigMesh.visible = false;
+        }
+
+        if (this.state === 'ko') {
+          this.koDespawnTimer -= dt;
+        } else if (this.state === 'ragdoll') {
+          this.ragdollTimer -= dt;
+          if (this.ragdollTimer <= 0 && this.grounded) {
+            this.state = 'idle';
+          }
+        } else if (this.state === 'attack') {
+          this.attackTimer -= dt;
+          this.evaluateAttackHits(allFighters);
+          if (this.attackTimer <= 0) {
+            this.state = 'idle';
+            this.attackType = null;
+          }
+        }
+
+        const isCollapsed = this.state === 'ragdoll' || this.state === 'ko';
+        const gravScale = (this.isPlayer && viceStats.mudd > 15) ? (1 - (viceStats.mudd / 100) * 0.35) : 1.0;
+
+        // Spider-Man Pendulum Web-Swing / Wall-Crawl Locomotion
+        if (this.isWebSwinging) {
+          this.vel.y -= 24 * dt;
+          const toAnchor = new THREE.Vector3().subVectors(this.webAnchor, this.pos);
+          const dist = toAnchor.length();
+          if (dist > this.webRopeLen) {
+            const dir = toAnchor.normalize();
+            this.pos.copy(this.webAnchor).addScaledVector(dir, -this.webRopeLen);
+            const radialVel = this.vel.dot(dir);
+            if (radialVel < 0) {
+              this.vel.addScaledVector(dir, -radialVel);
+            }
+            this.vel.addScaledVector(this.getForwardVec(), 14 * dt);
+          }
+          this.pos.addScaledVector(this.vel, dt);
+          this.webLineMesh.visible = true;
+          this.webLineMesh.geometry.setFromPoints([
+            this.torsoMesh.position.clone().add(new THREE.Vector3(0, 0.25, 0)),
+            this.webAnchor
+          ]);
+          if (this.pos.y <= 0.15 && this.vel.y < 0) {
+            this.isWebSwinging = false;
+            this.webLineMesh.visible = false;
+          }
+        } else if (this.wallCrawlNormal && (this.config.id === 'spiderman' || this.isPlayer)) {
+          this.vel.y *= 0.85;
+          this.pos.addScaledVector(this.vel, dt);
+          if (this.pos.y < 0) {
+            this.pos.y = 0;
+            this.wallCrawlNormal = null;
+          }
+        } else {
+          this.webLineMesh.visible = false;
+          this.vel.y -= 30 * gravScale * dt;
+          this.pos.addScaledVector(this.vel, dt);
+        }
+
+        if (this.pos.y <= 0) {
+          if (this.vel.y < -9) {
+            softBodies.forEach((sb) => {
+              if (this.pos.distanceTo(sb.mesh.position) < 2.4) {
+                sb.applyImpulseAtPoint(this.pos, new THREE.Vector3(0, this.vel.y, 0), 2.2);
+                this.vel.y = -this.vel.y * 0.55;
+              }
+            });
+          }
+          if (this.pos.y <= 0) {
+            this.pos.y = 0;
+            this.vel.y = 0;
+            this.grounded = true;
+            this.wallCrawlNormal = null;
+            this.vel.x *= Math.pow(0.002, dt);
+            this.vel.z *= Math.pow(0.002, dt);
+          }
+        } else {
+          this.grounded = false;
+          this.vel.x *= Math.pow(0.35, dt);
+          this.vel.z *= Math.pow(0.35, dt);
+        }
+
+        // Building & City Outer Bounds Collisions (with Spider-Man Wall-Crawl detection)
+        const canCrawl = (this.config.id === 'spiderman' || this.isPlayer) && !isCollapsed && !this.isWebSwinging;
+        const wallHit = resolveBuildingCollisions(this.pos, this.vel, 0.65, canCrawl);
+        if (wallHit && canCrawl && (Math.abs(this.vel.x) > 1.5 || Math.abs(this.vel.z) > 1.5 || this.pos.y > 0.35)) {
+          this.wallCrawlNormal = wallHit.normal;
+        } else if (!wallHit) {
+          this.wallCrawlNormal = null;
+        }
+
+        this.pos.x = THREE.MathUtils.clamp(this.pos.x, -CITY_HALF + 1, CITY_HALF - 1);
+        this.pos.z = THREE.MathUtils.clamp(this.pos.z, -CITY_HALF + 1, CITY_HALF - 1);
+
+        // Active Ragdoll Spring-Damper Torso Stabilization (Dead Mode KO still collapses completely!)
+        const drunkFactor = this.isPlayer ? (viceStats.drunk / 100) : 0;
+        const springK = isCollapsed ? 10 : Math.max(28, 95 * (1 - drunkFactor * 0.65));
+        const springD = isCollapsed ? 3.2 : Math.max(5, 13 * (1 - drunkFactor * 0.45));
+        const drunkWobble = this.isPlayer && drunkFactor > 0.05 ? Math.sin(performance.now() * 0.0055) * drunkFactor * 0.38 : 0;
+
+        this.meshyPhase += dt * 7.2;
+        const meshyRoll = (!isCollapsed && meshyRetargetGlitchMode) ? Math.sin(this.meshyPhase) * 0.24 : 0;
+        const swingPitch = this.isWebSwinging ? 0.55 : (this.wallCrawlNormal ? -0.65 : 0);
+
+        const targetRoll = isCollapsed ? 1.52 : ((this.crouching ? -0.28 : 0) + drunkWobble + meshyRoll);
+        const targetPitch = isCollapsed ? 0.35 : swingPitch;
+
+        this.torsoTiltVel.y += ((targetRoll - this.torsoTilt.y) * springK - this.torsoTiltVel.y * springD) * dt;
+        this.torsoTilt.y += this.torsoTiltVel.y * dt;
+
+        this.torsoTiltVel.x += ((targetPitch - this.torsoTilt.x) * springK - this.torsoTiltVel.x * springD) * dt;
+        this.torsoTilt.x += this.torsoTiltVel.x * dt;
+
+        if (!isCollapsed && meshyRetargetGlitchMode) {
+          this.glitchTimer -= dt;
+          if (this.glitchTimer <= 0) {
+            this.glitchTimer = 0.22 + Math.random() * 0.35;
+            this.headOffset.set((Math.random() - 0.5) * 0.22, (Math.random() - 0.5) * 0.18, (Math.random() - 0.5) * 0.22);
+          }
+        }
+
+        this.headVel.addScaledVector(this.headOffset, -115 * dt);
+        this.headVel.multiplyScalar(Math.pow(0.02, dt));
+        this.headOffset.addScaledVector(this.headVel, dt);
+
+        this.updateIKAndSkeleton(dt, isCollapsed);
+      }
+
+      updateIKAndSkeleton(dt, isCollapsed) {
+        const s = this.config.scale;
+        const fwd = this.getForwardVec();
+        const right = this.getRightVec();
+        const speedHoriz = Math.hypot(this.vel.x, this.vel.z);
+
+        if (speedHoriz > 0.6 && this.grounded && !isCollapsed) {
+          this.walkCycle += speedHoriz * dt * 1.45;
+        } else {
+          this.walkCycle += dt * 2.4;
+        }
+
+        const pelvisHeight = isCollapsed ? 0.28 : (this.crouching ? 0.68 : 0.94 * s.h);
+        const bob = !isCollapsed && this.grounded && speedHoriz > 0.6 ? Math.abs(Math.sin(this.walkCycle)) * 0.07 : 0;
+
+        this.pelvisMesh.position.set(this.pos.x, this.pos.y + pelvisHeight + bob, this.pos.z);
+        this.pelvisMesh.rotation.set(this.torsoTilt.x, this.facingAngle, this.torsoTilt.y);
+
+        const spineUp = new THREE.Vector3(0, 1, 0).applyEuler(this.pelvisMesh.rotation);
+        const torsoCenter = this.pelvisMesh.position.clone().addScaledVector(spineUp, 0.48 * s.h);
+        this.torsoMesh.position.copy(torsoCenter);
+        this.torsoMesh.rotation.copy(this.pelvisMesh.rotation);
+
+        if (this.state === 'attack' && this.attackType === 'special' && this.config.id === 'jacky') {
+          this.torsoMesh.rotation.y += (1 - this.attackTimer / this.attackDuration) * Math.PI * 4;
+        }
+
+        const headBase = torsoCenter.clone().addScaledVector(spineUp, 0.54 * s.h);
+        this.headMesh.position.copy(headBase).add(this.headOffset);
+        this.headMesh.rotation.copy(this.torsoMesh.rotation);
+
+        if (this.hpBarGroup) {
+          this.hpBarGroup.position.copy(this.headMesh.position).add(new THREE.Vector3(0, 0.48, 0));
+          this.hpBarGroup.lookAt(camera.position);
+          const ratio = Math.max(0.01, this.hp / this.maxHp);
+          this.hpBarFill.scale.x = ratio;
+          this.hpBarFill.position.x = -(1 - ratio) * 0.52;
+        }
+
+        const shoulderCenter = torsoCenter.clone().addScaledVector(spineUp, 0.26 * s.h);
+        const lShoulder = shoulderCenter.clone().addScaledVector(right, -0.38 * s.w);
+        const rShoulder = shoulderCenter.clone().addScaledVector(right, 0.38 * s.w);
+        const lHip = this.pelvisMesh.position.clone().addScaledVector(right, -0.18 * s.w);
+        const rHip = this.pelvisMesh.position.clone().addScaledVector(right, 0.18 * s.w);
+
+        const stride = !isCollapsed && this.grounded && speedHoriz > 0.6 ? Math.sin(this.walkCycle) * 0.42 : 0;
+        const liftL = !isCollapsed && this.grounded && speedHoriz > 0.6 ? Math.max(0, Math.cos(this.walkCycle)) * 0.22 : 0;
+        const liftR = !isCollapsed && this.grounded && speedHoriz > 0.6 ? Math.max(0, -Math.cos(this.walkCycle)) * 0.22 : 0;
+
+        let lFootTarget = new THREE.Vector3(this.pos.x, this.pos.y + 0.08 + liftL, this.pos.z)
+          .addScaledVector(right, -0.20 * s.w)
+          .addScaledVector(fwd, stride);
+        let rFootTarget = new THREE.Vector3(this.pos.x, this.pos.y + 0.08 + liftR, this.pos.z)
+          .addScaledVector(right, 0.20 * s.w)
+          .addScaledVector(fwd, -stride);
+
+        let lHandTarget = shoulderCenter.clone().addScaledVector(right, -0.44 * s.w).addScaledVector(fwd, 0.26 - stride * 0.5).add(new THREE.Vector3(0, -0.22, 0));
+        let rHandTarget = shoulderCenter.clone().addScaledVector(right, 0.44 * s.w).addScaledVector(fwd, 0.32 + stride * 0.5).add(new THREE.Vector3(0, -0.16, 0));
+
+        if (this.heldProp) {
+          lHandTarget = this.pelvisMesh.position.clone().add(new THREE.Vector3(0, 1.15, 0)).addScaledVector(right, -0.25);
+          rHandTarget = this.pelvisMesh.position.clone().add(new THREE.Vector3(0, 1.15, 0)).addScaledVector(right, 0.25);
+        }
+
+        if (isCollapsed) {
+          const flop = Math.sin(performance.now() * 0.009) * 0.25;
+          lHandTarget = lShoulder.clone().addScaledVector(right, -0.65).add(new THREE.Vector3(0, 0.1 + flop, 0.35));
+          rHandTarget = rShoulder.clone().addScaledVector(right, 0.65).add(new THREE.Vector3(0, 0.1 - flop, -0.35));
+          lFootTarget = lHip.clone().addScaledVector(fwd, -0.85).addScaledVector(right, -0.28);
+          rFootTarget = rHip.clone().addScaledVector(fwd, -0.85).addScaledVector(right, 0.28);
+        } else if (this.state === 'attack') {
+          const p = Math.sin((1 - this.attackTimer / this.attackDuration) * Math.PI);
+          if (this.attackType === 'punch' || this.attackType === 'fireball' || this.attackType === 'iceball') {
+            rHandTarget = shoulderCenter.clone().addScaledVector(fwd, 0.35 + p * 0.95).add(new THREE.Vector3(0, 0.05, 0));
+            if (this.attackType === 'fireball' || this.attackType === 'iceball') {
+              lHandTarget = shoulderCenter.clone().addScaledVector(fwd, 0.35 + p * 0.85).add(new THREE.Vector3(0, -0.05, 0));
+            }
+          } else if (this.attackType === 'uppercut') {
+            rHandTarget = shoulderCenter.clone().addScaledVector(fwd, 0.55 * p).add(new THREE.Vector3(0, -0.25 + p * 1.15, 0));
+          } else if (this.attackType === 'iceslide') {
+            rFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 1.15).add(new THREE.Vector3(0, -0.55, 0));
+            lFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, -0.55).add(new THREE.Vector3(0, -0.65, 0));
+          } else if (this.attackType === 'dragonkick') {
+            rFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 1.25).add(new THREE.Vector3(0, 0.15, 0));
+            rHandTarget = shoulderCenter.clone().addScaledVector(fwd, 0.95).add(new THREE.Vector3(0, 0.25, 0));
+          } else if (this.attackType === 'bicycle') {
+            const cyc = performance.now() * 0.032;
+            lFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 0.75 + Math.sin(cyc) * 0.45).add(new THREE.Vector3(0, Math.cos(cyc) * 0.35, 0));
+            rFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 0.75 - Math.sin(cyc) * 0.45).add(new THREE.Vector3(0, -Math.cos(cyc) * 0.35, 0));
+          } else if (this.attackType === 'kick' || (this.attackType === 'special' && this.config.id === 'jacky')) {
+            rFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 0.3 + p * 1.15).add(new THREE.Vector3(0, p * 0.75, 0));
+            lHandTarget = shoulderCenter.clone().addScaledVector(fwd, -0.45).add(new THREE.Vector3(0, 0.35, 0));
+          } else if (this.attackType === 'throw' || this.attackType === 'special') {
+            lHandTarget = shoulderCenter.clone().addScaledVector(fwd, 0.4 + p * 0.95).addScaledVector(right, -0.2);
+            rHandTarget = shoulderCenter.clone().addScaledVector(fwd, 0.4 + p * 0.95).addScaledVector(right, 0.2);
+          }
+        }
+
+        const armBend = fwd.clone().multiplyScalar(-1).add(new THREE.Vector3(0, -0.4, 0));
+        const legBend = fwd.clone().add(new THREE.Vector3(0, 0.2, 0));
+
+        // Meshy-2 Motion & Constraint Glitch Retargeting
+        if (!isCollapsed && meshyRetargetGlitchMode) {
+          const mArc = Math.sin(this.meshyPhase);
+          const mCos = Math.cos(this.meshyPhase);
+          const gJitter = Math.sin(performance.now() * 0.065) * 0.28;
+          lHandTarget.add(new THREE.Vector3(mArc * 0.38, mCos * 0.35 + gJitter, -mArc * 0.32));
+          rHandTarget.add(new THREE.Vector3(-mArc * 0.38, -mCos * 0.35 - gJitter, mArc * 0.32));
+          if (!this.grounded || speedHoriz > 0.5) {
+            lFootTarget.y += Math.max(0, mCos) * 0.25;
+            rFootTarget.y += Math.max(0, -mCos) * 0.25;
+          }
+        }
+
+        // Spider-Man Web-Swing Pose
+        if (!isCollapsed && this.isWebSwinging) {
+          rHandTarget.copy(this.webAnchor).sub(this.pos).normalize().multiplyScalar(1.3).add(shoulderCenter);
+          lHandTarget = shoulderCenter.clone().addScaledVector(fwd, -0.45).add(new THREE.Vector3(0, 0.25, 0));
+          lFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 0.35).add(new THREE.Vector3(0, -0.35, -0.18));
+          rFootTarget = this.pelvisMesh.position.clone().addScaledVector(fwd, 0.55).add(new THREE.Vector3(0, -0.15, 0.18));
+        }
+
+        const ikLArm = solveTwoBoneIK(lShoulder, lHandTarget, this.limbs.leftArm.len1, this.limbs.leftArm.len2, armBend);
+        const ikRArm = solveTwoBoneIK(rShoulder, rHandTarget, this.limbs.rightArm.len1, this.limbs.rightArm.len2, armBend);
+        const ikLLeg = solveTwoBoneIK(lHip, lFootTarget, this.limbs.leftLeg.len1, this.limbs.leftLeg.len2, legBend);
+        const ikRLeg = solveTwoBoneIK(rHip, rFootTarget, this.limbs.rightLeg.len1, this.limbs.rightLeg.len2, legBend);
+
+        const applyLimb = (limb, root, ik) => {
+          this.positionSegment(limb.seg1, root, ik.jointPos);
+          this.positionSegment(limb.seg2, ik.jointPos, ik.endPos);
+          limb.end.position.copy(ik.endPos);
+        };
+
+        applyLimb(this.limbs.leftArm, lShoulder, ikLArm);
+        applyLimb(this.limbs.rightArm, rShoulder, ikRArm);
+        applyLimb(this.limbs.leftLeg, lHip, ikLLeg);
+        applyLimb(this.limbs.rightLeg, rHip, ikRLeg);
+
+        this.xrayGroup.visible = xrayMode;
+        if (xrayMode) {
+          this.xrayLines[0].geometry.setFromPoints([this.pelvisMesh.position, this.headMesh.position]);
+          this.xrayLines[1].geometry.setFromPoints([lShoulder, rShoulder]);
+          this.xrayLines[2].geometry.setFromPoints([lShoulder, ikLArm.jointPos, ikLArm.endPos]);
+          this.xrayLines[3].geometry.setFromPoints([rShoulder, ikRArm.jointPos, ikRArm.endPos]);
+          this.xrayLines[4].geometry.setFromPoints([lHip, ikLLeg.jointPos, ikLLeg.endPos]);
+          this.xrayLines[5].geometry.setFromPoints([rHip, ikRLeg.jointPos, ikRLeg.endPos]);
+
+          this.ikMarkers.leftHand.position.copy(ikLArm.endPos);
+          this.ikMarkers.rightHand.position.copy(ikRArm.endPos);
+          this.ikMarkers.leftFoot.position.copy(ikLLeg.endPos);
+          this.ikMarkers.rightFoot.position.copy(ikRLeg.endPos);
+        }
+      }
+
+      destroy() {
+        scene.remove(this.rootGroup);
+        if (this.webLineMesh) scene.remove(this.webLineMesh);
+        if (this.iceBlockMesh) scene.remove(this.iceBlockMesh);
+      }
+    }
+
+    /**
+     * ============================================================================
+     * VICE & SURVIVAL STATS SYSTEM (VODKA DRUNK, MUDD, CIGS COUNTER, HUNGER)
+     * ============================================================================
+     */
+    const viceStats = {
+      drunk: 0,
+      mudd: 0,
+      cigsSmoked: 0,
+      hunger: 85,
+      cash: 450,
+      wantedStars: 1,
+      kos: 0,
+      inv: {
+        vodka: 2,
+        mudd: 2,
+        cigs: 5,
+        food: 2
+      }
+    };
+
+    function drinkVodka() {
+      if (!p1 || p1.state === 'ko') return;
+      if (viceStats.inv.vodka <= 0) {
+        showBanner('OUT OF VODKA!', 'LOOT ALLEY NPCs OR PICK UP BOTTLES');
+        return;
+      }
+      viceStats.inv.vodka--;
+      viceStats.drunk = Math.min(100, viceStats.drunk + 32);
+      viceStats.hunger = Math.max(0, viceStats.hunger - 4);
+      p1.superMeter = Math.min(100, p1.superMeter + 18);
+      p1.torsoTiltVel.z += (Math.random() > 0.5 ? 1 : -1) * 7.5;
+      sfx.playConsume('drink');
+      showBanner(`VODKA SIPPED! (${Math.round(viceStats.drunk)}% DRUNK)`, 'DRUNKEN FIST DAMAGE + RAGDOLL WOBBLE');
+    }
+
+    function sipMudd() {
+      if (!p1 || p1.state === 'ko') return;
+      if (viceStats.inv.mudd <= 0) {
+        showBanner('OUT OF MUDD!', 'FIND PURPLE CUPS IN THE ALLEY');
+        return;
+      }
+      viceStats.inv.mudd--;
+      viceStats.mudd = Math.min(100, viceStats.mudd + 35);
+      p1.hp = Math.min(p1.maxHp, p1.hp + 12);
+      sfx.playConsume('drink');
+      showBanner(`MUDD / LEAN SIPPED! (${Math.round(viceStats.mudd)}%)`, 'HEAVY DAMAGE RESISTANCE + FLOATY GRAVITY');
+    }
+
+    function smokeCig() {
+      if (!p1 || p1.state === 'ko') return;
+      if (viceStats.inv.cigs <= 0) {
+        showBanner('PACK EMPTY!', 'LOOT CIG PACKS FROM STREET BRAWLERS');
+        return;
+      }
+      viceStats.inv.cigs--;
+      viceStats.cigsSmoked++;
+      p1.cigLitTimer = Math.max(p1.cigLitTimer, 9.0);
+      p1.superMeter = Math.min(100, p1.superMeter + 25);
+      sfx.playConsume('smoke');
+      showBanner(`CIGARETTE LIT! (#${viceStats.cigsSmoked} SMOKED)`, '+25 SUPER METER & NICOTINE FOCUS');
+    }
+
+    function eatStreetFood() {
+      if (!p1 || p1.state === 'ko') return;
+      if (viceStats.inv.food <= 0) {
+        showBanner('NO FOOD!', 'GRAB STREET BURGERS AROUND THE 4 BLOCKS');
+        return;
+      }
+      viceStats.inv.food--;
+      viceStats.hunger = Math.min(100, viceStats.hunger + 40);
+      viceStats.drunk = Math.max(0, viceStats.drunk - 12);
+      p1.hp = Math.min(p1.maxHp, p1.hp + 22);
+      sfx.playConsume('food');
+      showBanner('STREET BURGER EATEN!', '+40% HUNGER & +22 HEALTH RESTORED');
+    }
+
+    function collectPickup(type) {
+      sfx.playConsume('drink');
+      if (type === 'vodka') {
+        viceStats.inv.vodka++;
+        showBanner('+1 VODKA BOTTLE', 'PRESS [1] TO DRINK');
+      } else if (type === 'mudd') {
+        viceStats.inv.mudd++;
+        showBanner('+1 MUDD DOUBLE-CUP', 'PRESS [2] TO SIP');
+      } else if (type === 'cigs') {
+        viceStats.inv.cigs += 3;
+        showBanner('+3 CIGARETTES', 'PRESS [3] TO LIGHT UP');
+      } else if (type === 'food') {
+        viceStats.inv.food++;
+        showBanner('+1 STREET BURGER', 'PRESS [4] TO EAT');
+      } else if (type === 'cash') {
+        const amt = 120 + Math.floor(Math.random() * 180);
+        viceStats.cash += amt;
+        showBanner(`+$${amt} ALLEY CASH`, 'STREET RESPECT UP');
+      }
+      setTimeout(() => {
+        const types = ['vodka', 'mudd', 'cigs', 'food', 'cash'];
+        const pick = types[Math.floor(Math.random() * types.length)];
+        const spot = getRandomAlleySpawnPoint();
+        new StreetPickup(pick, spot);
+      }, 4500);
+    }
+
+    /**
+     * ============================================================================
+     * RANDOM ALLEY NPC SPAWNER, WAVE DIRECTOR & CITY GAME LOOP
+     * ============================================================================
+     */
+    let selectedP1 = 'spiderman';
+    let p1 = null;
+    const npcFighters = [];
+
+    let hitStopTimer = 0;
+    let shakeIntensity = 0;
+    let koSlowMoTimer = 0;
+    let npcRespawnTimer = 0;
+
+    let camYawOffset = 0;
+    let camPitchOffset = 0.14;
+    let isDraggingCam = false;
+    let prevPointer = { x: 0, y: 0 };
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      isDraggingCam = true;
+      prevPointer = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (!isDraggingCam) return;
+      const dx = e.clientX - prevPointer.x;
+      const dy = e.clientY - prevPointer.y;
+      prevPointer = { x: e.clientX, y: e.clientY };
+      camYawOffset -= dx * 0.0065;
+      camPitchOffset = Math.max(-0.15, Math.min(0.55, camPitchOffset + dy * 0.005));
+    });
+    window.addEventListener('pointerup', () => { isDraggingCam = false; });
+
+    function triggerHitStop(sec) { hitStopTimer = Math.max(hitStopTimer, sec); }
+    function triggerShake(amount) { shakeIntensity = Math.max(shakeIntensity, amount); }
+
+    let bannerTimeout = null;
+    function showBanner(title, sub, persist = false) {
+      const el = document.getElementById('center-banner');
+      document.getElementById('banner-title').textContent = title;
+      document.getElementById('banner-sub').textContent = sub;
+      el.classList.remove('hidden', 'announce-pop');
+      void el.offsetWidth;
+      el.classList.add('announce-pop');
+      clearTimeout(bannerTimeout);
+      if (!persist) {
+        bannerTimeout = setTimeout(() => el.classList.add('hidden'), 1550);
+      }
+    }
+
+    let comboHideTimeout = null;
+    function updateComboHUD(count, dmg, label) {
+      if (count < 2 && !label) return;
+      const box = document.getElementById('combo-box');
+      document.getElementById('combo-count').textContent = count >= 2 ? `${count} HIT COMBO!` : label;
+      document.getElementById('combo-dmg').textContent = `${dmg} DMG • ${label || 'ALLEY BRAWL'}`;
+      box.classList.remove('hidden');
+      clearTimeout(comboHideTimeout);
+      comboHideTimeout = setTimeout(() => box.classList.add('hidden'), 1750);
+    }
+
+    function getRandomAlleySpawnPoint() {
+      const zones = [
+        () => new THREE.Vector3((Math.random() - 0.5) * 4.5, 0, (Math.random() > 0.5 ? 1 : -1) * (6 + Math.random() * 14)),
+        () => new THREE.Vector3((Math.random() > 0.5 ? 1 : -1) * (6 + Math.random() * 14), 0, (Math.random() - 0.5) * 4.5),
+        () => new THREE.Vector3((Math.random() - 0.5) * 40, 0, (Math.random() > 0.5 ? 1 : -1) * 22.5)
+      ];
+      const pt = zones[Math.floor(Math.random() * zones.length)]();
+      resolveBuildingCollisions(pt, null, 1.2);
+      return pt;
+    }
+
+    function spawnRandomAlleyNPC() {
+      const pool = ['spiderman', 'subzero', 'luechang', 'neo', 'jacky', 'wrestler', 'thug'];
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      const spawnPos = getRandomAlleySpawnPoint();
+      const npc = new ActiveRagdollFighter(pick, false, spawnPos);
+      npcFighters.push(npc);
+      return npc;
+    }
+
+    function startCitySession() {
+      if (p1) p1.destroy();
+      npcFighters.forEach((n) => n.destroy());
+      npcFighters.length = 0;
+
+      mkProjectiles.forEach((pr) => pr.destroy());
+      mkProjectiles.length = 0;
+
+      arenaProps.forEach((pr) => pr.destroy());
+      arenaProps.length = 0;
+
+      streetPickups.forEach((pk) => scene.remove(pk.group));
+      streetPickups.length = 0;
+
+      spawnInitialProps();
+      spawnRandomStreetPickups();
+
+      p1 = new ActiveRagdollFighter(selectedP1, true, new THREE.Vector3(0, 0, 2));
+      document.getElementById('p1-name').textContent = p1.config.name;
+      document.getElementById('p1-name').style.color = p1.config.colorHex;
+
+      for (let i = 0; i < 4; i++) {
+        spawnRandomAlleyNPC();
+      }
+
+      document.getElementById('center-banner').classList.add('hidden');
+      sfx.playBell();
+      showBanner('GTA ALLEY BRAWL!', '4-BLOCK CITY • SPIDER-MAN SWING & SMOKING SUB-ZERO');
+    }
+
+    // Keyboard & UI Event Listeners
+    const keys = {};
+    window.addEventListener('keydown', (e) => {
+      keys[e.code] = true;
+      if (e.code === 'Digit1') drinkVodka();
+      if (e.code === 'Digit2') sipMudd();
+      if (e.code === 'Digit3') smokeCig();
+      if (e.code === 'Digit4') eatStreetFood();
+      if (e.code === 'KeyG') {
+        meshyRetargetGlitchMode = !meshyRetargetGlitchMode;
+        const mEl = document.getElementById('meshy-state');
+        if (mEl) mEl.textContent = meshyRetargetGlitchMode ? 'ON' : 'OFF';
+        showBanner(
+          meshyRetargetGlitchMode ? 'MESHY-2 RETARGET GLITCH: ON' : 'MESHY-2 RETARGET GLITCH: OFF',
+          'IK CONSTRAINT JITTER + MOCAP BLEND (RAGDOLL DEAD MODE PRESERVED)'
+        );
+      }
+      if (e.code === 'KeyR') startCitySession();
+
+      if (!p1 || p1.state === 'ko') return;
+      const all = [p1, ...npcFighters];
+      if (e.code === 'KeyV') p1.toggleWebSwing();
+      if (e.code === 'KeyJ' || e.code === 'KeyZ') p1.startAttack('punch', all);
+      if (e.code === 'KeyK' || e.code === 'KeyX') p1.startAttack('kick', all);
+      if (e.code === 'KeyE') p1.startAttack('throw', all);
+      if (e.code === 'KeyC') p1.startAttack('mobility', all);
+      if (e.code === 'KeyF' || e.code === 'KeyL') p1.startAttack('special', all);
+      if (e.code === 'Space' && p1.state !== 'ragdoll') {
+        if (p1.isWebSwinging) {
+          p1.toggleWebSwing();
+        } else if (p1.grounded || p1.wallCrawlNormal) {
+          p1.vel.y = p1.config.jumpForce;
+          if (p1.wallCrawlNormal) {
+            p1.vel.addScaledVector(p1.wallCrawlNormal, 9.5);
+            p1.wallCrawlNormal = null;
+          }
+          p1.grounded = false;
+          sfx.playWhoosh();
+        }
+      }
+    });
+    window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+    document.querySelectorAll('.ctrl-btn').forEach((btn) => {
+      const code = btn.dataset.key;
+      const press = (e) => {
+        e.preventDefault();
+        keys[code] = true;
+        if (code === 'Space' && p1 && (p1.grounded || p1.wallCrawlNormal) && p1.state !== 'ragdoll') {
+          p1.vel.y = p1.config.jumpForce;
+          p1.grounded = false;
+          sfx.playWhoosh();
+        }
+      };
+      const release = (e) => { e.preventDefault(); keys[code] = false; };
+      btn.addEventListener('pointerdown', press);
+      btn.addEventListener('pointerup', release);
+      btn.addEventListener('pointerleave', release);
+    });
+
+    document.getElementById('act-punch').addEventListener('click', () => p1 && p1.startAttack('punch', [p1, ...npcFighters]));
+    document.getElementById('act-kick').addEventListener('click', () => p1 && p1.startAttack('kick', [p1, ...npcFighters]));
+    document.getElementById('act-swing').addEventListener('click', () => p1 && p1.toggleWebSwing());
+    document.getElementById('act-throw').addEventListener('click', () => p1 && p1.startAttack('throw', [p1, ...npcFighters]));
+    document.getElementById('act-special').addEventListener('click', () => p1 && p1.startAttack('special', [p1, ...npcFighters]));
+
+    document.getElementById('btn-drink-vodka').addEventListener('click', drinkVodka);
+    document.getElementById('btn-sip-mudd').addEventListener('click', sipMudd);
+    document.getElementById('btn-smoke-cig').addEventListener('click', smokeCig);
+    document.getElementById('btn-eat-food').addEventListener('click', eatStreetFood);
+
+    document.getElementById('btn-xray').addEventListener('click', () => {
+      xrayMode = !xrayMode;
+      document.getElementById('xray-state').textContent = xrayMode ? 'ON' : 'OFF';
+    });
+
+    document.getElementById('btn-meshy').addEventListener('click', () => {
+      meshyRetargetGlitchMode = !meshyRetargetGlitchMode;
+      document.getElementById('meshy-state').textContent = meshyRetargetGlitchMode ? 'ON' : 'OFF';
+      showBanner(
+        meshyRetargetGlitchMode ? 'MESHY-2 RETARGET GLITCH: ON' : 'MESHY-2 RETARGET GLITCH: OFF',
+        'IK CONSTRAINT JITTER + MOCAP BLEND'
+      );
+    });
+
+    document.getElementById('btn-spawn-npc').addEventListener('click', () => {
+      const npc = spawnRandomAlleyNPC();
+      showBanner(`${npc.config.name} ENTERED ALLEY!`, 'RANDOM STREET CHALLENGER');
+    });
+
+    document.getElementById('btn-spawn-softbody').addEventListener('click', () => {
+      const colors = [0xa855f7, 0x10b981, 0x06b6d4, 0xf59e0b, 0xf43f5e];
+      const pos = p1 ? p1.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 4.5, (Math.random() - 0.5) * 4)) : new THREE.Vector3(0, 4.5, 0);
+      new SoftBodyMesh({
+        type: 'cube',
+        pos,
+        size: new THREE.Vector3(1.3, 1.3, 1.3),
+        color: colors[Math.floor(Math.random() * colors.length)],
+        anchoredTop: false,
+        mass: 0.85
+      });
+    });
+
+    document.getElementById('btn-spawn-prop').addEventListener('click', () => {
+      const types = ['crate', 'barrel', 'cone'];
+      const t = types[Math.floor(Math.random() * types.length)];
+      const pos = p1 ? p1.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 4.2, (Math.random() - 0.5) * 4)) : new THREE.Vector3(0, 4.2, 0);
+      new InteractiveProp(t, pos);
+    });
+
+    document.getElementById('btn-reset').addEventListener('click', startCitySession);
+
+    // Roster Modal
+    const rosterModal = document.getElementById('roster-modal');
+    function renderRosterCards() {
+      const wrap = document.getElementById('p1-cards');
+      wrap.innerHTML = '';
+      ['spiderman', 'subzero', 'luechang', 'neo', 'jacky', 'wrestler'].forEach((id) => {
+        const f = FIGHTERS[id];
+        const active = f.id === selectedP1;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `w-full text-left p-3.5 rounded-2xl border transition flex flex-col gap-1 ${
+          active
+            ? 'bg-slate-800/95 border-emerald-400 shadow-lg ring-2 ring-emerald-400/40'
+            : 'bg-slate-900/65 border-white/10 hover:border-white/30'
+        }`;
+        card.innerHTML = `
+          <div class="flex items-center justify-between">
+            <span class="font-gta text-2xl" style="color:${f.colorHex}">${f.name}</span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-950 text-slate-300">${f.tag}</span>
+          </div>
+          <div class="text-[11px] font-semibold text-slate-300">${f.title}</div>
+          <p class="text-[11px] text-slate-400 leading-snug">${f.desc}</p>
+        `;
+        card.onclick = () => {
+          selectedP1 = f.id;
+          renderRosterCards();
+        };
+        wrap.appendChild(card);
+      });
+    }
+    renderRosterCards();
+
+    document.getElementById('btn-open-roster').addEventListener('click', () => rosterModal.classList.remove('hidden'));
+    document.getElementById('btn-close-roster').addEventListener('click', () => rosterModal.classList.add('hidden'));
+    document.getElementById('btn-start-match').addEventListener('click', () => {
+      rosterModal.classList.add('hidden');
+      startCitySession();
+    });
+
+    function processPlayerInput(dt) {
+      if (!p1 || p1.state === 'ragdoll' || p1.state === 'ko') return;
+
+      let forwardIn = 0;
+      let rightIn = 0;
+      if (keys['KeyW'] || keys['ArrowUp']) forwardIn += 1;
+      if (keys['KeyS'] || keys['ArrowDown']) forwardIn -= 1;
+      if (keys['KeyA'] || keys['ArrowLeft']) rightIn -= 1;
+      if (keys['KeyD'] || keys['ArrowRight']) rightIn += 1;
+
+      if (forwardIn !== 0 || rightIn !== 0) {
+        const camForward = new THREE.Vector3(-Math.sin(camYawOffset), 0, -Math.cos(camYawOffset)).normalize();
+        const camRight = new THREE.Vector3(Math.cos(camYawOffset), 0, -Math.sin(camYawOffset)).normalize();
+
+        const moveDir = new THREE.Vector3()
+          .addScaledVector(camForward, forwardIn)
+          .addScaledVector(camRight, rightIn)
+          .normalize();
+
+        if (viceStats.drunk > 15) {
+          const sway = Math.sin(performance.now() * 0.004) * (viceStats.drunk / 100) * 0.45;
+          moveDir.addScaledVector(camRight, sway).normalize();
+        }
+
+        const hungerMult = viceStats.hunger <= 10 ? 0.72 : (keys['ShiftLeft'] ? 1.28 : 1.0);
+        const speed = p1.config.speed * hungerMult;
+        p1.vel.x = moveDir.x * speed;
+        p1.vel.z = moveDir.z * speed;
+
+        if (p1.wallCrawlNormal) {
+          p1.vel.y = speed * 0.92;
+        }
+
+        if (p1.state !== 'attack') {
+          p1.facingAngle = Math.atan2(moveDir.x, moveDir.z);
+          if (p1.state === 'idle') p1.state = 'walk';
+        }
+      } else if (p1.state === 'walk') {
+        p1.state = 'idle';
+      }
+    }
+
+    function updateNPCs(dt) {
+      const allFighters = [p1, ...npcFighters];
+
+      for (let i = npcFighters.length - 1; i >= 0; i--) {
+        const npc = npcFighters[i];
+        npc.update(dt, allFighters);
+
+        if (npc.state === 'ko') {
+          if (npc.koDespawnTimer <= 0) {
+            npc.destroy();
+            npcFighters.splice(i, 1);
+          }
+          continue;
+        }
+
+        if (npc.state === 'ragdoll' || npc.state === 'attack' || npc.frozenTimer > 0) continue;
+
+        const distToPlayer = p1 && p1.state !== 'ko' ? npc.pos.distanceTo(p1.pos) : 999;
+        if (distToPlayer < 13.5) npc.aggro = true;
+
+        npc.aiTimer -= dt;
+        if (npc.aiTimer <= 0) {
+          npc.aiTimer = 0.35 + Math.random() * 0.35;
+          if (npc.aggro && p1 && p1.state !== 'ko') {
+            const toP = new THREE.Vector3().subVectors(p1.pos, npc.pos).setY(0);
+            if (toP.length() > 1.85) {
+              npc.aiDesiredDir.copy(toP.normalize());
+            } else {
+              npc.aiDesiredDir.set(0, 0, 0);
+              npc.facingAngle = Math.atan2(toP.x, toP.z);
+              const roll = Math.random();
+              if (npc.superMeter >= 45 && roll < 0.2) {
+                npc.startAttack('special', allFighters);
+              } else if (roll < 0.55) {
+                npc.startAttack('punch', allFighters);
+              } else if (roll < 0.85) {
+                npc.startAttack('kick', allFighters);
+              } else {
+                npc.startAttack('throw', allFighters);
+              }
+            }
+          } else {
+            const ang = Math.random() * Math.PI * 2;
+            npc.aiDesiredDir.set(Math.sin(ang) * 0.55, 0, Math.cos(ang) * 0.55);
+          }
+        }
+
+        if (npc.aiDesiredDir.lengthSq() > 0.01) {
+          const spd = npc.config.speed * 0.78;
+          npc.vel.x = npc.aiDesiredDir.x * spd;
+          npc.vel.z = npc.aiDesiredDir.z * spd;
+          npc.facingAngle = Math.atan2(npc.aiDesiredDir.x, npc.aiDesiredDir.z);
+        }
+      }
+
+      if (npcFighters.length < 4) {
+        npcRespawnTimer += dt;
+        if (npcRespawnTimer > 3.5) {
+          npcRespawnTimer = 0;
+          spawnRandomAlleyNPC();
+        }
+      }
+    }
+
+    function updateViceAndSurvival(dt) {
+      if (!p1 || p1.state === 'ko') return;
+
+      viceStats.drunk = Math.max(0, viceStats.drunk - 1.35 * dt);
+      viceStats.mudd = Math.max(0, viceStats.mudd - 1.15 * dt);
+
+      const activityDrain = (Math.hypot(p1.vel.x, p1.vel.z) > 1 ? 0.65 : 0.35);
+      viceStats.hunger = Math.max(0, viceStats.hunger - activityDrain * dt);
+
+      if (viceStats.hunger >= 65 && p1.hp < p1.maxHp) {
+        p1.hp = Math.min(p1.maxHp, p1.hp + 1.4 * dt);
+      } else if (viceStats.hunger <= 0) {
+        p1.hp = Math.max(1, p1.hp - 1.8 * dt);
+      }
+
+      if (p1.cigLitTimer > 0) {
+        p1.superMeter = Math.min(100, p1.superMeter + 3.5 * dt);
+      }
+
+      const vignette = document.getElementById('vice-vignette');
+      if (viceStats.mudd > 15 || viceStats.drunk > 15) {
+        const mAlpha = (viceStats.mudd / 100) * 0.42;
+        const dAlpha = (viceStats.drunk / 100) * 0.35;
+        vignette.style.boxShadow = `inset 0 0 110px rgba(168, 85, 247, ${mAlpha}), inset 0 0 80px rgba(56, 189, 248, ${dAlpha})`;
+      } else {
+        vignette.style.boxShadow = 'none';
+      }
+    }
+
+    const radarCanvas = document.getElementById('radar-canvas');
+    const rCtx = radarCanvas.getContext('2d');
+
+    function drawRadar() {
+      const w = radarCanvas.width;
+      const h = radarCanvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const scale = 2.1;
+
+      rCtx.clearRect(0, 0, w, h);
+      rCtx.fillStyle = '#090d16';
+      rCtx.fillRect(0, 0, w, h);
+
+      if (!p1) return;
+
+      rCtx.save();
+      rCtx.translate(cx, cy);
+      rCtx.rotate(camYawOffset);
+
+      rCtx.fillStyle = '#334155';
+      buildingColliders.forEach((b) => {
+        const rx = (b.x - p1.pos.x) * scale;
+        const rz = (b.z - p1.pos.z) * scale;
+        rCtx.fillRect(rx - (b.w * scale) / 2, rz - (b.d * scale) / 2, b.w * scale, b.d * scale);
+      });
+
+      streetPickups.forEach((pk) => {
+        if (pk.collected) return;
+        const rx = (pk.pos.x - p1.pos.x) * scale;
+        const rz = (pk.pos.z - p1.pos.z) * scale;
+        rCtx.fillStyle = pk.type === 'mudd' ? '#c084fc' : (pk.type === 'vodka' ? '#38bdf8' : '#facc15');
+        rCtx.beginPath();
+        rCtx.arc(rx, rz, 2.5, 0, Math.PI * 2);
+        rCtx.fill();
+      });
+
+      npcFighters.forEach((npc) => {
+        if (npc.state === 'ko') return;
+        const rx = (npc.pos.x - p1.pos.x) * scale;
+        const rz = (npc.pos.z - p1.pos.z) * scale;
+        rCtx.fillStyle = '#f43f5e';
+        rCtx.beginPath();
+        rCtx.arc(rx, rz, 3.6, 0, Math.PI * 2);
+        rCtx.fill();
+      });
+
+      rCtx.restore();
+
+      rCtx.fillStyle = '#10b981';
+      rCtx.beginPath();
+      rCtx.moveTo(cx, cy - 5);
+      rCtx.lineTo(cx - 4, cy + 4);
+      rCtx.lineTo(cx + 4, cy + 4);
+      rCtx.closePath();
+      rCtx.fill();
+    }
+
+    function updateHUD() {
+      if (!p1) return;
+      document.getElementById('p1-hp').style.width = `${(p1.hp / p1.maxHp) * 100}%`;
+      document.getElementById('hp-text').textContent = `${Math.ceil(p1.hp)} / ${p1.maxHp}`;
+
+      const hPct = Math.round(viceStats.hunger);
+      document.getElementById('p1-hunger').style.width = `${hPct}%`;
+      document.getElementById('hunger-text').textContent = `${hPct}%`;
+      const hStatus = document.getElementById('hunger-status');
+      if (hPct >= 65) {
+        hStatus.textContent = '(WELL FED +HP)';
+        hStatus.className = 'text-[9px] text-emerald-400';
+      } else if (hPct <= 10) {
+        hStatus.textContent = '(STARVING!)';
+        hStatus.className = 'text-[9px] text-rose-400 animate-pulse';
+      } else {
+        hStatus.textContent = '(OK)';
+        hStatus.className = 'text-[9px] text-amber-300';
+      }
+
+      document.getElementById('drunk-val').textContent = `${Math.round(viceStats.drunk)}%`;
+      document.getElementById('drunk-bar').style.width = `${viceStats.drunk}%`;
+      document.getElementById('inv-vodka').textContent = viceStats.inv.vodka;
+
+      document.getElementById('mudd-val').textContent = `${Math.round(viceStats.mudd)}%`;
+      document.getElementById('mudd-bar').style.width = `${viceStats.mudd}%`;
+      document.getElementById('inv-mudd').textContent = viceStats.inv.mudd;
+
+      document.getElementById('cigs-count').textContent = viceStats.cigsSmoked;
+      document.getElementById('inv-cigs').textContent = viceStats.inv.cigs;
+      document.getElementById('inv-food').textContent = viceStats.inv.food;
+
+      document.getElementById('gta-cash').textContent = `$${String(viceStats.cash).padStart(8, '0')}`;
+      document.getElementById('gta-wanted').textContent = '★'.repeat(viceStats.wantedStars) + '☆'.repeat(5 - viceStats.wantedStars);
+      document.getElementById('p1-super-txt').textContent = `${Math.round(p1.superMeter)}%`;
+
+      const aliveCount = npcFighters.filter((n) => n.state !== 'ko').length;
+      document.getElementById('npc-alive-count').textContent = aliveCount;
+      document.getElementById('ko-counter').textContent = viceStats.kos;
+    }
+
+    /**
+     * ============================================================================
+     * MAIN ANIMATION & PHYSICS LOOP
+     * ============================================================================
+     */
+    let lastTime = performance.now();
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+
+      const rawDt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      if (hitStopTimer > 0) {
+        hitStopTimer -= rawDt;
+        renderer.render(scene, camera);
+        return;
+      }
+
+      let timeScale = 1.0;
+      if (koSlowMoTimer > 0) {
+        koSlowMoTimer -= rawDt;
+        timeScale = 0.35;
+      } else if (p1 && p1.bulletTimeTimer > 0) {
+        timeScale = 0.42;
+      } else if (viceStats.mudd > 50) {
+        timeScale = 0.78;
+      }
+      const dt = rawDt * timeScale;
+
+      if (p1) {
+        processPlayerInput(dt);
+        updateViceAndSurvival(rawDt);
+
+        const allFighters = [p1, ...npcFighters];
+        const p1Dt = p1.bulletTimeTimer > 0 ? rawDt * 0.88 : dt;
+        p1.update(p1Dt, allFighters);
+
+        updateNPCs(dt);
+
+        for (let i = mkProjectiles.length - 1; i >= 0; i--) {
+          mkProjectiles[i].update(dt, allFighters);
+          if (mkProjectiles[i].dead) mkProjectiles.splice(i, 1);
+        }
+
+        arenaProps.forEach((prop) => prop.update(dt, allFighters));
+        streetPickups.forEach((pk) => pk.update(dt, p1));
+        softBodies.forEach((sb) => sb.update(dt));
+        updateParticles(dt);
+        updateHUD();
+        drawRadar();
+
+        const camDist = 11.5;
+        const targetCamX = p1.pos.x + Math.sin(camYawOffset) * camDist;
+        const targetCamZ = p1.pos.z + Math.cos(camYawOffset) * camDist;
+        const targetCamY = p1.pos.y + 4.2 + camPitchOffset * 9;
+
+        camera.position.x += (targetCamX - camera.position.x) * 7 * rawDt;
+        camera.position.y += (targetCamY - camera.position.y) * 7 * rawDt;
+        camera.position.z += (targetCamZ - camera.position.z) * 7 * rawDt;
+
+        if (shakeIntensity > 0.001) {
+          camera.position.x += (Math.random() - 0.5) * shakeIntensity;
+          camera.position.y += (Math.random() - 0.5) * shakeIntensity;
+          shakeIntensity *= Math.pow(0.015, rawDt);
+        }
+
+        camera.lookAt(p1.pos.x, p1.pos.y + 1.45, p1.pos.z);
+
+        if (viceStats.drunk > 10) {
+          camera.rotation.z += Math.sin(now * 0.0032) * (viceStats.drunk / 100) * 0.14;
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    window.onload = function () {
+      startCitySession();
+      requestAnimationFrame(animate);
+    };
+  </script>
+</body>
+</html>

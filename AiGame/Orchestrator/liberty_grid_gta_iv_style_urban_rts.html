@@ -1,0 +1,1902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LIBERTY GRID // Urban RTS & Wave Defense</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js r128 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Google Fonts: Inter & Oswald for gritty GTA IV typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Oswald:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0d1015;
+            font-family: 'Inter', sans-serif;
+            color: #e2e8f0;
+        }
+        #game-container {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .font-gta {
+            font-family: 'Oswald', sans-serif;
+            letter-spacing: 0.06em;
+        }
+        /* Gritty GTA IV HUD Glass Styling */
+        .gta-panel {
+            background: rgba(13, 16, 22, 0.86);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65);
+        }
+        .gta-btn {
+            background: linear-gradient(180deg, rgba(35, 42, 54, 0.95) 0%, rgba(18, 22, 29, 0.98) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            transition: all 0.14s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        }
+        .gta-btn:hover:not(:disabled) {
+            border-color: #f59e0b;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(245, 158, 11, 0.25);
+        }
+        .gta-btn:active:not(:disabled) {
+            transform: translateY(0px);
+        }
+        .gta-btn.active {
+            border-color: #f59e0b;
+            background: linear-gradient(180deg, rgba(120, 74, 12, 0.85) 0%, rgba(45, 29, 8, 0.95) 100%);
+            box-shadow: 0 0 16px rgba(245, 158, 11, 0.4);
+        }
+        .gta-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+        /* GTA IV Radar Ring */
+        #minimap-wrapper {
+            border: 3px solid #1e242e;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.12), 0 12px 28px rgba(0,0,0,0.8);
+            background: #0b0e13;
+        }
+        /* WASTED Overlay Animation */
+        @keyframes wastedPulse {
+            0% { transform: scale(1.18); opacity: 0; letter-spacing: 0.25em; }
+            100% { transform: scale(1.0); opacity: 1; letter-spacing: 0.12em; }
+        }
+        .wasted-title {
+            animation: wastedPulse 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            text-shadow: 0 4px 28px rgba(220, 38, 38, 0.85), 0 2px 4px #000;
+        }
+        /* Subtle film grain & vignette */
+        #vignette {
+            pointer-events: none;
+            position: fixed;
+            inset: 0;
+            z-index: 5;
+            background: radial-gradient(circle at center, transparent 58%, rgba(5, 7, 10, 0.68) 100%);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D WebGL Viewport -->
+    <div id="game-container"></div>
+    <div id="vignette"></div>
+
+    <!-- HUD Layer -->
+    <div id="hud" class="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-3 sm:p-4">
+        
+        <!-- Top Row: Radar (Left) & Economy / Wave Telemetry (Right) -->
+        <div class="flex items-start justify-between gap-3 w-full">
+            
+            <!-- GTA IV Style Tactical Radar & Zone Streaming Info -->
+            <div class="flex items-start gap-3 pointer-events-auto">
+                <div id="minimap-wrapper" class="relative w-32 h-32 sm:w-40 sm:h-40 rounded-full overflow-hidden flex-shrink-0">
+                    <canvas id="minimap-canvas" width="160" height="160" class="w-full h-full"></canvas>
+                    <div class="absolute bottom-1.5 inset-x-0 text-center text-[9px] font-bold tracking-widest text-amber-400/90 uppercase pointer-events-none drop-shadow">
+                        BROKER-DUKES
+                    </div>
+                </div>
+
+                <!-- Zone Streaming & HQ Status -->
+                <div class="gta-panel rounded-xl px-3 py-2 hidden md:flex flex-col gap-1.5 min-w-[200px]">
+                    <div class="flex items-center justify-between border-b border-slate-700/60 pb-1">
+                        <span class="font-gta text-xs uppercase text-amber-400 tracking-wider">LIBERTY GRID // STREAMING</span>
+                        <span id="stream-indicator" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Dynamic City Streaming Active"></span>
+                    </div>
+                    <div class="text-[11px] text-slate-300 flex justify-between">
+                        <span>Active Sectors:</span>
+                        <span id="stat-chunks" class="font-mono text-amber-300 font-semibold">9</span>
+                    </div>
+                    <div class="text-[11px] text-slate-300 flex justify-between">
+                        <span>Command HQ Integrity:</span>
+                        <span id="stat-hq-hp" class="font-mono text-emerald-400 font-semibold">100%</span>
+                    </div>
+                    <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div id="hq-hp-bar" class="h-full bg-emerald-500 transition-all duration-200" style="width: 100%"></div>
+                    </div>
+                    <div class="text-[10px] text-slate-400 mt-0.5">
+                        WASD: Pan • Wheel: Zoom • R-Drag: Orbit
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right HUD: GTA Cash, Power Grid MW, Wave Countdown & Audio -->
+            <div class="flex flex-col items-end gap-2 pointer-events-auto">
+                <div class="gta-panel rounded-xl px-3.5 py-2.5 flex flex-wrap items-center gap-4 sm:gap-5">
+                    <!-- Cash / Credits -->
+                    <div class="flex flex-col items-end">
+                        <span class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Syndicate Funds</span>
+                        <span id="hud-cash" class="font-gta text-2xl sm:text-3xl font-bold text-emerald-400 leading-none tracking-wide">$1,200</span>
+                    </div>
+
+                    <div class="h-8 w-px bg-slate-700/70"></div>
+
+                    <!-- Power Grid -->
+                    <div class="flex flex-col items-end min-w-[105px]">
+                        <div class="flex items-center gap-1.5">
+                            <span id="power-status-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                            <span class="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Power Grid</span>
+                        </div>
+                        <span id="hud-power" class="font-gta text-lg sm:text-xl font-bold text-amber-300 leading-tight">20 / 10 MW</span>
+                        <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden mt-1">
+                            <div id="power-bar" class="h-full bg-emerald-400 transition-all duration-300" style="width: 50%"></div>
+                        </div>
+                    </div>
+
+                    <div class="h-8 w-px bg-slate-700/70"></div>
+
+                    <!-- Wave Counter & Timer -->
+                    <div class="flex flex-col items-end">
+                        <span class="text-[10px] uppercase tracking-wider text-rose-400 font-bold">Wave <span id="hud-wave">1</span></span>
+                        <span id="hud-wave-timer" class="font-gta text-lg sm:text-xl font-bold text-white leading-tight">00:35</span>
+                        <span id="hud-enemies" class="text-[10px] text-slate-400 font-medium">Hostiles: 0</span>
+                    </div>
+
+                    <!-- Mute & Help Buttons -->
+                    <div class="flex items-center gap-1.5 ml-1">
+                        <button id="btn-wave-now" title="Call Next Wave Early (+$150 Bonus)" class="gta-btn rounded-lg px-2.5 py-1.5 text-[11px] font-gta uppercase text-amber-300 hover:text-amber-200">
+                            Rush Wave
+                        </button>
+                        <button id="btn-mute" title="Toggle Sound" class="gta-btn rounded-lg p-2 text-slate-200">
+                            <svg id="icon-sound-on" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                            <svg id="icon-sound-off" class="w-4 h-4 hidden text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Dynamic Toast / Notification Feed -->
+                <div id="toast-container" class="flex flex-col items-end gap-1.5 pointer-events-none max-w-xs"></div>
+            </div>
+        </div>
+
+        <!-- Bottom Construction & Unit Command Dock -->
+        <div class="flex flex-col items-center gap-2 w-full pointer-events-none">
+            
+            <!-- Active Tool Banner -->
+            <div id="build-hint" class="hidden gta-panel rounded-full px-4 py-1 text-xs font-medium text-amber-300 border-amber-500/40 pointer-events-auto">
+                Click on a valid city grid tile to build • Press <span class="font-bold text-white">ESC</span> or Right-Click to cancel
+            </div>
+
+            <!-- Main Construction & Training Dock -->
+            <div class="gta-panel rounded-2xl p-2 sm:p-2.5 flex flex-wrap items-center justify-center gap-2 pointer-events-auto max-w-full">
+                
+                <!-- 1: Asphalt Road -->
+                <button data-tool="road" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">1</span>
+                    <div class="w-7 h-7 rounded-lg bg-slate-700/80 flex items-center justify-center mb-1 text-amber-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">Road</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$50</span>
+                </button>
+
+                <!-- 2: Power Plant -->
+                <button data-tool="power" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">2</span>
+                    <div class="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center mb-1 text-amber-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">Power Plant</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$250 <span class="text-amber-300">+25MW</span></span>
+                </button>
+
+                <!-- 3: Refinery -->
+                <button data-tool="refinery" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">3</span>
+                    <div class="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center mb-1 text-emerald-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">Refinery</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$400 <span class="text-rose-300">-10MW</span></span>
+                </button>
+
+                <!-- 4: Barracks -->
+                <button data-tool="barracks" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">4</span>
+                    <div class="w-7 h-7 rounded-lg bg-sky-500/20 flex items-center justify-center mb-1 text-sky-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">Barracks</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$350 <span class="text-rose-300">-10MW</span></span>
+                </button>
+
+                <!-- 5: Turret -->
+                <button data-tool="turret" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">5</span>
+                    <div class="w-7 h-7 rounded-lg bg-rose-500/20 flex items-center justify-center mb-1 text-rose-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">Gun Turret</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$200 <span class="text-rose-300">-5MW</span></span>
+                </button>
+
+                <div class="h-10 w-px bg-slate-700/70 mx-0.5 hidden sm:block"></div>
+
+                <!-- 6: Train Collector Truck (Requires Refinery) -->
+                <button id="btn-train-collector" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">6</span>
+                    <div class="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center mb-1 text-amber-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">+Collector</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$200</span>
+                </button>
+
+                <!-- 7: Train Enforcer Squad (Requires Barracks) -->
+                <button id="btn-train-enforcer" class="gta-btn rounded-xl px-3 py-2 flex flex-col items-center min-w-[76px] sm:min-w-[88px] relative">
+                    <span class="absolute top-1 left-1.5 text-[10px] font-mono text-slate-400">7</span>
+                    <div class="w-7 h-7 rounded-lg bg-sky-500/20 flex items-center justify-center mb-1 text-sky-300">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    </div>
+                    <span class="text-[11px] font-bold text-slate-100">+Enforcer</span>
+                    <span class="text-[10px] font-mono text-emerald-400">$150</span>
+                </button>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- GTA IV "WASTED / BASE OVERRUN" Lose Screen Modal -->
+    <div id="lose-screen" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+        <div class="max-w-lg w-full gta-panel rounded-2xl p-8 border-rose-500/40 shadow-2xl">
+            <div class="text-xs font-bold tracking-[0.3em] text-rose-400 uppercase mb-2">Syndicate Territory Lost</div>
+            <h1 class="font-gta text-6xl sm:text-7xl font-bold text-rose-600 wasted-title uppercase mb-3">WASTED</h1>
+            <p class="text-slate-300 text-sm mb-6">Your Command HQ was overrun by rival Liberty City syndicates. The grid has gone dark.</p>
+            
+            <div class="grid grid-cols-3 gap-3 bg-slate-900/90 border border-slate-800 rounded-xl p-4 mb-7">
+                <div>
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400">Waves Survived</div>
+                    <div id="lose-waves" class="font-gta text-2xl font-bold text-amber-400">0</div>
+                </div>
+                <div>
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400">Hostiles Neutralized</div>
+                    <div id="lose-kills" class="font-gta text-2xl font-bold text-emerald-400">0</div>
+                </div>
+                <div>
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400">Structures Built</div>
+                    <div id="lose-built" class="font-gta text-2xl font-bold text-sky-400">0</div>
+                </div>
+            </div>
+
+            <button id="btn-restart" class="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-gta text-xl font-bold uppercase tracking-wider shadow-lg shadow-amber-500/25 transition-all cursor-pointer">
+                Restart Campaign
+            </button>
+        </div>
+    </div>
+
+    <script>
+    /**
+     * LIBERTY GRID // GTA IV-Inspired 3D Urban RTS & Wave Defense
+     * Single-file WebGL architecture using Three.js r128 & Web Audio API.
+     */
+
+    // =========================================================================
+    // 1. AUDIO SYNTHESIZER (Web Audio API - Zero external assets required)
+    // =========================================================================
+    class SoundEngine {
+        constructor() {
+            this.ctx = null;
+            this.muted = false;
+        }
+        init() {
+            if (!this.ctx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+            }
+            if (this.ctx.state === 'suspended') {
+                this.ctx.resume();
+            }
+        }
+        toggleMute() {
+            this.muted = !this.muted;
+            return this.muted;
+        }
+        playBuild() {
+            if (this.muted) return;
+            this.init();
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(140, now);
+            osc.frequency.exponentialRampToValueAtTime(55, now + 0.18);
+            gain.gain.setValueAtTime(0.25, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.19);
+        }
+        playCash() {
+            if (this.muted) return;
+            this.init();
+            const now = this.ctx.currentTime;
+            [880, 1318.5].forEach((freq, idx) => {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + idx * 0.07);
+                gain.gain.setValueAtTime(0.14, now + idx * 0.07);
+                gain.gain.exponentialRampToValueAtTime(0.005, now + idx * 0.07 + 0.22);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now + idx * 0.07);
+                osc.stop(now + idx * 0.07 + 0.23);
+            });
+        }
+        playShot() {
+            if (this.muted) return;
+            this.init();
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(420, now);
+            osc.frequency.exponentialRampToValueAtTime(75, now + 0.08);
+            gain.gain.setValueAtTime(0.09, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.09);
+        }
+        playExplosion() {
+            if (this.muted) return;
+            this.init();
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(95, now);
+            osc.frequency.exponentialRampToValueAtTime(24, now + 0.35);
+            gain.gain.setValueAtTime(0.22, now);
+            gain.gain.exponentialRampToValueAtTime(0.005, now + 0.35);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.36);
+        }
+        playWaveSiren() {
+            if (this.muted) return;
+            this.init();
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(220, now);
+            osc.frequency.linearRampToValueAtTime(340, now + 0.45);
+            osc.frequency.linearRampToValueAtTime(190, now + 0.95);
+            gain.gain.setValueAtTime(0.14, now);
+            gain.gain.exponentialRampToValueAtTime(0.005, now + 0.98);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 1.0);
+        }
+        playError() {
+            if (this.muted) return;
+            this.init();
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(130, now);
+            osc.frequency.setValueAtTime(100, now + 0.09);
+            gain.gain.setValueAtTime(0.14, now);
+            gain.gain.exponentialRampToValueAtTime(0.005, now + 0.18);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.19);
+        }
+    }
+
+    const sfx = new SoundEngine();
+
+    // =========================================================================
+    // 2. GAME CONFIGURATION & CONSTANTS
+    // =========================================================================
+    const TILE_SIZE = 10;          // World units per grid cell
+    const CHUNK_SIZE = 8;          // 8x8 tiles per streamed urban sector (80x80 units)
+    const STREAM_RADIUS = 1;       // 3x3 active chunks around camera focus (24x24 tiles)
+
+    const COSTS = {
+        road: 50,
+        power: 250,
+        refinery: 400,
+        barracks: 350,
+        turret: 200,
+        collector: 200,
+        enforcer: 150
+    };
+
+    const POWER_DELTA = {
+        hq: 15,
+        power: 25,
+        refinery: -10,
+        barracks: -10,
+        turret: -5
+    };
+
+    // =========================================================================
+    // 3. GLOBAL GAME STATE
+    // =========================================================================
+    const state = {
+        cash: 1200,
+        powerProduced: 15,
+        powerUsed: 0,
+        wave: 1,
+        waveTimer: 32,
+        waveActive: false,
+        gameOver: false,
+        kills: 0,
+        buildingsConstructed: 0,
+        activeTool: null, // 'road' | 'power' | 'refinery' | 'barracks' | 'turret' | null
+        hoverGrid: { gx: 0, gz: 0, valid: false },
+
+        // Grid Maps (key = "gx,gz")
+        roads: new Set(),
+        buildings: new Map(),      // "gx,gz" -> Building Object
+        scrapNodes: new Map(),     // "gx,gz" -> Scrap Node Object
+        streamedChunks: new Map(), // "cx,cz" -> THREE.Group (procedural city block scenery)
+        cityPropsBlocked: new Set(), // Tiles occupied by background streamed skyscrapers (can be demolished or built around)
+
+        // Entities
+        collectors: [],
+        defenders: [],
+        enemies: [],
+        projectiles: [],
+        particles: [],
+        streetlights: []
+    };
+
+    // =========================================================================
+    // 4. THREE.JS SCENE, LIGHTING & ATMOSPHERIC LIBERTY CITY MOOD
+    // =========================================================================
+    const container = document.getElementById('game-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x161b22);
+    scene.fog = new THREE.FogExp2(0x161b22, 0.0052);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 500);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    container.appendChild(renderer.domElement);
+
+    // Overcast Liberty City Lighting
+    const hemiLight = new THREE.HemisphereLight(0x7c93b0, 0x1e2229, 0.72);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xcbd5e1, 0.85);
+    dirLight.position.set(85, 140, 65);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.near = 20;
+    dirLight.shadow.camera.far = 320;
+    const d = 120;
+    dirLight.shadow.camera.left = -d;
+    dirLight.shadow.camera.right = d;
+    dirLight.shadow.camera.top = d;
+    dirLight.shadow.camera.bottom = -d;
+    scene.add(dirLight);
+
+    // Infinite Ground Plane (Dark Urban Concrete / Asphalt Base)
+    const groundGeo = new THREE.PlaneGeometry(2400, 2400);
+    const groundMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1e24,
+        roughness: 0.92,
+        metalness: 0.08
+    });
+    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.receiveShadow = true;
+    scene.add(groundMesh);
+
+    // Subtle Grid Overlay around camera
+    const gridHelper = new THREE.GridHelper(320, 32, 0x334155, 0x222933);
+    gridHelper.position.y = 0.03;
+    scene.add(gridHelper);
+
+    // Groups for clean organization
+    const worldChunkGroup = new THREE.Group();
+    const roadGroup = new THREE.Group();
+    const buildingGroup = new THREE.Group();
+    const unitGroup = new THREE.Group();
+    const fxGroup = new THREE.Group();
+    scene.add(worldChunkGroup, roadGroup, buildingGroup, unitGroup, fxGroup);
+
+    // Shared Materials
+    const MATS = {
+        asphalt: new THREE.MeshStandardMaterial({ color: 0x242931, roughness: 0.85 }),
+        sidewalk: new THREE.MeshStandardMaterial({ color: 0x3b424e, roughness: 0.9 }),
+        yellowLine: new THREE.MeshBasicMaterial({ color: 0xf59e0b }),
+        whiteLine: new THREE.MeshBasicMaterial({ color: 0xcbd5e1 }),
+        hqWall: new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.6, metalness: 0.3 }),
+        hqAccent: new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0x78350f, roughness: 0.4 }),
+        powerWall: new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.5 }),
+        powerGlow: new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.8 }),
+        refineryWall: new THREE.MeshStandardMaterial({ color: 0x1e3a2f, roughness: 0.6 }),
+        refineryAccent: new THREE.MeshStandardMaterial({ color: 0x10b981, emissive: 0x047857 }),
+        barracksWall: new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.6 }),
+        barracksAccent: new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x1d4ed8 }),
+        turretBase: new THREE.MeshStandardMaterial({ color: 0x3f3f46, metalness: 0.6, roughness: 0.4 }),
+        turretHead: new THREE.MeshStandardMaterial({ color: 0xe11d48, emissive: 0x881337 }),
+        scrap: new THREE.MeshStandardMaterial({ color: 0xd97706, emissive: 0x78350f, roughness: 0.5, metalness: 0.5 }),
+        ghostValid: new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.48 }),
+        ghostInvalid: new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.48 })
+    };
+
+    // Ghost Placement Preview Mesh
+    const ghostMesh = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.92, 4, TILE_SIZE * 0.92), MATS.ghostValid);
+    ghostMesh.visible = false;
+    scene.add(ghostMesh);
+
+    // =========================================================================
+    // 5. CAMERA RIG (RTS Tactical Orbit + Pan + Zoom)
+    // =========================================================================
+    const camRig = {
+        target: new THREE.Vector3(0, 0, 0),
+        distance: 88,
+        angle: Math.PI / 4,      // Horizontal orbit angle
+        pitch: 0.82,             // Elevation angle
+        isOrbiting: false,
+        lastMouse: { x: 0, y: 0 },
+        keys: {}
+    };
+
+    function updateCameraTransform() {
+        const x = camRig.target.x + camRig.distance * Math.sin(camRig.angle) * Math.cos(camRig.pitch);
+        const z = camRig.target.z + camRig.distance * Math.cos(camRig.angle) * Math.cos(camRig.pitch);
+        const y = camRig.target.y + camRig.distance * Math.sin(camRig.pitch);
+        camera.position.set(x, y, z);
+        camera.lookAt(camRig.target);
+
+        // Keep grid helper centered on snapped tile near camera target
+        gridHelper.position.x = Math.round(camRig.target.x / TILE_SIZE) * TILE_SIZE;
+        gridHelper.position.z = Math.round(camRig.target.z / TILE_SIZE) * TILE_SIZE;
+    }
+
+    // =========================================================================
+    // 6. COORDINATE HELPERS & UI NOTIFICATIONS
+    // =========================================================================
+    function gridKey(gx, gz) {
+        return `${gx},${gz}`;
+    }
+
+    function gridToWorld(gx, gz) {
+        return new THREE.Vector3(gx * TILE_SIZE, 0, gz * TILE_SIZE);
+    }
+
+    function worldToGrid(wx, wz) {
+        return {
+            gx: Math.round(wx / TILE_SIZE),
+            gz: Math.round(wz / TILE_SIZE)
+        };
+    }
+
+    function showToast(msg, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const el = document.createElement('div');
+        const colors = {
+            info: 'border-slate-600 text-slate-200',
+            success: 'border-emerald-500/60 text-emerald-300',
+            warn: 'border-amber-500/60 text-amber-300',
+            danger: 'border-rose-500/70 text-rose-300'
+        };
+        el.className = `gta-panel rounded-lg px-3 py-1.5 text-xs font-medium shadow-lg transition-all duration-300 ${colors[type] || colors.info}`;
+        el.textContent = msg;
+        container.appendChild(el);
+        setTimeout(() => {
+            el.style.opacity = '0';
+            el.style.transform = 'translateX(12px)';
+            setTimeout(() => el.remove(), 300);
+        }, 2800);
+    }
+
+    // =========================================================================
+    // 7. GTA IV DYNAMIC URBAN CHUNK STREAMING ENGINE
+    // =========================================================================
+    function pseudoRandom(x, z) {
+        const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453123;
+        return n - Math.floor(n);
+    }
+
+    function updateCityStreaming() {
+        const centerGx = Math.round(camRig.target.x / TILE_SIZE);
+        const centerGz = Math.round(camRig.target.z / TILE_SIZE);
+        const centerCx = Math.floor(centerGx / CHUNK_SIZE);
+        const centerCz = Math.floor(centerGz / CHUNK_SIZE);
+
+        const neededChunks = new Set();
+
+        for (let dx = -STREAM_RADIUS; dx <= STREAM_RADIUS; dx++) {
+            for (let dz = -STREAM_RADIUS; dz <= STREAM_RADIUS; dz++) {
+                const cx = centerCx + dx;
+                const cz = centerCz + dz;
+                const key = `${cx},${cz}`;
+                neededChunks.add(key);
+
+                if (!state.streamedChunks.has(key)) {
+                    const chunkGroup = generateUrbanChunk(cx, cz);
+                    worldChunkGroup.add(chunkGroup);
+                    state.streamedChunks.set(key, chunkGroup);
+                }
+            }
+        }
+
+        // Unload distant chunks to maintain silky 60fps streaming performance
+        for (const [key, group] of state.streamedChunks.entries()) {
+            if (!neededChunks.has(key)) {
+                worldChunkGroup.remove(group);
+                state.streamedChunks.delete(key);
+            }
+        }
+
+        document.getElementById('stat-chunks').textContent = state.streamedChunks.size;
+    }
+
+    function generateUrbanChunk(cx, cz) {
+        const group = new THREE.Group();
+        const startGx = cx * CHUNK_SIZE;
+        const startGz = cz * CHUNK_SIZE;
+
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+                const gx = startGx + lx;
+                const gz = startGz + lz;
+                const k = gridKey(gx, gz);
+
+                // Keep central starter compound clear (gx, gz in [-4..4])
+                if (Math.abs(gx) <= 4 && Math.abs(gz) <= 4) continue;
+
+                // Arterial city avenues every 8 tiles
+                const isAvenueX = (gx % 8 === 0);
+                const isAvenueZ = (gz % 8 === 0);
+
+                if (isAvenueX || isAvenueZ) {
+                    // Auto-stream main avenues into playable road network
+                    if (!state.roads.has(k) && !state.buildings.has(k)) {
+                        placeRoadTile(gx, gz, true);
+                    }
+                    continue;
+                }
+
+                // Skip if player already built here or scrap node exists
+                if (state.roads.has(k) || state.buildings.has(k) || state.scrapNodes.has(k)) continue;
+
+                const r = pseudoRandom(gx, gz);
+
+                // Spawn Salvage / Scrap Yards periodically for Collectors
+                if (r > 0.945 && (Math.abs(gx) > 5 || Math.abs(gz) > 5)) {
+                    createScrapNode(gx, gz);
+                    continue;
+                }
+
+                // Spawn gritty Liberty City brick/concrete tenements & skyscrapers on outer blocks
+                if (r < 0.34 && (Math.abs(gx) > 5 || Math.abs(gz) > 5)) {
+                    const height = 10 + Math.floor(pseudoRandom(gx + 3, gz - 7) * 26);
+                    const shade = 0x222730 + Math.floor(pseudoRandom(gx, gz + 1) * 0x101014);
+                    const bGeo = new THREE.BoxGeometry(TILE_SIZE * 0.86, height, TILE_SIZE * 0.86);
+                    const bMat = new THREE.MeshStandardMaterial({ color: shade, roughness: 0.82 });
+                    const mesh = new THREE.Mesh(bGeo, bMat);
+                    mesh.position.set(gx * TILE_SIZE, height / 2, gz * TILE_SIZE);
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                    group.add(mesh);
+
+                    // Lit apartment window strips (GTA IV night/overcast vibe)
+                    if (height > 15) {
+                        const winGeo = new THREE.BoxGeometry(TILE_SIZE * 0.88, 0.5, TILE_SIZE * 0.88);
+                        const winMat = new THREE.MeshBasicMaterial({ color: r > 0.17 ? 0xfbbf24 : 0x38bdf8 });
+                        const winMesh = new THREE.Mesh(winGeo, winMat);
+                        winMesh.position.set(gx * TILE_SIZE, height * 0.72, gz * TILE_SIZE);
+                        group.add(winMesh);
+                    }
+
+                    state.cityPropsBlocked.add(k);
+                }
+            }
+        }
+        return group;
+    }
+
+    // =========================================================================
+    // 8. ROADS, SCRAP NODES & RTS BUILDINGS
+    // =========================================================================
+    function placeRoadTile(gx, gz, silent = false) {
+        const k = gridKey(gx, gz);
+        if (state.roads.has(k) || state.buildings.has(k)) return false;
+
+        // Clear any background scenery prop on this tile so player can build roads anywhere
+        state.cityPropsBlocked.delete(k);
+        state.roads.add(k);
+
+        const pos = gridToWorld(gx, gz);
+        const tileGroup = new THREE.Group();
+        tileGroup.position.copy(pos);
+
+        // Asphalt slab
+        const slab = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE, 0.25, TILE_SIZE), MATS.asphalt);
+        slab.position.y = 0.125;
+        slab.receiveShadow = true;
+        tileGroup.add(slab);
+
+        // Double yellow center line markings
+        const stripe1 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, TILE_SIZE * 0.75), MATS.yellowLine);
+        stripe1.position.set(-0.22, 0.14, 0);
+        const stripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, TILE_SIZE * 0.75), MATS.yellowLine);
+        stripe2.position.set(0.22, 0.14, 0);
+        tileGroup.add(stripe1, stripe2);
+
+        // Occasional GTA IV Sodium-Vapor Streetlight on intersections
+        if (Math.abs(gx) % 4 === 0 && Math.abs(gz) % 4 === 0) {
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 6.5, 6), MATS.turretBase);
+            pole.position.set(TILE_SIZE * 0.42, 3.25, TILE_SIZE * 0.42);
+            tileGroup.add(pole);
+
+            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
+            const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 8), bulbMat);
+            bulb.position.set(TILE_SIZE * 0.32, 6.4, TILE_SIZE * 0.32);
+            tileGroup.add(bulb);
+            state.streetlights.push(bulbMat);
+        }
+
+        roadGroup.add(tileGroup);
+        if (!silent) {
+            sfx.playBuild();
+            state.buildingsConstructed++;
+        }
+        return true;
+    }
+
+    function createScrapNode(gx, gz) {
+        const k = gridKey(gx, gz);
+        if (state.scrapNodes.has(k) || state.buildings.has(k) || state.roads.has(k)) return;
+
+        const pos = gridToWorld(gx, gz);
+        const group = new THREE.Group();
+        group.position.copy(pos);
+
+        // Pile of golden-amber salvage crates & scrap metal
+        for (let i = 0; i < 4; i++) {
+            const size = 2.0 + (i % 2) * 0.9;
+            const crate = new THREE.Mesh(new THREE.BoxGeometry(size, size * 0.85, size), MATS.scrap);
+            crate.position.set((i - 1.5) * 1.4, size * 0.42, ((i % 2) - 0.5) * 1.8);
+            crate.rotation.y = i * 0.5;
+            crate.castShadow = true;
+            group.add(crate);
+        }
+
+        buildingGroup.add(group);
+        state.scrapNodes.set(k, { gx, gz, pos, mesh: group, amount: 999999 });
+    }
+
+    function placeBuilding(type, gx, gz, isFree = false) {
+        const k = gridKey(gx, gz);
+        if (state.buildings.has(k) || state.roads.has(k) || state.scrapNodes.has(k)) return false;
+
+        const cost = isFree ? 0 : (COSTS[type] || 0);
+        if (state.cash < cost) {
+            sfx.playError();
+            showToast(`Insufficient funds! Need $${cost}`, 'danger');
+            return false;
+        }
+
+        state.cash -= cost;
+        state.cityPropsBlocked.delete(k);
+
+        const pos = gridToWorld(gx, gz);
+        const group = new THREE.Group();
+        group.position.copy(pos);
+
+        let maxHp = 400;
+        let turretHead = null;
+
+        if (type === 'hq') {
+            maxHp = 1500;
+            const base = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.92, 9, TILE_SIZE * 0.92), MATS.hqWall);
+            base.position.y = 4.5;
+            base.castShadow = true;
+            base.receiveShadow = true;
+            const tower = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.52, 15, TILE_SIZE * 0.52), MATS.hqWall);
+            tower.position.y = 7.5;
+            tower.castShadow = true;
+            const beacon = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.56, 1.2, TILE_SIZE * 0.56), MATS.hqAccent);
+            beacon.position.y = 14.2;
+            group.add(base, tower, beacon);
+        } else if (type === 'power') {
+            maxHp = 450;
+            const hall = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.85, 5.5, TILE_SIZE * 0.85), MATS.powerWall);
+            hall.position.y = 2.75;
+            hall.castShadow = true;
+            const stack1 = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 11, 12), MATS.powerWall);
+            stack1.position.set(-2, 5.5, -2);
+            const stack2 = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 11, 12), MATS.powerWall);
+            stack2.position.set(2, 5.5, 2);
+            const core = new THREE.Mesh(new THREE.SphereGeometry(1.6, 12, 12), MATS.powerGlow);
+            core.position.set(0, 6.2, 0);
+            group.add(hall, stack1, stack2, core);
+        } else if (type === 'refinery') {
+            maxHp = 600;
+            const main = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.88, 6.5, TILE_SIZE * 0.88), MATS.refineryWall);
+            main.position.y = 3.25;
+            main.castShadow = true;
+            const silo = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 9.5, 14), MATS.refineryAccent);
+            silo.position.set(2.1, 4.75, -2.1);
+            group.add(main, silo);
+        } else if (type === 'barracks') {
+            maxHp = 550;
+            const bunker = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.88, 5, TILE_SIZE * 0.88), MATS.barracksWall);
+            bunker.position.y = 2.5;
+            bunker.castShadow = true;
+            const roof = new THREE.Mesh(new THREE.BoxGeometry(TILE_SIZE * 0.72, 1.2, TILE_SIZE * 0.72), MATS.barracksAccent);
+            roof.position.y = 5.4;
+            group.add(bunker, roof);
+        } else if (type === 'turret') {
+            maxHp = 350;
+            const ped = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 3.0, 3.5, 8), MATS.turretBase);
+            ped.position.y = 1.75;
+            ped.castShadow = true;
+            turretHead = new THREE.Group();
+            turretHead.position.y = 4.2;
+            const headBox = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.8, 3.2), MATS.turretHead);
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 3.6, 8), MATS.turretBase);
+            barrel.rotation.x = Math.PI / 2;
+            barrel.position.z = 2.2;
+            turretHead.add(headBox, barrel);
+            group.add(ped, turretHead);
+        }
+
+        // Health Bar Sprite above building
+        const hpBar = createHealthBarMesh();
+        hpBar.position.y = type === 'hq' ? 17.5 : 10.5;
+        group.add(hpBar);
+
+        buildingGroup.add(group);
+
+        const buildingObj = {
+            id: Math.random().toString(36).substr(2, 9),
+            type,
+            gx,
+            gz,
+            pos,
+            mesh: group,
+            turretHead,
+            hpBar,
+            hp: maxHp,
+            maxHp,
+            cooldown: 0
+        };
+
+        state.buildings.set(k, buildingObj);
+        recalculatePowerGrid();
+
+        if (!isFree) {
+            sfx.playBuild();
+            state.buildingsConstructed++;
+            showToast(`${type.toUpperCase()} constructed (-$${cost})`, 'success');
+
+            // Refinery automatically spawns 1 free Collector Truck!
+            if (type === 'refinery') {
+                spawnCollector(buildingObj);
+            }
+            // Barracks automatically spawns 1 free Enforcer Squad!
+            if (type === 'barracks') {
+                spawnEnforcer(buildingObj);
+            }
+        }
+        return buildingObj;
+    }
+
+    function createHealthBarMesh() {
+        const group = new THREE.Group();
+        const bg = new THREE.Mesh(
+            new THREE.PlaneGeometry(5.5, 0.65),
+            new THREE.MeshBasicMaterial({ color: 0x0f172a, side: THREE.DoubleSide })
+        );
+        const fg = new THREE.Mesh(
+            new THREE.PlaneGeometry(5.3, 0.48),
+            new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide })
+        );
+        fg.position.z = 0.02;
+        group.add(bg, fg);
+        group.userData.fg = fg;
+        return group;
+    }
+
+    function updateHealthBar(entity) {
+        if (!entity.hpBar) return;
+        entity.hpBar.lookAt(camera.position);
+        const pct = Math.max(0, entity.hp / entity.maxHp);
+        const fg = entity.hpBar.userData.fg;
+        fg.scale.x = Math.max(0.001, pct);
+        fg.position.x = -(1 - pct) * 2.65;
+        fg.material.color.setHex(pct > 0.5 ? 0x10b981 : pct > 0.25 ? 0xf59e0b : 0xef4444);
+    }
+
+    function recalculatePowerGrid() {
+        let produced = 0;
+        let used = 0;
+        for (const b of state.buildings.values()) {
+            const delta = POWER_DELTA[b.type] || 0;
+            if (delta > 0) produced += delta;
+            else used += Math.abs(delta);
+        }
+        state.powerProduced = produced;
+        state.powerUsed = used;
+
+        const lowPower = state.powerUsed > state.powerProduced;
+        state.streetlights.forEach(mat => {
+            mat.color.setHex(lowPower ? 0x475569 : 0xfbbf24);
+        });
+    }
+
+    function getPowerEfficiency() {
+        if (state.powerProduced >= state.powerUsed) return 1.0;
+        return Math.max(0.35, state.powerProduced / Math.max(1, state.powerUsed));
+    }
+
+    // =========================================================================
+    // 9. AUTONOMOUS COLLECTORS, ENFORCERS & WAVE ENEMIES
+    // =========================================================================
+    function findNearestAdjacentRoad(gx, gz) {
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]];
+        for (const [dx, dz] of dirs) {
+            if (state.roads.has(gridKey(gx + dx, gz + dz))) {
+                return gridToWorld(gx + dx, gz + dz);
+            }
+        }
+        return gridToWorld(gx, gz + 1);
+    }
+
+    function spawnCollector(refinery = null) {
+        if (!refinery) {
+            for (const b of state.buildings.values()) {
+                if (b.type === 'refinery') { refinery = b; break; }
+            }
+        }
+        if (!refinery) {
+            sfx.playError();
+            showToast('Build a Refinery first to deploy Collectors!', 'warn');
+            return false;
+        }
+
+        const spawnPos = findNearestAdjacentRoad(refinery.gx, refinery.gz);
+        const mesh = new THREE.Group();
+
+        // Armored Salvage Truck Chassis
+        const body = new THREE.Mesh(
+            new THREE.BoxGeometry(2.6, 2.0, 4.6),
+            new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4, metalness: 0.3 })
+        );
+        body.position.y = 1.2;
+        body.castShadow = true;
+
+        const cab = new THREE.Mesh(
+            new THREE.BoxGeometry(2.4, 2.3, 1.6),
+            new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 })
+        );
+        cab.position.set(0, 1.35, 1.6);
+        mesh.add(body, cab);
+        mesh.position.copy(spawnPos);
+        unitGroup.add(mesh);
+
+        state.collectors.push({
+            mesh,
+            pos: spawnPos.clone(),
+            state: 'to_scrap', // 'to_scrap' | 'mining' | 'to_refinery'
+            cargo: 0,
+            maxCargo: 150,
+            mineTimer: 0,
+            targetRefinery: refinery,
+            targetScrap: null
+        });
+        return true;
+    }
+
+    function spawnEnforcer(barracks = null) {
+        if (!barracks) {
+            for (const b of state.buildings.values()) {
+                if (b.type === 'barracks') { barracks = b; break; }
+            }
+        }
+        if (!barracks) {
+            sfx.playError();
+            showToast('Build a Barracks first to train Enforcers!', 'warn');
+            return false;
+        }
+
+        const spawnPos = findNearestAdjacentRoad(barracks.gx, barracks.gz);
+        const mesh = new THREE.Group();
+
+        // Tactical SWAT/Syndicate Patrol Cruiser
+        const chassis = new THREE.Mesh(
+            new THREE.BoxGeometry(2.4, 1.5, 4.2),
+            new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.4, metalness: 0.4 })
+        );
+        chassis.position.y = 0.95;
+        chassis.castShadow = true;
+
+        const lightBar = new THREE.Mesh(
+            new THREE.BoxGeometry(1.4, 0.3, 0.4),
+            new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+        );
+        lightBar.position.set(0, 1.85, 0.2);
+
+        const hpBar = createHealthBarMesh();
+        hpBar.scale.set(0.65, 0.65, 0.65);
+        hpBar.position.y = 3.2;
+
+        mesh.add(chassis, lightBar, hpBar);
+        mesh.position.copy(spawnPos);
+        unitGroup.add(mesh);
+
+        state.defenders.push({
+            mesh,
+            hpBar,
+            pos: spawnPos.clone(),
+            hp: 220,
+            maxHp: 220,
+            speed: 18,
+            range: 26,
+            damage: 24,
+            cooldown: 0,
+            patrolAngle: Math.random() * Math.PI * 2
+        });
+        return true;
+    }
+
+    // =========================================================================
+    // 10. WAVE SPAWNER & "WAVE CAL LOSE FUNCTION"
+    // =========================================================================
+    function startNextWave() {
+        state.waveActive = true;
+        sfx.playWaveSiren();
+        showToast(`WAVE ${state.wave} INCOMING! Rival Syndicate attacking!`, 'danger');
+
+        const enemyCount = 4 + state.wave * 3;
+        const hpScale = 1 + (state.wave - 1) * 0.28;
+        const dmgScale = 1 + (state.wave - 1) * 0.18;
+
+        for (let i = 0; i < enemyCount; i++) {
+            // Spawn around outer highway perimeter
+            const angle = (i / enemyCount) * Math.PI * 2 + (Math.random() * 0.35);
+            const dist = 105 + Math.random() * 25;
+            const spawnPos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+
+            const isHeavy = (i % 4 === 3 && state.wave >= 2);
+            const mesh = new THREE.Group();
+
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(isHeavy ? 3.2 : 2.3, isHeavy ? 2.2 : 1.5, isHeavy ? 5.2 : 4.0),
+                new THREE.MeshStandardMaterial({
+                    color: isHeavy ? 0x991b1b : 0xdc2626,
+                    roughness: 0.45,
+                    metalness: 0.35
+                })
+            );
+            body.position.y = isHeavy ? 1.2 : 0.9;
+            body.castShadow = true;
+
+            const hpBar = createHealthBarMesh();
+            hpBar.scale.set(0.7, 0.7, 0.7);
+            hpBar.position.y = isHeavy ? 3.8 : 3.0;
+
+            mesh.add(body, hpBar);
+            mesh.position.copy(spawnPos);
+            unitGroup.add(mesh);
+
+            const maxHp = Math.round((isHeavy ? 360 : 140) * hpScale);
+            state.enemies.push({
+                mesh,
+                hpBar,
+                pos: spawnPos,
+                hp: maxHp,
+                maxHp,
+                speed: isHeavy ? 10.5 : 14.5,
+                range: 20,
+                damage: Math.round((isHeavy ? 28 : 14) * dmgScale),
+                cooldown: 0,
+                reward: isHeavy ? 85 : 40
+            });
+        }
+    }
+
+    /**
+     * WAVE CAL LOSE FUNCTION
+     * Evaluates wave progression, HQ survival, and triggers the GTA IV "WASTED" lose state.
+     */
+    function evaluateWaveAndLoseCondition(dt) {
+        if (state.gameOver) return;
+
+        // 1. Check if Command HQ still exists and has HP > 0
+        let hq = null;
+        for (const b of state.buildings.values()) {
+            if (b.type === 'hq') {
+                hq = b;
+                break;
+            }
+        }
+
+        const hqPct = hq ? Math.max(0, Math.round((hq.hp / hq.maxHp) * 100)) : 0;
+        document.getElementById('stat-hq-hp').textContent = `${hqPct}%`;
+        document.getElementById('hq-hp-bar').style.width = `${hqPct}%`;
+
+        if (!hq || hq.hp <= 0 || state.buildings.size === 0) {
+            triggerLoseState();
+            return;
+        }
+
+        // 2. Wave Timer & Escalation Calculation
+        if (!state.waveActive) {
+            state.waveTimer -= dt;
+            if (state.waveTimer <= 0) {
+                startNextWave();
+            }
+        } else {
+            // Check if all enemies in current wave are eliminated
+            if (state.enemies.length === 0) {
+                state.waveActive = false;
+                const clearBonus = 150 + state.wave * 50;
+                state.cash += clearBonus;
+                sfx.playCash();
+                showToast(`Wave ${state.wave} Cleared! +$${clearBonus} Syndicate Bonus`, 'success');
+                state.wave++;
+                state.waveTimer = Math.max(18, 34 - state.wave);
+            }
+        }
+    }
+
+    function triggerLoseState() {
+        if (state.gameOver) return;
+        state.gameOver = true;
+        sfx.playExplosion();
+
+        document.getElementById('lose-waves').textContent = Math.max(0, state.wave - 1);
+        document.getElementById('lose-kills').textContent = state.kills;
+        document.getElementById('lose-built').textContent = state.buildingsConstructed;
+        document.getElementById('lose-screen').classList.remove('hidden');
+    }
+
+    // =========================================================================
+    // 11. COMBAT, PROJECTILES & PARTICLES
+    // =========================================================================
+    function fireTracer(fromPos, toPos, colorHex = 0xfbbf24) {
+        const geo = new THREE.SphereGeometry(0.32, 6, 6);
+        const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(fromPos).add(new THREE.Vector3(0, 2.2, 0));
+        fxGroup.add(mesh);
+
+        state.projectiles.push({
+            mesh,
+            start: mesh.position.clone(),
+            end: toPos.clone().add(new THREE.Vector3(0, 1.5, 0)),
+            progress: 0
+        });
+    }
+
+    function spawnExplosion(pos, colorHex = 0xf97316) {
+        sfx.playExplosion();
+        for (let i = 0; i < 10; i++) {
+            const p = new THREE.Mesh(
+                new THREE.BoxGeometry(0.7, 0.7, 0.7),
+                new THREE.MeshBasicMaterial({ color: colorHex })
+            );
+            p.position.copy(pos).add(new THREE.Vector3(0, 1.5, 0));
+            fxGroup.add(p);
+            state.particles.push({
+                mesh: p,
+                vel: new THREE.Vector3(
+                    (Math.random() - 0.5) * 18,
+                    6 + Math.random() * 14,
+                    (Math.random() - 0.5) * 18
+                ),
+                life: 0.65
+            });
+        }
+    }
+
+    // =========================================================================
+    // 12. SIMULATION STEP (Collectors, Turrets, Squads, Enemies)
+    // =========================================================================
+    function updateSimulation(dt) {
+        if (state.gameOver) return;
+
+        const powerEff = getPowerEfficiency();
+
+        // --- A. Autonomous Collectors ---
+        for (const col of state.collectors) {
+            // Find nearest scrap node if needed
+            if (!col.targetScrap || !state.scrapNodes.has(gridKey(col.targetScrap.gx, col.targetScrap.gz))) {
+                let best = null;
+                let bestDist = Infinity;
+                for (const s of state.scrapNodes.values()) {
+                    const d = col.pos.distanceTo(s.pos);
+                    if (d < bestDist) { bestDist = d; best = s; }
+                }
+                col.targetScrap = best;
+            }
+
+            // Find nearest refinery if needed
+            if (!col.targetRefinery || !state.buildings.has(gridKey(col.targetRefinery.gx, col.targetRefinery.gz))) {
+                let bestRef = null;
+                let bestDist = Infinity;
+                for (const b of state.buildings.values()) {
+                    if (b.type === 'refinery' || b.type === 'hq') {
+                        const d = col.pos.distanceTo(b.pos);
+                        if (d < bestDist) { bestDist = d; bestRef = b; }
+                    }
+                }
+                col.targetRefinery = bestRef;
+            }
+
+            // Road speed bonus! Collectors move 55% faster when driving on player asphalt roads
+            const currentGrid = worldToGrid(col.pos.x, col.pos.z);
+            const onRoad = state.roads.has(gridKey(currentGrid.gx, currentGrid.gz));
+            const moveSpeed = (onRoad ? 21 : 13.5) * (0.6 + 0.4 * powerEff);
+
+            if (col.state === 'to_scrap' && col.targetScrap) {
+                const dist = col.pos.distanceTo(col.targetScrap.pos);
+                if (dist > 4.5) {
+                    const dir = col.targetScrap.pos.clone().sub(col.pos).normalize();
+                    col.pos.addScaledVector(dir, moveSpeed * dt);
+                    col.mesh.position.copy(col.pos);
+                    col.mesh.lookAt(col.targetScrap.pos);
+                } else {
+                    col.state = 'mining';
+                    col.mineTimer = 1.6;
+                }
+            } else if (col.state === 'mining') {
+                col.mineTimer -= dt * powerEff;
+                if (col.mineTimer <= 0) {
+                    col.cargo = col.maxCargo;
+                    col.state = 'to_refinery';
+                }
+            } else if (col.state === 'to_refinery' && col.targetRefinery) {
+                const dist = col.pos.distanceTo(col.targetRefinery.pos);
+                if (dist > 5.5) {
+                    const dir = col.targetRefinery.pos.clone().sub(col.pos).normalize();
+                    col.pos.addScaledVector(dir, moveSpeed * dt);
+                    col.mesh.position.copy(col.pos);
+                    col.mesh.lookAt(col.targetRefinery.pos);
+                } else {
+                    state.cash += col.cargo;
+                    sfx.playCash();
+                    col.cargo = 0;
+                    col.state = 'to_scrap';
+                }
+            }
+        }
+
+        // --- B. Defense Turrets ---
+        for (const b of state.buildings.values()) {
+            updateHealthBar(b);
+            if (b.type === 'turret') {
+                b.cooldown -= dt * powerEff;
+                let nearestEnemy = null;
+                let minDist = 38;
+                for (const e of state.enemies) {
+                    const d = b.pos.distanceTo(e.pos);
+                    if (d < minDist) { minDist = d; nearestEnemy = e; }
+                }
+                if (nearestEnemy && b.turretHead) {
+                    b.turretHead.lookAt(nearestEnemy.pos.x, b.turretHead.position.y, nearestEnemy.pos.z);
+                    if (b.cooldown <= 0) {
+                        b.cooldown = 0.65;
+                        nearestEnemy.hp -= 32;
+                        fireTracer(b.pos, nearestEnemy.pos, 0x38bdf8);
+                        sfx.playShot();
+                    }
+                }
+            }
+        }
+
+        // --- C. Enforcer Patrol Squads ---
+        for (let i = state.defenders.length - 1; i >= 0; i--) {
+            const def = state.defenders[i];
+            updateHealthBar(def);
+            if (def.hp <= 0) {
+                spawnExplosion(def.pos, 0x3b82f6);
+                unitGroup.remove(def.mesh);
+                state.defenders.splice(i, 1);
+                continue;
+            }
+
+            def.cooldown -= dt * powerEff;
+            let target = null;
+            let bestDist = 48;
+            for (const e of state.enemies) {
+                const d = def.pos.distanceTo(e.pos);
+                if (d < bestDist) { bestDist = d; target = e; }
+            }
+
+            if (target) {
+                if (bestDist > def.range) {
+                    const dir = target.pos.clone().sub(def.pos).normalize();
+                    def.pos.addScaledVector(dir, def.speed * dt);
+                    def.mesh.position.copy(def.pos);
+                    def.mesh.lookAt(target.pos);
+                } else {
+                    def.mesh.lookAt(target.pos);
+                    if (def.cooldown <= 0) {
+                        def.cooldown = 0.75;
+                        target.hp -= def.damage;
+                        fireTracer(def.pos, target.pos, 0x60a5fa);
+                        sfx.playShot();
+                    }
+                }
+            } else {
+                // Orbit/Patrol perimeter around HQ
+                def.patrolAngle += dt * 0.45;
+                const patrolTarget = new THREE.Vector3(
+                    Math.cos(def.patrolAngle) * 24,
+                    0,
+                    Math.sin(def.patrolAngle) * 24
+                );
+                if (def.pos.distanceTo(patrolTarget) > 1.5) {
+                    const dir = patrolTarget.clone().sub(def.pos).normalize();
+                    def.pos.addScaledVector(dir, def.speed * 0.65 * dt);
+                    def.mesh.position.copy(def.pos);
+                    def.mesh.lookAt(patrolTarget);
+                }
+            }
+        }
+
+        // --- D. Wave Enemies ---
+        for (let i = state.enemies.length - 1; i >= 0; i--) {
+            const enemy = state.enemies[i];
+            updateHealthBar(enemy);
+
+            if (enemy.hp <= 0) {
+                state.kills++;
+                state.cash += enemy.reward;
+                spawnExplosion(enemy.pos, 0xef4444);
+                unitGroup.remove(enemy.mesh);
+                state.enemies.splice(i, 1);
+                continue;
+            }
+
+            enemy.cooldown -= dt;
+
+            // Find closest target (Defender or Building, prioritizing HQ if close)
+            let targetPos = null;
+            let targetEntity = null;
+            let targetIsBuilding = false;
+            let bestDist = Infinity;
+
+            for (const def of state.defenders) {
+                const d = enemy.pos.distanceTo(def.pos);
+                if (d < bestDist && d < 35) {
+                    bestDist = d;
+                    targetPos = def.pos;
+                    targetEntity = def;
+                    targetIsBuilding = false;
+                }
+            }
+
+            if (!targetEntity) {
+                for (const b of state.buildings.values()) {
+                    const d = enemy.pos.distanceTo(b.pos);
+                    if (d < bestDist) {
+                        bestDist = d;
+                        targetPos = b.pos;
+                        targetEntity = b;
+                        targetIsBuilding = true;
+                    }
+                }
+            }
+
+            if (targetEntity && targetPos) {
+                if (bestDist > enemy.range) {
+                    const dir = targetPos.clone().sub(enemy.pos).normalize();
+                    enemy.pos.addScaledVector(dir, enemy.speed * dt);
+                    enemy.mesh.position.copy(enemy.pos);
+                    enemy.mesh.lookAt(targetPos);
+                } else {
+                    enemy.mesh.lookAt(targetPos);
+                    if (enemy.cooldown <= 0) {
+                        enemy.cooldown = 1.05;
+                        targetEntity.hp -= enemy.damage;
+                        fireTracer(enemy.pos, targetPos, 0xf43f5e);
+                        sfx.playShot();
+
+                        if (targetIsBuilding && targetEntity.hp <= 0) {
+                            spawnExplosion(targetEntity.pos, 0xf59e0b);
+                            buildingGroup.remove(targetEntity.mesh);
+                            state.buildings.delete(gridKey(targetEntity.gx, targetEntity.gz));
+                            recalculatePowerGrid();
+                            showToast(`ALERT: ${targetEntity.type.toUpperCase()} destroyed!`, 'danger');
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- E. Projectiles & Particles ---
+        for (let i = state.projectiles.length - 1; i >= 0; i--) {
+            const p = state.projectiles[i];
+            p.progress += dt * 9;
+            if (p.progress >= 1) {
+                fxGroup.remove(p.mesh);
+                state.projectiles.splice(i, 1);
+            } else {
+                p.mesh.position.lerpVectors(p.start, p.end, p.progress);
+            }
+        }
+
+        for (let i = state.particles.length - 1; i >= 0; i--) {
+            const pt = state.particles[i];
+            pt.life -= dt;
+            if (pt.life <= 0) {
+                fxGroup.remove(pt.mesh);
+                state.particles.splice(i, 1);
+            } else {
+                pt.vel.y -= 32 * dt;
+                pt.mesh.position.addScaledVector(pt.vel, dt);
+                pt.mesh.scale.setScalar(Math.max(0.01, pt.life));
+            }
+        }
+    }
+
+    // =========================================================================
+    // 13. GTA IV CIRCULAR TACTICAL RADAR & HUD UPDATES
+    // =========================================================================
+    const minimapCanvas = document.getElementById('minimap-canvas');
+    const mmCtx = minimapCanvas.getContext('2d');
+
+    function renderMinimap() {
+        const w = minimapCanvas.width;
+        const h = minimapCanvas.height;
+        const cx = w / 2;
+        const cy = h / 2;
+        const scale = 0.62; // World units to minimap pixels
+
+        mmCtx.clearRect(0, 0, w, h);
+
+        // Dark asphalt radar background
+        mmCtx.fillStyle = '#0d1117';
+        mmCtx.fillRect(0, 0, w, h);
+
+        // Subtle radar grid rings
+        mmCtx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
+        mmCtx.lineWidth = 1;
+        [28, 56, 76].forEach(r => {
+            mmCtx.beginPath();
+            mmCtx.arc(cx, cy, r, 0, Math.PI * 2);
+            mmCtx.stroke();
+        });
+
+        const camX = camRig.target.x;
+        const camZ = camRig.target.z;
+
+        const toMap = (wx, wz) => ({
+            x: cx + (wx - camX) * scale,
+            y: cy + (wz - camZ) * scale
+        });
+
+        // Draw Roads
+        mmCtx.fillStyle = '#334155';
+        for (const k of state.roads) {
+            const [gx, gz] = k.split(',').map(Number);
+            const p = toMap(gx * TILE_SIZE, gz * TILE_SIZE);
+            mmCtx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+        }
+
+        // Draw Scrap Nodes (Gold)
+        mmCtx.fillStyle = '#f59e0b';
+        for (const s of state.scrapNodes.values()) {
+            const p = toMap(s.pos.x, s.pos.z);
+            mmCtx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+        }
+
+        // Draw Buildings
+        for (const b of state.buildings.values()) {
+            const p = toMap(b.pos.x, b.pos.z);
+            mmCtx.fillStyle = b.type === 'hq' ? '#ffffff' : b.type === 'turret' ? '#38bdf8' : '#10b981';
+            mmCtx.fillRect(p.x - 3.5, p.y - 3.5, 7, 7);
+        }
+
+        // Draw Collectors & Defenders
+        mmCtx.fillStyle = '#fde047';
+        for (const c of state.collectors) {
+            const p = toMap(c.pos.x, c.pos.z);
+            mmCtx.beginPath();
+            mmCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+            mmCtx.fill();
+        }
+
+        mmCtx.fillStyle = '#60a5fa';
+        for (const d of state.defenders) {
+            const p = toMap(d.pos.x, d.pos.z);
+            mmCtx.beginPath();
+            mmCtx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+            mmCtx.fill();
+        }
+
+        // Draw Hostile Red Blips
+        mmCtx.fillStyle = '#ef4444';
+        for (const e of state.enemies) {
+            const p = toMap(e.pos.x, e.pos.z);
+            // Clamp enemy blips to radar rim so player always sees direction of attack
+            const dx = p.x - cx;
+            const dy = p.y - cy;
+            const dist = Math.hypot(dx, dy);
+            const maxR = cx - 6;
+            const rx = dist > maxR ? cx + (dx / dist) * maxR : p.x;
+            const ry = dist > maxR ? cy + (dy / dist) * maxR : p.y;
+
+            mmCtx.beginPath();
+            mmCtx.arc(rx, ry, 3.2, 0, Math.PI * 2);
+            mmCtx.fill();
+        }
+
+        // Camera Focus Crosshair
+        mmCtx.strokeStyle = 'rgba(245, 158, 11, 0.75)';
+        mmCtx.beginPath();
+        mmCtx.moveTo(cx - 5, cy); mmCtx.lineTo(cx + 5, cy);
+        mmCtx.moveTo(cx, cy - 5); mmCtx.lineTo(cx, cy + 5);
+        mmCtx.stroke();
+    }
+
+    function updateHUD() {
+        document.getElementById('hud-cash').textContent = `$${state.cash.toLocaleString()}`;
+
+        const powerEl = document.getElementById('hud-power');
+        const powerDot = document.getElementById('power-status-dot');
+        const powerBar = document.getElementById('power-bar');
+        powerEl.textContent = `${state.powerProduced} / ${state.powerUsed} MW`;
+
+        const lowPower = state.powerUsed > state.powerProduced;
+        powerEl.className = `font-gta text-lg sm:text-xl font-bold leading-tight ${lowPower ? 'text-rose-400' : 'text-amber-300'}`;
+        powerDot.className = `w-2 h-2 rounded-full ${lowPower ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}`;
+        powerBar.className = `h-full transition-all duration-300 ${lowPower ? 'bg-rose-500' : 'bg-emerald-400'}`;
+        const ratio = Math.min(100, Math.round((state.powerProduced / Math.max(1, state.powerUsed + 10)) * 100));
+        powerBar.style.width = `${ratio}%`;
+
+        document.getElementById('hud-wave').textContent = state.wave;
+        const timerEl = document.getElementById('hud-wave-timer');
+        if (state.waveActive) {
+            timerEl.textContent = 'UNDER ATTACK';
+            timerEl.className = 'font-gta text-base sm:text-lg font-bold text-rose-500 animate-pulse leading-tight';
+        } else {
+            const secs = Math.max(0, Math.ceil(state.waveTimer));
+            timerEl.textContent = `00:${secs < 10 ? '0' : ''}${secs}`;
+            timerEl.className = 'font-gta text-lg sm:text-xl font-bold text-white leading-tight';
+        }
+        document.getElementById('hud-enemies').textContent = `Hostiles: ${state.enemies.length}`;
+    }
+
+    // =========================================================================
+    // 14. INPUT HANDLING (Grid Placement, Raycasting, Orbit, Hotkeys)
+    // =========================================================================
+    const raycaster = new THREE.Raycaster();
+    const mouseNDC = new THREE.Vector2();
+
+    function setActiveTool(tool) {
+        state.activeTool = tool;
+        document.querySelectorAll('[data-tool]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tool === tool);
+        });
+        const hint = document.getElementById('build-hint');
+        if (tool) {
+            hint.classList.remove('hidden');
+            ghostMesh.visible = true;
+            ghostMesh.scale.y = tool === 'road' ? 0.12 : 1.4;
+            ghostMesh.position.y = tool === 'road' ? 0.25 : 2.8;
+        } else {
+            hint.classList.add('hidden');
+            ghostMesh.visible = false;
+        }
+    }
+
+    function updateHoverTile(clientX, clientY) {
+        mouseNDC.x = (clientX / window.innerWidth) * 2 - 1;
+        mouseNDC.y = -(clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouseNDC, camera);
+
+        const hits = raycaster.intersectObject(groundMesh);
+        if (hits.length > 0) {
+            const pt = hits[0].point;
+            const { gx, gz } = worldToGrid(pt.x, pt.z);
+            const k = gridKey(gx, gz);
+
+            const occupied = state.buildings.has(k) || state.roads.has(k) || state.scrapNodes.has(k);
+            const cost = COSTS[state.activeTool] || 0;
+            const valid = !occupied && state.cash >= cost;
+
+            state.hoverGrid = { gx, gz, valid };
+
+            if (state.activeTool) {
+                ghostMesh.position.x = gx * TILE_SIZE;
+                ghostMesh.position.z = gz * TILE_SIZE;
+                ghostMesh.material = valid ? MATS.ghostValid : MATS.ghostInvalid;
+            }
+        }
+    }
+
+    function executePlacementAtHover() {
+        if (!state.activeTool) return;
+        const { gx, gz, valid } = state.hoverGrid;
+        if (!valid) {
+            sfx.playError();
+            return;
+        }
+
+        if (state.activeTool === 'road') {
+            if (state.cash >= COSTS.road && placeRoadTile(gx, gz, false)) {
+                state.cash -= COSTS.road;
+            }
+        } else {
+            placeBuilding(state.activeTool, gx, gz, false);
+        }
+    }
+
+    // Mouse Events
+    let isPointerDown = false;
+    let dragDistance = 0;
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        sfx.init();
+        isPointerDown = true;
+        dragDistance = 0;
+        camRig.lastMouse = { x: e.clientX, y: e.clientY };
+
+        if (e.button === 2) {
+            if (state.activeTool) {
+                setActiveTool(null);
+            } else {
+                camRig.isOrbiting = true;
+            }
+        }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+        updateHoverTile(e.clientX, e.clientY);
+
+        if (isPointerDown) {
+            const dx = e.clientX - camRig.lastMouse.x;
+            const dy = e.clientY - camRig.lastMouse.y;
+            dragDistance += Math.hypot(dx, dy);
+
+            if (camRig.isOrbiting) {
+                camRig.angle -= dx * 0.007;
+                camRig.pitch = Math.max(0.35, Math.min(1.38, camRig.pitch + dy * 0.006));
+            } else if (state.activeTool === 'road' && dragDistance > 8) {
+                // Allow click-and-drag continuous road paving!
+                executePlacementAtHover();
+            }
+            camRig.lastMouse = { x: e.clientX, y: e.clientY };
+        }
+    });
+
+    window.addEventListener('pointerup', (e) => {
+        if (e.button === 0 && dragDistance < 8 && state.activeTool) {
+            executePlacementAtHover();
+        }
+        isPointerDown = false;
+        camRig.isOrbiting = false;
+    });
+
+    renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    renderer.domElement.addEventListener('wheel', (e) => {
+        camRig.distance = Math.max(36, Math.min(185, camRig.distance + e.deltaY * 0.06));
+    }, { passive: true });
+
+    // Keyboard Controls & Hotkeys
+    window.addEventListener('keydown', (e) => {
+        camRig.keys[e.code] = true;
+        if (e.key === 'Escape') setActiveTool(null);
+        if (e.key === '1') setActiveTool(state.activeTool === 'road' ? null : 'road');
+        if (e.key === '2') setActiveTool(state.activeTool === 'power' ? null : 'power');
+        if (e.key === '3') setActiveTool(state.activeTool === 'refinery' ? null : 'refinery');
+        if (e.key === '4') setActiveTool(state.activeTool === 'barracks' ? null : 'barracks');
+        if (e.key === '5') setActiveTool(state.activeTool === 'turret' ? null : 'turret');
+        if (e.key === '6') trainUnit('collector');
+        if (e.key === '7') trainUnit('enforcer');
+    });
+
+    window.addEventListener('keyup', (e) => {
+        camRig.keys[e.code] = false;
+    });
+
+    function trainUnit(unitType) {
+        const cost = COSTS[unitType];
+        if (state.cash < cost) {
+            sfx.playError();
+            showToast(`Need $${cost} to deploy ${unitType}`, 'danger');
+            return;
+        }
+        const ok = unitType === 'collector' ? spawnCollector() : spawnEnforcer();
+        if (ok) {
+            state.cash -= cost;
+            sfx.playBuild();
+            showToast(`Deployed ${unitType.toUpperCase()} (-$${cost})`, 'success');
+        }
+    }
+
+    // Dock Button Bindings
+    document.querySelectorAll('[data-tool]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const t = btn.dataset.tool;
+            setActiveTool(state.activeTool === t ? null : t);
+        });
+    });
+
+    document.getElementById('btn-train-collector').addEventListener('click', () => trainUnit('collector'));
+    document.getElementById('btn-train-enforcer').addEventListener('click', () => trainUnit('enforcer'));
+
+    document.getElementById('btn-wave-now').addEventListener('click', () => {
+        if (!state.waveActive && !state.gameOver) {
+            state.cash += 150;
+            showToast('Wave rushed! +$150 Early Bonus', 'warn');
+            startNextWave();
+        }
+    });
+
+    document.getElementById('btn-mute').addEventListener('click', () => {
+        const muted = sfx.toggleMute();
+        document.getElementById('icon-sound-on').classList.toggle('hidden', muted);
+        document.getElementById('icon-sound-off').classList.toggle('hidden', !muted);
+    });
+
+    document.getElementById('btn-restart').addEventListener('click', () => {
+        resetCampaign();
+    });
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // =========================================================================
+    // 15. INITIALIZE / RESET LIBERTY CITY STARTER COMPOUND
+    // =========================================================================
+    function clearGroup(grp) {
+        while (grp.children.length > 0) {
+            grp.remove(grp.children[0]);
+        }
+    }
+
+    function resetCampaign() {
+        // Clear 3D scene groups
+        clearGroup(worldChunkGroup);
+        clearGroup(roadGroup);
+        clearGroup(buildingGroup);
+        clearGroup(unitGroup);
+        clearGroup(fxGroup);
+
+        // Reset state
+        state.cash = 1200;
+        state.powerProduced = 15;
+        state.powerUsed = 0;
+        state.wave = 1;
+        state.waveTimer = 32;
+        state.waveActive = false;
+        state.gameOver = false;
+        state.kills = 0;
+        state.buildingsConstructed = 0;
+        state.roads.clear();
+        state.buildings.clear();
+        state.scrapNodes.clear();
+        state.streamedChunks.clear();
+        state.cityPropsBlocked.clear();
+        state.collectors = [];
+        state.defenders = [];
+        state.enemies = [];
+        state.projectiles = [];
+        state.particles = [];
+        state.streetlights = [];
+
+        setActiveTool(null);
+        document.getElementById('lose-screen').classList.add('hidden');
+        camRig.target.set(0, 0, 0);
+
+        // Build Starter Perimeter Roads around Command HQ
+        for (let i = -3; i <= 3; i++) {
+            placeRoadTile(i, -2, true);
+            placeRoadTile(i, 2, true);
+            placeRoadTile(-2, i, true);
+            placeRoadTile(2, i, true);
+        }
+
+        // Place Starter Command HQ, 1 Refinery, and 2 nearby Salvage Scrap Nodes
+        placeBuilding('hq', 0, 0, true);
+        const starterRefinery = placeBuilding('refinery', -1, 0, true);
+        createScrapNode(-4, -3);
+        createScrapNode(4, 3);
+
+        // Spawn 1 Starter Collector & 1 Starter Enforcer
+        spawnCollector(starterRefinery);
+        spawnEnforcer({ gx: 1, gz: 1 });
+
+        updateCityStreaming();
+        updateCameraTransform();
+        showToast('Welcome to Liberty Grid. Protect your HQ & build your empire!', 'info');
+    }
+
+    // =========================================================================
+    // 16. MAIN ANIMATION LOOP
+    // =========================================================================
+    let lastTime = performance.now();
+
+    function animate(now) {
+        requestAnimationFrame(animate);
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+
+        // Smooth WASD / Arrow Camera Panning relative to camera yaw angle
+        const panSpeed = (camRig.distance * 0.85) * dt;
+        const forward = new THREE.Vector3(-Math.sin(camRig.angle), 0, -Math.cos(camRig.angle));
+        const right = new THREE.Vector3(Math.cos(camRig.angle), 0, -Math.sin(camRig.angle));
+
+        if (camRig.keys['KeyW'] || camRig.keys['ArrowUp']) camRig.target.addScaledVector(forward, panSpeed);
+        if (camRig.keys['KeyS'] || camRig.keys['ArrowDown']) camRig.target.addScaledVector(forward, -panSpeed);
+        if (camRig.keys['KeyA'] || camRig.keys['ArrowLeft']) camRig.target.addScaledVector(right, -panSpeed);
+        if (camRig.keys['KeyD'] || camRig.keys['ArrowRight']) camRig.target.addScaledVector(right, panSpeed);
+
+        updateCameraTransform();
+        updateCityStreaming();
+        updateSimulation(dt);
+        evaluateWaveAndLoseCondition(dt);
+        updateHUD();
+        renderMinimap();
+
+        renderer.render(scene, camera);
+    }
+
+    window.onload = function () {
+        resetCampaign();
+        lastTime = performance.now();
+        requestAnimationFrame(animate);
+    };
+    </script>
+</body>
+</html>
